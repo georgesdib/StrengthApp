@@ -115,12 +115,12 @@ private struct HistoryRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    private static func sessionLabel(_ type: String?) -> String {
+    nonisolated private static func sessionLabel(_ type: String?) -> String {
         guard let type, !type.isEmpty, type != "unknown" else { return "Session" }
         return type.capitalized
     }
 
-    private static func liftLabel(_ exerciseId: String) -> String {
+    nonisolated private static func liftLabel(_ exerciseId: String) -> String {
         exerciseId
             .replacingOccurrences(of: "_", with: " ")
             .capitalized

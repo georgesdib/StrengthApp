@@ -111,7 +111,7 @@ final class URLSessionTransport: HTTPTransport {
 /// https://host, forwarding the bearer token to a different server or scheme. The guard compares
 /// the original request's origin with the redirect target's origin: same scheme
 /// (case-insensitive), same host (case-insensitive) and same effective port.
-enum RedirectPolicy {
+nonisolated enum RedirectPolicy {
     struct Origin: Equatable {
         let scheme: String
         let host: String

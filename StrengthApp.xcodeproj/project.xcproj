@@ -17,8 +17,18 @@
       "name": "Products",
       "children": [
         { "path": "<PRODUCTS>/StrengthApp.app", "id": "000000000000000000000120", "type": "wrapper.application", "index": false },
+        { "path": "<PRODUCTS>/StrengthAppTests.xctest", "id": "EAE4FAEC309F8DD500B7CC15", "type": "wrapper.cfbundle", "index": false },
+        { "path": "<PRODUCTS>/StrengthAppUITests.xctest", "id": "EACD40A5309F8F500088B032", "type": "wrapper.cfbundle", "index": false },
+      ],
+    }, {
+      "kind": "group",
+      "path": "Support",
+      "children": [
+        { "path": "Info.plist" },
       ],
     },
+    { "kind": "folder", "path": "StrengthAppTests", "target-membership": [ "StrengthAppTests" ] },
+    { "kind": "folder", "path": "StrengthAppUITests", "target-membership": [ "StrengthAppUITests" ] },
   ],
   "targets": [
     {
@@ -40,6 +50,7 @@
         "ENABLE_PREVIEWS": "YES",
         "ENABLE_USER_SELECTED_FILES": "readonly",
         "GENERATE_INFOPLIST_FILE": "YES",
+        "INFOPLIST_FILE": "Support/Info.plist",
         "INFOPLIST_KEY_LSApplicationCategoryType": "public.app-category.sports",
         "INFOPLIST_KEY_NSHealthClinicalHealthRecordsShareUsageDescription": "Longevity view",
         "INFOPLIST_KEY_NSHealthShareUsageDescription": "Workout stats",
@@ -72,6 +83,55 @@
         "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
         "SWIFT_VERSION": "5.0",
         "TARGETED_DEVICE_FAMILY": "1,2,7",
+      },
+    }, {
+      "name": "StrengthAppTests",
+      "id": "EAE4FAEB309F8DD500B7CC15",
+      "product": "Products/StrengthAppTests.xctest",
+      "product-type": "bundle.unit-test",
+      "dependencies": [
+        "StrengthApp",
+      ],
+      "build-phases": [
+        "compile-sources",
+      ],
+      "build-settings": {
+        "BUNDLE_LOADER": "$(TEST_HOST)",
+        "CODE_SIGN_STYLE": "Automatic",
+        "DEVELOPMENT_TEAM": "Z8645DRK72",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "IPHONEOS_DEPLOYMENT_TARGET": "27.2",
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.georgesdibpersonalteam.StrengthAppTests",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SDKROOT": "iphoneos",
+        "SUPPORTED_PLATFORMS": "iphonesimulator iphoneos",
+        "SWIFT_VERSION": "5.0",
+        "TARGETED_DEVICE_FAMILY": "1,2",
+        "TEST_HOST": "$(BUILT_PRODUCTS_DIR)/StrengthApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StrengthApp",
+      },
+    }, {
+      "name": "StrengthAppUITests",
+      "id": "EACD40A4309F8F500088B032",
+      "product": "Products/StrengthAppUITests.xctest",
+      "product-type": "bundle.ui-testing",
+      "dependencies": [
+        "StrengthApp",
+      ],
+      "build-phases": [
+        "compile-sources",
+      ],
+      "build-settings": {
+        "CODE_SIGN_STYLE": "Automatic",
+        "DEVELOPMENT_TEAM": "Z8645DRK72",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "IPHONEOS_DEPLOYMENT_TARGET": "27.2",
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.georgesdibpersonalteam.StrengthAppUITests",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SDKROOT": "iphoneos",
+        "SUPPORTED_PLATFORMS": "iphonesimulator iphoneos",
+        "SWIFT_VERSION": "5.0",
+        "TARGETED_DEVICE_FAMILY": "1,2",
+        "TEST_TARGET_NAME": "StrengthApp",
       },
     },
   ],

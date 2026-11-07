@@ -47,6 +47,10 @@ The server contract is `docs/design/IOS-PHASE-1-CONTRACT.md` in the
 - **Settings** — server URL, device id/label, app version, Forget this device (local token only),
   re-pair instructions.
 
+There is no **Progress** screen in Phase 1. The server exposes `GET /api/ios/v1/progress` and
+covers it with server tests, but the client screens are Pairing, Today, History and Settings only.
+A Progress screen is deferred to Phase 2 and was not added under the Phase 1 contract.
+
 There is no prescription, workout write, readiness entry, HealthKit, review or offline UI in
 Phase 1.
 
@@ -57,8 +61,8 @@ Phase 1.
 - Server URL and device id/label: UserDefaults (not secret). The token never goes to
   UserDefaults, a file, a log or a crash report.
 - One `IOSAPIClient`: http/https base URL validation, `Authorization: Bearer`, JSON on POST,
-  10-second timeout, strict decoding, bounded GET retries only, no cookies, no cross-host
-  redirects, no background transfers.
+  10-second timeout, strict decoding, bounded GET retries only, no cookies, no redirects outside
+  the paired origin (scheme, host and effective port), no background transfers.
 - 401/403 clears the local pairing and returns to the pairing screen. Other 4xx show the server
   message; 5xx shows a generic failure.
 - Plain HTTP on the trusted home LAN. No TLS, proxy, CA or remote access. No analytics, telemetry,
@@ -66,9 +70,10 @@ Phase 1.
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`) covers Keychain save/load/delete/replace, API client
-decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/label
-validation, and the AppModel pairing/forget/auth-failure flows.
+The unit-test target (`StrengthAppTests`, 29 tests) covers Keychain save/load/delete/replace, API
+client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
+label validation, the AppModel pairing/forget/auth-failure flows, and the same-origin redirect
+policy (cross-port, scheme-changing, host, userinfo and delegate rejection).
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \

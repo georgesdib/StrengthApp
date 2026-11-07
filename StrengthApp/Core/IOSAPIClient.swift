@@ -56,7 +56,8 @@ protocol HTTPTransport {
 }
 
 /// A GET-only transport with no cookies or shared cache. Redirects are allowed only within the
-/// original host so the bearer token can never follow a redirect to another server.
+/// original origin (scheme, host and port) so the bearer token can never follow a redirect to
+/// another server, port or HTTP/HTTPS scheme.
 final class URLSessionTransport: HTTPTransport {
     private let session: URLSession
 
@@ -86,7 +87,46 @@ final class URLSessionTransport: HTTPTransport {
     }
 }
 
-private final class SameHostRedirectGuard: NSObject, URLSessionTaskDelegate {
+/// The redirect policy compares the full origin, not just the hostname.
+///
+/// A hostname-only check would allow http://host:8000 to redirect to http://host:9000 or
+/// https://host, forwarding the bearer token to a different server or scheme. The guard compares
+/// the original request's origin with the redirect target's origin: same scheme
+/// (case-insensitive), same host (case-insensitive) and same effective port.
+enum RedirectPolicy {
+    struct Origin: Equatable {
+        let scheme: String
+        let host: String
+        let port: Int
+    }
+
+    static func origin(of url: URL?) -> Origin? {
+        guard let url,
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased(),
+              !host.isEmpty,
+              url.user == nil,
+              url.password == nil else {
+            return nil
+        }
+        let port = url.port ?? (scheme == "https" ? 443 : 80)
+        return Origin(scheme: scheme, host: host, port: port)
+    }
+
+    static func allowsRedirect(from original: URL?, to target: URL?) -> Bool {
+        guard let originalOrigin = origin(of: original),
+              let targetOrigin = origin(of: target) else {
+            return false
+        }
+        return originalOrigin == targetOrigin
+    }
+}
+
+/// Kept as SameHostRedirectGuard because that is the transport-level name, but the policy is
+/// same-origin: a cross-port or scheme-changing redirect is rejected and never receives the
+/// Authorization header.
+final class SameHostRedirectGuard: NSObject, URLSessionTaskDelegate {
     nonisolated func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
@@ -94,9 +134,12 @@ private final class SameHostRedirectGuard: NSObject, URLSessionTaskDelegate {
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
-        let original = task.originalRequest?.url?.host?.lowercased()
-        let target = request.url?.host?.lowercased()
-        completionHandler(original != nil && original == target ? request : nil)
+        completionHandler(
+            RedirectPolicy.allowsRedirect(
+                from: task.originalRequest?.url,
+                to: request.url
+            ) ? request : nil
+        )
     }
 }
 

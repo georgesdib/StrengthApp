@@ -3,7 +3,9 @@
 **Result: complete.** The owner confirmed the Phase 1 pass on their physical iPhone (iOS 27.2;
 the connected device reports iPhone 16 Pro Max, iPhone17,2) against the local server on the home
 LAN. The simulator pass used the iPhone 18 Pro. The checklist below is retained as the record of
-what was exercised.
+what was exercised. A later transport-internal remediation hardened the redirect guard to
+same-origin (scheme, host and effective port); it is covered by unit tests and does not change the
+normal LAN path.
 
 Phase 1 is read-only: if a check would require writing a readiness day, starting a workout or
 requesting a prescription, it is out of scope.

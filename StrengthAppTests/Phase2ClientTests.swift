@@ -1,0 +1,362 @@
+import XCTest
+
+@testable import StrengthApp
+
+@MainActor
+final class Phase2ClientTests: XCTestCase {
+    private let session = IOSSession(
+        baseURL: URL(string: "http://127.0.0.1:8000")!,
+        token: "token-abc"
+    )
+
+    private func body(_ request: URLRequest) -> [String: Any] {
+        guard let data = request.httpBody,
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any] else {
+            return [:]
+        }
+        return dictionary
+    }
+
+    func testReadinessWriteUsesSnakeCaseAndIdempotency() async throws {
+        let transport = StubTransport { _ in
+            (200, Data(Fixtures.readinessWrite.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        let result = try await client.writeReadiness(
+            ReadinessWriteRequest(values: ["sleep": 4], note: "felt good"),
+            session: session,
+            idempotencyKey: "key-readiness"
+        )
+        XCTAssertEqual(result.score?.status, "ready")
+        XCTAssertEqual(result.score?.score, 0.82)
+
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.path, "/api/ios/v1/readiness")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "key-readiness")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-abc")
+        let json = body(request)
+        XCTAssertEqual(json["values"] as? [String: Double], ["sleep": 4])
+        XCTAssertEqual(json["note"] as? String, "felt good")
+    }
+
+    func testIssuePrescriptionSendsAcknowledgementAndConfirmations() async throws {
+        let transport = StubTransport { _ in
+            (200, Data(Fixtures.issuedPlan.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        let result = try await client.issuePrescription(
+            IssuePrescriptionRequest(
+                readinessAck: true,
+                confirmations: ["deload": false]
+            ),
+            session: session,
+            idempotencyKey: "key-issue"
+        )
+        XCTAssertEqual(result.issuedPlanId, "plan-1")
+        XCTAssertEqual(result.plan.items.first?.exerciseId, "competition_squat")
+        XCTAssertEqual(result.plan.items.first?.loadKg, 140)
+
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.url?.path, "/api/ios/v1/prescriptions")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "key-issue")
+        let json = body(request)
+        XCTAssertEqual(json["readiness_ack"] as? Bool, true)
+        let confirmations = json["confirmations"] as? [String: Bool]
+        XCTAssertEqual(confirmations?["deload"], false)
+        XCTAssertNil(json["plan"])
+    }
+
+    func testStartAndAddSetSendSnakeCaseBodies() async throws {
+        let transport = StubTransport { request in
+            if request.url?.path.hasSuffix("/sets") == true {
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        let started = try await client.startWorkout(
+            issuedPlanId: "plan-1",
+            session: session,
+            idempotencyKey: "key-start"
+        )
+        XCTAssertEqual(started.workoutId, "workout-1")
+        XCTAssertEqual(started.status, "in_progress")
+        let startBody = body(try XCTUnwrap(transport.requests.first))
+        XCTAssertEqual(startBody["issued_plan_id"] as? String, "plan-1")
+
+        let updated = try await client.addSet(
+            workoutId: "workout-1",
+            body: AddSetRequest(
+                exerciseId: "competition_squat",
+                loadKg: 140,
+                reps: 3,
+                rir: 2,
+                velocityMps: 0.62,
+                setIndex: 1,
+                planItemIndex: 0
+            ),
+            session: session,
+            idempotencyKey: "key-set"
+        )
+        XCTAssertEqual(updated.sets?.count, 1)
+        XCTAssertEqual(updated.sets?.first?.velocity, 0.62)
+        let setRequest = try XCTUnwrap(transport.requests.last)
+        XCTAssertEqual(setRequest.url?.path, "/api/ios/v1/workouts/workout-1/sets")
+        XCTAssertEqual(setRequest.value(forHTTPHeaderField: "Idempotency-Key"), "key-set")
+        let setBody = body(setRequest)
+        XCTAssertEqual(setBody["exercise_id"] as? String, "competition_squat")
+        XCTAssertEqual(setBody["velocity_mps"] as? Double, 0.62)
+        XCTAssertEqual(setBody["set_index"] as? Int, 1)
+        XCTAssertEqual(setBody["plan_item_index"] as? Int, 0)
+    }
+
+    func testFormCompleteAndAbandonBodies() async throws {
+        let transport = StubTransport { request in
+            if request.url?.path.hasSuffix("/form") == true {
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            }
+            return (200, Data(Fixtures.workoutCompleted.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        _ = try await client.rateForm(
+            workoutId: "workout-1",
+            body: FormRatingRequest(
+                exerciseId: "competition_squat", rating: 4, note: nil
+            ),
+            session: session,
+            idempotencyKey: "key-form"
+        )
+        let formBody = body(try XCTUnwrap(transport.requests.last))
+        XCTAssertEqual(formBody["exercise_id"] as? String, "competition_squat")
+        XCTAssertEqual(formBody["rating"] as? Int, 4)
+
+        let completed = try await client.completeWorkout(
+            workoutId: "workout-1",
+            body: CompleteWorkoutRequest(
+                sessionRpe: 7, notRecorded: false, durationMin: 45, notes: "good"
+            ),
+            session: session,
+            idempotencyKey: "key-complete"
+        )
+        XCTAssertEqual(completed.status, "completed")
+        XCTAssertEqual(completed.sessionRpe, 7)
+        let completeBody = body(try XCTUnwrap(transport.requests.last))
+        XCTAssertEqual(completeBody["session_rpe"] as? Double, 7)
+        XCTAssertEqual(completeBody["not_recorded"] as? Bool, false)
+        XCTAssertEqual(completeBody["duration_min"] as? Double, 45)
+        XCTAssertEqual(completeBody["notes"] as? String, "good")
+
+        _ = try await client.abandonWorkout(
+            workoutId: "workout-1",
+            session: session,
+            idempotencyKey: "key-abandon"
+        )
+        let abandonRequest = try XCTUnwrap(transport.requests.last)
+        XCTAssertEqual(abandonRequest.url?.path, "/api/ios/v1/workouts/workout-1/abandon")
+        XCTAssertEqual(body(abandonRequest).count, 0)
+    }
+
+    func testProgressDecodesAndSendsWindow() async throws {
+        let transport = StubTransport { _ in
+            (200, Data(Fixtures.progress.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        let progress = try await client.progress(weeks: 8, session: session)
+        XCTAssertEqual(progress.coverage.sessions, 2)
+        XCTAssertEqual(progress.volume.first?.pattern, "squat")
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.url?.path, "/api/ios/v1/progress")
+        let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+        XCTAssertTrue(components?.queryItems?.contains(
+            URLQueryItem(name: "weeks", value: "8")
+        ) == true)
+    }
+
+    func testReadinessConflictCarriesCodeAndDetails() async throws {
+        let transport = StubTransport { _ in
+            (409, Data(Fixtures.serverError.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        do {
+            _ = try await client.issuePrescription(
+                IssuePrescriptionRequest(readinessAck: false, confirmations: nil),
+                session: session,
+                idempotencyKey: "key-conflict"
+            )
+            XCTFail("expected a conflict")
+        } catch let error as APIError {
+            XCTAssertEqual(error.code, "readiness_required")
+            XCTAssertEqual(error.details?["status"]?.stringValue, "unknown")
+            XCTAssertEqual(error.details?["can_acknowledge"]?.boolValue, true)
+        }
+    }
+
+    func testMutationsDoNotRetryTransportFailures() async throws {
+        let transport = StubTransport { _ in
+            throw URLError(.timedOut)
+        }
+        let client = IOSAPIClient(transport: transport)
+        do {
+            _ = try await client.addSet(
+                workoutId: "workout-1",
+                body: AddSetRequest(
+                    exerciseId: "competition_squat", loadKg: 140, reps: 3,
+                    rir: 2, velocityMps: nil, setIndex: 1, planItemIndex: 0
+                ),
+                session: session,
+                idempotencyKey: "key-noretry"
+            )
+            XCTFail("expected a transport failure")
+        } catch let error as APIError {
+            guard case .transport = error else {
+                return XCTFail("expected transport, got \(error)")
+            }
+        }
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+}
+
+@MainActor
+final class Phase2AppModelTests: XCTestCase {
+    private func makeDefaults() -> (UserDefaults, String) {
+        let suite = "com.georgesdibpersonalteam.StrengthApp.phase2tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return (defaults, suite)
+    }
+
+    private func pairedModel(
+        transport: StubTransport
+    ) -> (AppModel, UserDefaults, String, InMemoryTokenStore) {
+        let (defaults, suite) = makeDefaults()
+        let store = PairedStore(defaults: defaults)
+        store.serverURL = "http://127.0.0.1:8000"
+        store.device = PairingDevice(deviceID: "device-1", label: "iPhone")
+        let tokens = InMemoryTokenStore(token: "token-abc")
+        let model = AppModel(
+            client: IOSAPIClient(transport: transport),
+            tokens: tokens,
+            store: store
+        )
+        return (model, defaults, suite, tokens)
+    }
+
+    func testIssueStartSetAndCompleteFlow() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (200, Data(Fixtures.issuedPlan.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            case "/api/ios/v1/workouts/workout-1/sets":
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            case "/api/ios/v1/workouts/workout-1/complete":
+                return (200, Data(Fixtures.workoutCompleted.utf8))
+            case "/api/ios/v1/history":
+                return (200, Data(Fixtures.history.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, tokens) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+        XCTAssertEqual(model.phase, .paired)
+        XCTAssertTrue(model.canWrite)
+
+        await model.issuePrescription(
+            readinessAck: false, idempotencyKey: "issue-1"
+        )
+        guard case .issued(let issued) = model.prescriptionState else {
+            return XCTFail("expected an issued plan")
+        }
+        XCTAssertEqual(issued.issuedPlanId, "plan-1")
+
+        let started = await model.startWorkout(idempotencyKey: "start-1")
+        XCTAssertTrue(started)
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+        XCTAssertEqual(model.activeWorkout?.status, "in_progress")
+        guard case .issued = model.prescriptionState else {
+            return XCTFail("the preview must stay presented while the workout is active")
+        }
+
+        let added = await model.addSet(
+            AddSetRequest(
+                exerciseId: "competition_squat", loadKg: 140, reps: 3,
+                rir: 2, velocityMps: 0.62, setIndex: 1, planItemIndex: 0
+            ),
+            idempotencyKey: "set-1"
+        )
+        XCTAssertTrue(added)
+        XCTAssertEqual(model.activeWorkout?.sets?.count, 1)
+        XCTAssertEqual(model.activeWorkout?.sets?.first?.velocity, 0.62)
+
+        let completed = await model.completeWorkout(
+            CompleteWorkoutRequest(
+                sessionRpe: 7, notRecorded: false, durationMin: 45, notes: "test"
+            ),
+            idempotencyKey: "complete-1"
+        )
+        XCTAssertTrue(completed)
+        XCTAssertNil(model.activeWorkout)
+        XCTAssertGreaterThanOrEqual(model.sessions.count, 1)
+        XCTAssertNotNil(tokens.token)
+    }
+
+    func testReadinessGateBecomesState() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (409, Data(Fixtures.serverError.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(
+            readinessAck: false, idempotencyKey: "gate-1"
+        )
+        guard case .readinessRequired(let details) = model.prescriptionState else {
+            return XCTFail("expected readinessRequired")
+        }
+        XCTAssertEqual(details["status"]?.stringValue, "unknown")
+        XCTAssertNil(model.mutationError)
+    }
+
+    func testProgressLoadsIntoModel() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/progress":
+                return (200, Data(Fixtures.progress.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.loadProgress(weeks: 8)
+        XCTAssertTrue(model.hasLoadedProgress)
+        XCTAssertEqual(model.progress?.coverage.sessions, 2)
+        XCTAssertEqual(model.progress?.volume.first?.pattern, "squat")
+        XCTAssertNil(model.progressError)
+    }
+}
+

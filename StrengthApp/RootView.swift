@@ -31,6 +31,8 @@ struct MainTabView: View {
                 .tabItem { Label("Today", systemImage: "sun.max") }
             HistoryView(model: model)
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+            ProgressDashboardView(model: model)
+                .tabItem { Label("Progress", systemImage: "chart.line.uptrend.xyaxis") }
             SettingsView(model: model)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }

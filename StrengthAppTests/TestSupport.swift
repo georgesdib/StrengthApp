@@ -149,4 +149,179 @@ enum Fixtures {
       "server_timezone": "GMT"
     }
     """#
+
+    static let bootstrapPhase2 = #"""
+    {
+      "api_version": "1",
+      "server_date": "2026-11-07",
+      "server_time": "2026-11-07T16:00:00+00:00",
+      "utc_offset_minutes": 0,
+      "server_timezone": "GMT",
+      "capabilities": {
+        "readiness": true,
+        "readiness_write": true,
+        "prescription": true,
+        "workout_write": true,
+        "healthkit": false,
+        "offline": false
+      }
+    }
+    """#
+
+    static let readinessWrite = #"""
+    {
+      "on_date": "2026-11-07",
+      "known": true,
+      "score": {
+        "on_date": "2026-11-07",
+        "status": "ready",
+        "score": 0.82,
+        "basis": "weighted subjective core",
+        "overrides": {},
+        "context_flags": []
+      }
+    }
+    """#
+
+    static let issuedPlan = #"""
+    {
+      "issued_plan_id": "plan-1",
+      "prescription_id": "prescription-1",
+      "for_date": "2026-11-07",
+      "session_type": "squat",
+      "expires_at": "2026-11-07T17:00:00+00:00",
+      "plan": {
+        "for_date": "2026-11-07",
+        "session_type": "squat",
+        "session_label": "Squat",
+        "items": [
+          {
+            "order_index": 0,
+            "exercise_id": "competition_squat",
+            "sets": 3,
+            "reps_low": 3,
+            "reps_high": 5,
+            "load_kg": 140.0,
+            "load_basis": "e1rm",
+            "rir_target": 2,
+            "effort_model": "rir",
+            "refs": ["PRG-RIR-001"]
+          }
+        ],
+        "warnings": [],
+        "issues": []
+      },
+      "readiness": {
+        "status": "ready",
+        "score": 0.82,
+        "basis": "weighted subjective core",
+        "overrides": {},
+        "context_flags": []
+      },
+      "warnings": []
+    }
+    """#
+
+    static let workoutInProgress = #"""
+    {
+      "workout_id": "workout-1",
+      "prescription_id": "prescription-1",
+      "for_date": "2026-11-07",
+      "session_type": "squat",
+      "status": "in_progress",
+      "plan": {
+        "for_date": "2026-11-07",
+        "session_type": "squat",
+        "items": [
+          {"order_index": 0, "exercise_id": "competition_squat", "sets": 3,
+           "reps_low": 3, "reps_high": 5, "load_kg": 140.0, "rir_target": 2}
+        ]
+      },
+      "sets": [],
+      "forms": [],
+      "elapsed_seconds": 600,
+      "started_at": "2026-11-07T16:00:00+00:00"
+    }
+    """#
+
+    static let workoutWithSet = #"""
+    {
+      "workout_id": "workout-1",
+      "prescription_id": "prescription-1",
+      "for_date": "2026-11-07",
+      "session_type": "squat",
+      "status": "in_progress",
+      "plan": {
+        "for_date": "2026-11-07",
+        "session_type": "squat",
+        "items": [
+          {"order_index": 0, "exercise_id": "competition_squat", "sets": 3,
+           "reps_low": 3, "reps_high": 5, "load_kg": 140.0, "rir_target": 2}
+        ]
+      },
+      "sets": [
+        {"set_id": 1, "exercise_id": "competition_squat", "set_index": 1,
+         "load_kg": 140.0, "reps": 3, "rir": 2, "velocity": 0.62, "source": "manual"}
+      ],
+      "forms": [
+        {"form_id": 1, "workout_id": "workout-1", "exercise_id": "competition_squat",
+         "rating": 4, "note": null}
+      ],
+      "elapsed_seconds": 660,
+      "started_at": "2026-11-07T16:00:00+00:00"
+    }
+    """#
+
+    static let workoutCompleted = #"""
+    {
+      "workout_id": "workout-1",
+      "prescription_id": "prescription-1",
+      "for_date": "2026-11-07",
+      "session_type": "squat",
+      "status": "completed",
+      "plan": {
+        "for_date": "2026-11-07",
+        "session_type": "squat",
+        "items": [
+          {"order_index": 0, "exercise_id": "competition_squat", "sets": 3,
+           "reps_low": 3, "reps_high": 5, "load_kg": 140.0, "rir_target": 2}
+        ]
+      },
+      "sets": [
+        {"set_id": 1, "exercise_id": "competition_squat", "set_index": 1,
+         "load_kg": 140.0, "reps": 3, "rir": 2, "velocity": 0.62, "source": "manual"}
+      ],
+      "forms": [],
+      "elapsed_seconds": 2700,
+      "session_rpe": 7.0,
+      "started_at": "2026-11-07T16:00:00+00:00"
+    }
+    """#
+
+    static let progress = #"""
+    {
+      "on_date": "2026-11-07",
+      "coverage": {"sessions": 2, "with_srpe": 1, "pct": 50.0},
+      "performance": {"points": [], "latest": null, "median_ratio": null, "n": 0},
+      "volume": [{"pattern": "squat", "average": 4.0, "status": "under", "mrv": 14.0}],
+      "back": {"level": null, "date": null},
+      "attendance": {"weeks": 8, "from": "2026-09-12", "to": "2026-11-07",
+                     "completed": 2, "target": null, "pct": null,
+                     "note": "descriptive attendance"},
+      "note": "Descriptive monitoring only; no prescription change."
+    }
+    """#
+
+    static let serverError = #"""
+    {
+      "error": "readiness is not score-ready; acknowledge starting without a score",
+      "code": "readiness_required",
+      "details": {
+        "status": "unknown",
+        "score": null,
+        "basis": "no readiness entry",
+        "can_acknowledge": true
+      }
+    }
+    """#
 }

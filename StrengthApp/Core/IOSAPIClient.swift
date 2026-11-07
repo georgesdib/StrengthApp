@@ -12,6 +12,7 @@ enum APIError: LocalizedError, Equatable {
     case invalidLabel(String)
     case transport(String)
     case http(status: Int, message: String, fields: [String: String])
+    case server(status: Int, code: String, message: String, fields: [String: String], details: [String: JSONValue])
     case unauthorized
     case forbidden
     case decoding
@@ -27,13 +28,9 @@ enum APIError: LocalizedError, Equatable {
         case .transport:
             return "Could not reach the server. Check that it is running and that this iPhone is on the same network."
         case .http(let status, let message, let fields):
-            if (500...599).contains(status) {
-                return "The server could not complete the request (HTTP \(status))."
-            }
-            if let field = fields.sorted(by: { $0.key < $1.key }).first {
-                return "\(message) (\(field.key): \(field.value))"
-            }
-            return message
+            return Self.httpDescription(status: status, message: message, fields: fields)
+        case .server(let status, _, let message, let fields, _):
+            return Self.httpDescription(status: status, message: message, fields: fields)
         case .unauthorized, .forbidden:
             return "This device is no longer paired. Pair it again."
         case .decoding:
@@ -41,11 +38,32 @@ enum APIError: LocalizedError, Equatable {
         }
     }
 
+    static func httpDescription(status: Int, message: String,
+                                fields: [String: String]) -> String {
+        if (500...599).contains(status) {
+            return "The server could not complete the request (HTTP \(status))."
+        }
+        if let field = fields.sorted(by: { $0.key < $1.key }).first {
+            return "\(message) (\(field.key): \(field.value))"
+        }
+        return message
+    }
+
     var isAuthenticationFailure: Bool {
         switch self {
         case .unauthorized, .forbidden: return true
         default: return false
         }
+    }
+
+    var code: String? {
+        if case .server(_, let code, _, _, _) = self { return code }
+        return nil
+    }
+
+    var details: [String: JSONValue]? {
+        if case .server(_, _, _, _, let details) = self { return details }
+        return nil
     }
 }
 
@@ -173,6 +191,7 @@ final class IOSAPIClient {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         self.decoder = decoder
+        encoder.keyEncodingStrategy = .convertToSnakeCase
     }
 
     // MARK: Input validation
@@ -264,11 +283,143 @@ final class IOSAPIClient {
         )
     }
 
+    func writeReadiness(
+        _ body: ReadinessWriteRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> ReadinessPayload {
+        try await post(
+            path: "api/ios/v1/readiness",
+            body: body,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func issuePrescription(
+        _ body: IssuePrescriptionRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> IssuedPlanResponse {
+        try await post(
+            path: "api/ios/v1/prescriptions",
+            body: body,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func startWorkout(
+        issuedPlanId: String,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts",
+            body: StartWorkoutRequest(issuedPlanId: issuedPlanId),
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func addSet(
+        workoutId: String,
+        body: AddSetRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/sets",
+            body: body,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func rateForm(
+        workoutId: String,
+        body: FormRatingRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/form",
+            body: body,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func completeWorkout(
+        workoutId: String,
+        body: CompleteWorkoutRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/complete",
+            body: body,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func abandonWorkout(
+        workoutId: String,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/abandon",
+            body: EmptyRequest(),
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func progress(
+        weeks: Int = 8,
+        date: String? = nil,
+        session: IOSSession
+    ) async throws -> ProgressResponse {
+        var query = [URLQueryItem(name: "weeks", value: String(weeks))]
+        if let date {
+            query.append(URLQueryItem(name: "date", value: date))
+        }
+        return try await get(
+            path: "api/ios/v1/progress",
+            query: query,
+            session: session
+        )
+    }
+
     // MARK: Requests
 
     private struct PairRequest: Encodable {
         let code: String
         let label: String
+    }
+
+    private func post<T: Decodable, Body: Encodable>(
+        path: String,
+        body: Body,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> T {
+        var request = URLRequest(
+            url: try url(path: path, query: [], baseURL: session.baseURL)
+        )
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(session.token)", forHTTPHeaderField: "Authorization")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try encoder.encode(body)
+        let (data, response) = try await performNoRetry(request)
+        try validate(response, data: data)
+        return try decode(T.self, from: data)
     }
 
     private func get<T: Decodable>(
@@ -350,9 +501,19 @@ final class IOSAPIClient {
             throw APIError.forbidden
         default:
             let body = try? JSONDecoder().decode(ServerErrorBody.self, from: data)
+            let message = body?.error ?? "The server returned HTTP \(response.statusCode)."
+            if let code = body?.code {
+                throw APIError.server(
+                    status: response.statusCode,
+                    code: code,
+                    message: message,
+                    fields: body?.fields ?? [:],
+                    details: body?.details ?? [:]
+                )
+            }
             throw APIError.http(
                 status: response.statusCode,
-                message: body?.error ?? "The server returned HTTP \(response.statusCode).",
+                message: message,
                 fields: body?.fields ?? [:]
             )
         }

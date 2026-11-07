@@ -34,6 +34,23 @@ struct Capabilities: Decodable, Equatable {
     let workoutWrite: Bool
     let healthkit: Bool
     let offline: Bool
+    let readinessWrite: Bool?
+
+    init(
+        readiness: Bool,
+        prescription: Bool,
+        workoutWrite: Bool,
+        healthkit: Bool,
+        offline: Bool,
+        readinessWrite: Bool? = nil
+    ) {
+        self.readiness = readiness
+        self.prescription = prescription
+        self.workoutWrite = workoutWrite
+        self.healthkit = healthkit
+        self.offline = offline
+        self.readinessWrite = readinessWrite
+    }
 }
 
 // MARK: - Today
@@ -42,7 +59,7 @@ struct TodayResponse: Decodable {
     let date: String
     let readiness: ReadinessPayload?
     let readinessScore: ReadinessScore?
-    let activeWorkout: ActiveWorkout?
+    let activeWorkout: WorkoutDetail?
 }
 
 /// The existing server readiness payload is wider than Phase 1 shows; decode the fields this
@@ -84,15 +101,6 @@ struct CategoryFactor: Decodable {
     let rirBump: Int
 }
 
-/// Only the summary is decoded; plan/sets remain server detail and are ignored here.
-struct ActiveWorkout: Decodable {
-    let workoutId: String
-    let forDate: String?
-    let sessionType: String?
-    let status: String?
-    let startedAt: String?
-}
-
 // MARK: - History
 
 struct HistoryResponse: Decodable {
@@ -122,5 +130,7 @@ struct HistorySession: Decodable, Identifiable {
 
 struct ServerErrorBody: Decodable {
     let error: String
+    let code: String?
     let fields: [String: String]?
+    let details: [String: JSONValue]?
 }

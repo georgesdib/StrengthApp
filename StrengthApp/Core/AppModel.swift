@@ -9,6 +9,14 @@ final class AppModel: ObservableObject {
         case paired
     }
 
+    enum PrescriptionState {
+        case idle
+        case readinessRequired([String: JSONValue])
+        case confirmationRequired([String: JSONValue])
+        case issued(IssuedPlanResponse)
+        case failed(String)
+    }
+
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var bootstrap: BootstrapResponse?
     @Published private(set) var today: TodayResponse?
@@ -22,6 +30,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var pairedServerURL: String?
     @Published private(set) var errorMessage: String?
     @Published private(set) var pairingError: String?
+    @Published private(set) var activeWorkout: WorkoutDetail?
+    @Published private(set) var progress: ProgressResponse?
+    @Published private(set) var progressError: String?
+    @Published private(set) var hasLoadedProgress = false
+    @Published private(set) var prescriptionState: PrescriptionState = .idle
+    @Published private(set) var isSaving = false
+    @Published private(set) var isLoadingProgress = false
+    @Published private(set) var mutationError: String?
 
     @Published var serverURLText: String
     @Published var pairingCodeText: String = ""
@@ -53,6 +69,22 @@ final class AppModel: ObservableObject {
 
     var appVersion: String {
         AppConfig.versionText
+    }
+
+    var canWriteReadiness: Bool {
+        bootstrap?.capabilities.readinessWrite == true
+    }
+
+    var canPrescribe: Bool {
+        bootstrap?.capabilities.prescription == true
+    }
+
+    var canWriteWorkout: Bool {
+        bootstrap?.capabilities.workoutWrite == true
+    }
+
+    var canWrite: Bool {
+        canWriteReadiness && canPrescribe && canWriteWorkout
     }
 
     // MARK: Lifecycle
@@ -137,6 +169,13 @@ final class AppModel: ObservableObject {
             let (newBootstrap, newToday) = try await (bootstrapTask, todayTask)
             bootstrap = newBootstrap
             today = newToday
+            if let active = newToday.activeWorkout {
+                activeWorkout = active
+            } else if activeWorkout?.status != "in_progress" {
+                // A start can race a refresh; keep the just-started workout until the next
+                // read reports it. Completed/abandoned workouts are cleared.
+                activeWorkout = nil
+            }
             errorMessage = nil
         } catch {
             handle(error)
@@ -179,6 +218,207 @@ final class AppModel: ObservableObject {
         await loadHistory(reset: false)
     }
 
+    // MARK: Phase 2 mutations
+
+    func saveReadiness(
+        values: [String: Double],
+        note: String?,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard let session else { return false }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            _ = try await client.writeReadiness(
+                ReadinessWriteRequest(values: values, note: note),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            mutationError = nil
+            await refresh()
+            return true
+        } catch {
+            handleMutation(error)
+            return false
+        }
+    }
+
+    func issuePrescription(
+        readinessAck: Bool,
+        confirmations: [String: Bool]? = nil,
+        idempotencyKey: String
+    ) async {
+        guard let session else { return }
+        isSaving = true
+        defer { isSaving = false }
+        mutationError = nil
+        do {
+            let issued = try await client.issuePrescription(
+                IssuePrescriptionRequest(
+                    readinessAck: readinessAck,
+                    confirmations: confirmations
+                ),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            prescriptionState = .issued(issued)
+            await refresh()
+        } catch let error as APIError {
+            if error.isAuthenticationFailure {
+                handle(error)
+                return
+            }
+            switch error.code {
+            case "readiness_required":
+                prescriptionState = .readinessRequired(error.details ?? [:])
+            case "confirmation_required":
+                prescriptionState = .confirmationRequired(error.details ?? [:])
+            default:
+                handleMutation(error)
+                prescriptionState = .failed(message(for: error))
+            }
+        } catch {
+            handleMutation(error)
+            prescriptionState = .failed(message(for: error))
+        }
+    }
+
+    func clearPrescription() {
+        prescriptionState = .idle
+        mutationError = nil
+    }
+
+    func startWorkout(idempotencyKey: String) async -> Bool {
+        guard let session, case .issued(let issued) = prescriptionState else {
+            return false
+        }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            activeWorkout = try await client.startWorkout(
+                issuedPlanId: issued.issuedPlanId,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            // Keep the issued state so the preview sheet stays presented and can switch to
+            // the active workout. The sheet binding clears it when the sheet is dismissed.
+            mutationError = nil
+            await refresh()
+            return true
+        } catch {
+            if let api = error as? APIError, api.isAuthenticationFailure {
+                handle(error)
+                return false
+            }
+            if let api = error as? APIError,
+               ["workout_active", "plan_consumed", "plan_expired", "plan_superseded"]
+                .contains(api.code ?? "") {
+                prescriptionState = .idle
+                await refresh()
+            }
+            handleMutation(error)
+            return false
+        }
+    }
+
+    func addSet(_ body: AddSetRequest, idempotencyKey: String) async -> Bool {
+        guard let session, let workout = activeWorkout else { return false }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            activeWorkout = try await client.addSet(
+                workoutId: workout.workoutId,
+                body: body,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            mutationError = nil
+            return true
+        } catch {
+            handleMutation(error)
+            return false
+        }
+    }
+
+    func rateForm(_ body: FormRatingRequest, idempotencyKey: String) async -> Bool {
+        guard let session, let workout = activeWorkout else { return false }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            activeWorkout = try await client.rateForm(
+                workoutId: workout.workoutId,
+                body: body,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            mutationError = nil
+            return true
+        } catch {
+            handleMutation(error)
+            return false
+        }
+    }
+
+    func completeWorkout(
+        _ body: CompleteWorkoutRequest,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard let session, let workout = activeWorkout else { return false }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            activeWorkout = try await client.completeWorkout(
+                workoutId: workout.workoutId,
+                body: body,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            mutationError = nil
+            await refresh()
+            await loadHistory(reset: true)
+            return true
+        } catch {
+            handleMutation(error)
+            return false
+        }
+    }
+
+    func abandonWorkout(idempotencyKey: String) async -> Bool {
+        guard let session, let workout = activeWorkout else { return false }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            activeWorkout = try await client.abandonWorkout(
+                workoutId: workout.workoutId,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            mutationError = nil
+            await refresh()
+            return true
+        } catch {
+            handleMutation(error)
+            return false
+        }
+    }
+
+    func loadProgress(weeks: Int = 8) async {
+        guard let session, !isLoadingProgress else { return }
+        isLoadingProgress = true
+        defer { isLoadingProgress = false }
+        do {
+            progress = try await client.progress(weeks: weeks, session: session)
+            progressError = nil
+            hasLoadedProgress = true
+        } catch {
+            if let api = error as? APIError, api.isAuthenticationFailure {
+                handle(error)
+            } else {
+                progressError = message(for: error)
+            }
+        }
+    }
+
     // MARK: Local credential management
 
     func forgetDevice() {
@@ -196,10 +436,26 @@ final class AppModel: ObservableObject {
         historyTotal = 0
         historyOffset = 0
         hasLoadedHistory = false
+        activeWorkout = nil
+        progress = nil
+        progressError = nil
+        hasLoadedProgress = false
+        prescriptionState = .idle
+        isSaving = false
+        isLoadingProgress = false
+        mutationError = nil
         pairedServerURL = store.serverURL
         phase = .pairing
         errorMessage = nil
         pairingError = message
+    }
+
+    private func handleMutation(_ error: Error) {
+        if let api = error as? APIError, api.isAuthenticationFailure {
+            forgetLocally(message: api.errorDescription)
+        } else {
+            mutationError = message(for: error)
+        }
     }
 
     private func handle(_ error: Error) {

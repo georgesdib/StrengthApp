@@ -2,6 +2,10 @@ import SwiftUI
 
 struct TodayView: View {
     @ObservedObject var model: AppModel
+    @State private var pendingReadinessAck = false
+    @State private var lastIssueKey: String?
+    @State private var lastIssueAck = false
+    @State private var lastIssueConfirmations: [String: Bool]?
 
     var body: some View {
         NavigationStack {
@@ -14,6 +18,26 @@ struct TodayView: View {
                             Task { await model.refresh() }
                         }
                     }
+                }
+
+                if let error = model.mutationError {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if case .failed(let message) = model.prescriptionState,
+                   lastIssueKey != nil {
+                    Section {
+                        Label(message, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                        Button("Retry issue") { retryIssue() }
+                    }
+                }
+
+                Section("Training") {
+                    trainingContent
                 }
 
                 Section("Server") {
@@ -30,12 +54,12 @@ struct TodayView: View {
                 }
 
                 Section("Active workout") {
-                    if let workout = model.today?.activeWorkout {
+                    if let workout = model.activeWorkout ?? model.today?.activeWorkout {
                         LabeledContent("Session", value: workout.sessionType ?? "Workout")
                         if let date = workout.forDate {
                             LabeledContent("Date", value: date)
                         }
-                        LabeledContent("Status", value: workout.status ?? "in progress")
+                        LabeledContent("Status", value: workout.status)
                         if let started = workout.startedAt {
                             LabeledContent("Started", value: started)
                         }
@@ -68,6 +92,169 @@ struct TodayView: View {
                     ProgressView("Loading today…")
                 }
             }
+            .sheet(isPresented: showingIssuedPlan) {
+                PrescriptionPreviewView(model: model)
+            }
+            .alert("Readiness is not score-ready", isPresented: showingReadinessPrompt) {
+                Button("Start anyway") { issuePrescription(acknowledge: true) }
+                Button("Cancel", role: .cancel) { model.clearPrescription() }
+            } message: {
+                Text(readinessPromptText)
+            }
+            .confirmationDialog(
+                "Confirm the server's training decision",
+                isPresented: showingConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Accept") { issueConfirmation(accept: true) }
+                Button("Proceed without") { issueConfirmation(accept: false) }
+                Button("Cancel", role: .cancel) { model.clearPrescription() }
+            } message: {
+                Text("The server needs a deload or drop decision before issuing the plan.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var trainingContent: some View {
+        if model.canWrite {
+            if let workout = model.activeWorkout ?? model.today?.activeWorkout {
+                NavigationLink {
+                    ActiveWorkoutView(model: model)
+                } label: {
+                    Label("Resume workout (\(workout.sessionType ?? "session"))",
+                          systemImage: "figure.strengthtraining.traditional")
+                }
+                .accessibilityIdentifier("resume-workout")
+            } else {
+                if model.canWriteReadiness {
+                    NavigationLink {
+                        ReadinessFormView(model: model)
+                    } label: {
+                        Label("Log readiness", systemImage: "heart.text.square")
+                    }
+                    .accessibilityIdentifier("log-readiness")
+                }
+                if model.canPrescribe {
+                    Button {
+                        startPrescription()
+                    } label: {
+                        Label("Start workout", systemImage: "play.circle")
+                    }
+                    .accessibilityIdentifier("start-workout")
+                    .disabled(model.isSaving)
+                }
+            }
+        } else if model.bootstrap != nil {
+            Text("This server has iOS writes disabled.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var showingIssuedPlan: Binding<Bool> {
+        Binding(
+            get: {
+                if case .issued = model.prescriptionState { return true }
+                return false
+            },
+            set: { presented in
+                if !presented { model.clearPrescription() }
+            }
+        )
+    }
+
+    private var showingReadinessPrompt: Binding<Bool> {
+        Binding(
+            get: {
+                if case .readinessRequired = model.prescriptionState { return true }
+                return false
+            },
+            set: { presented in
+                if !presented { model.clearPrescription() }
+            }
+        )
+    }
+
+    private var showingConfirmation: Binding<Bool> {
+        Binding(
+            get: {
+                if case .confirmationRequired = model.prescriptionState { return true }
+                return false
+            },
+            set: { presented in
+                if !presented { model.clearPrescription() }
+            }
+        )
+    }
+
+    private var readinessPromptText: String {
+        guard case .readinessRequired(let details) = model.prescriptionState else {
+            return ""
+        }
+        let status = details["status"]?.stringValue ?? "unknown"
+        let basis = details["basis"]?.stringValue ?? ""
+        return "The server reports \(status) readiness. \(basis) Start without a score?"
+    }
+
+    private func startPrescription() {
+        pendingReadinessAck = false
+        lastIssueAck = false
+        lastIssueConfirmations = nil
+        lastIssueKey = UUID().uuidString.lowercased()
+        guard let key = lastIssueKey else { return }
+        Task {
+            await model.issuePrescription(
+                readinessAck: false, idempotencyKey: key
+            )
+        }
+    }
+
+    private func issuePrescription(acknowledge: Bool) {
+        pendingReadinessAck = acknowledge
+        lastIssueAck = acknowledge
+        lastIssueConfirmations = nil
+        if lastIssueKey == nil {
+            lastIssueKey = UUID().uuidString.lowercased()
+        }
+        guard let key = lastIssueKey else { return }
+        Task {
+            await model.issuePrescription(
+                readinessAck: acknowledge, idempotencyKey: key
+            )
+        }
+    }
+
+    private func issueConfirmation(accept: Bool) {
+        guard case .confirmationRequired(let details) = model.prescriptionState else {
+            return
+        }
+        let keys = details.keys.filter { $0 == "deload" || $0 == "drop" }
+        let confirmations = Dictionary(
+            uniqueKeysWithValues: keys.map { ($0, accept) }
+        )
+        lastIssueConfirmations = confirmations
+        lastIssueAck = pendingReadinessAck
+        if lastIssueKey == nil {
+            lastIssueKey = UUID().uuidString.lowercased()
+        }
+        guard let key = lastIssueKey else { return }
+        Task {
+            await model.issuePrescription(
+                readinessAck: pendingReadinessAck,
+                confirmations: confirmations,
+                idempotencyKey: key
+            )
+        }
+    }
+
+    private func retryIssue() {
+        guard let key = lastIssueKey else { return }
+        Task {
+            await model.issuePrescription(
+                readinessAck: lastIssueAck,
+                confirmations: lastIssueConfirmations,
+                idempotencyKey: key
+            )
         }
     }
 

@@ -1,0 +1,29 @@
+# ---------------------------------------------------------------------------
+# Xcode and macOS local state. The project references whole folders
+# (StrengthApp/, StrengthAppTests/, StrengthAppUITests/), so every source file
+# in them is compiled automatically; these are the files that must never be
+# committed. Kept in the repository itself: .git/info/exclude is local to one
+# clone and does not protect a fresh clone or another machine.
+# ---------------------------------------------------------------------------
+.DS_Store
+**/.DS_Store
+.DS_Store?
+
+# Per-user Xcode state: window layout, breakpoints, scheme ordering. This
+# project has no shared scheme, so none of it is needed to build or test.
+xcuserdata/
+*.xcuserstate
+
+# Build output, test results and package checkouts.
+DerivedData/
+build/
+*.xcresult
+.swiftpm/
+.build/
+
+# Live server details for the acceptance run are typed into
+# StrengthAppUITests/LiveConfig.swift, which is tracked with empty defaults
+# because the UI-test target compiles this folder and a fresh clone must build.
+# Do not commit a filled-in copy: it carries the server address and a pairing
+# code. Check "git diff StrengthAppUITests/LiveConfig.swift" before committing
+# after an acceptance run.

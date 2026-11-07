@@ -104,12 +104,15 @@ iOS 27.2  ·  Simulator: iPhone 18 Pro, iOS 27.2
 
 ---
 
-# Phase 2 device acceptance checklist — pending
+# Phase 2 device acceptance checklist — completed 2026-11-07
 
-**Status: simulator-verified 2026-11-07; physical-iPhone acceptance pending.** The live simulator
-flow covered pair -> readiness -> issue -> start -> add a manual-VBT set -> finish -> Progress
-against a temporary SQLite database. Run this checklist on the physical iPhone against a rehearsal
-database before treating Phase 2 as accepted.
+**Status: accepted 2026-11-07.** The live simulator flow covered pair -> readiness -> issue ->
+start -> add a manual-VBT set -> force-quit/relaunch recovery -> finish -> Progress against a
+temporary SQLite database. The owner then confirmed the physical-iPhone Phase 2 checklist on the
+iPhone 16 Pro Max (iPhone17,2), iOS 27.2. The live database is at schema 0053 with both Phase 2
+tables; a verified post-acceptance backup is at
+data/exports/phase2-post-acceptance-2026-11-07.tar.gz. The checklist below is retained as the
+record of what was exercised.
 
 ## Before you start
 
@@ -193,17 +196,17 @@ database before treating Phase 2 as accepted.
 
 | Check | Result | Notes |
 |---|---|---|
-| Readiness entry and validation | pending | |
-| Prescription gate/confirmation/preview | pending | |
-| Start, resume and single-use plan | pending | |
-| Add set incl. manual velocity | pending | |
-| Form rating | pending | |
-| Completion (RPE and not recorded) | pending | |
-| Abandon | pending | |
-| Progress | pending | |
-| Retry/idempotency and disabled switch | pending | |
-| Force-quit/relaunch recovery | pending | acknowledged set only; ambiguous post-termination replay is deferred (R1) |
-| Secrets and rollback | pending | |
+| Readiness entry and validation | pass | owner-confirmed 2026-11-07 |
+| Prescription gate/confirmation/preview | pass | owner-confirmed 2026-11-07 |
+| Start, resume and single-use plan | pass | owner-confirmed 2026-11-07 |
+| Add set incl. manual velocity | pass | owner-confirmed 2026-11-07 |
+| Form rating | pass | owner-confirmed 2026-11-07 |
+| Completion (RPE and not recorded) | pass | owner-confirmed 2026-11-07 |
+| Abandon | pass | owner-confirmed 2026-11-07 |
+| Progress | pass | owner-confirmed 2026-11-07 |
+| Retry/idempotency and disabled switch | pass | owner-confirmed 2026-11-07 |
+| Force-quit/relaunch recovery | pass | acknowledged set recovered; ambiguous post-termination replay is deferred (R1) |
+| Secrets and rollback | pass | owner-confirmed 2026-11-07 |
 
-Owner confirmation: pending  ·  Build: Phase 2  ·  Device: iPhone 16 Pro Max (iPhone17,2),
+Owner confirmation: 2026-11-07  ·  Build: Phase 2  ·  Device: iPhone 16 Pro Max (iPhone17,2),
 iOS 27.2  ·  Simulator: iPhone 18 Pro, iOS 27.2

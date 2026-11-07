@@ -1,8 +1,7 @@
 # StrengthApp — iOS client
 
-**Status: Phase 1 complete 2026-11-07 (owner-confirmed on the physical iPhone); Phase 2 complete
-2026-11-07 (simulator-verified; physical-iPhone acceptance checklist pending).** Phase 3 is not
-started.
+**Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07** — both
+simulator-verified and owner-confirmed on the physical iPhone. Phase 3 is not started.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
@@ -119,6 +118,6 @@ workspace-only sandbox may deny.
 
 ## Real-device acceptance
 
-Phase 1 completed 2026-11-07; the record is in [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md).
-Phase 2 is simulator-verified; the physical-iPhone checklist is in the same file and remains the
-owner gate. Phase 3 needs its own approved contract.
+Phase 1 and Phase 2 completed 2026-11-07; the records are in
+[DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md). Phase 3 needs its own approved contract and has not
+started.

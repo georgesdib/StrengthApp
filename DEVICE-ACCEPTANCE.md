@@ -1,8 +1,12 @@
-# Phase 1 device acceptance checklist
+# Phase 1 device acceptance checklist — completed 2026-11-07
 
-Use this for the owner's iPhone 16 Pro (iOS 27.2) pass. Phase 1 is read-only: if a check would
-require writing a readiness day, starting a workout or requesting a prescription, it is out of
-scope.
+**Result: complete.** The owner confirmed the Phase 1 pass on their physical iPhone (iOS 27.2;
+the connected device reports iPhone 16 Pro Max, iPhone17,2) against the local server on the home
+LAN. The simulator pass used the iPhone 18 Pro. The checklist below is retained as the record of
+what was exercised.
+
+Phase 1 is read-only: if a check would require writing a readiness day, starting a workout or
+requesting a prescription, it is out of scope.
 
 ## Before you start
 
@@ -13,7 +17,7 @@ scope.
       (`strength-coach --db /tmp/rehearsal.db web --host 0.0.0.0 --port 8000`); never point a
       rehearsal at the live `data/coach.db`.
 - [ ] The iPhone and the server are on the same trusted network.
-- [ ] `StrengthApp` is selected, the personal team is set, and the build targets the iPhone 16 Pro.
+- [ ] `StrengthApp` is selected, the personal team is set, and the build targets the owner's iPhone.
 - [ ] The app's local-network permission is allowed in iPhone Settings if it was previously denied.
 
 ## Pairing
@@ -83,14 +87,15 @@ scope.
 
 | Check | Result | Notes |
 |---|---|---|
-| Pairing and rejection paths | | |
-| Today readiness/date | | |
-| History paging | | |
-| Relaunch persistence | | |
-| Forget and re-pair | | |
-| Server revocation | | |
-| No secrets in logs | | |
-| Existing web/API unchanged | | |
-| Device/build/signing | | |
+| Pairing and rejection paths | pass | owner-confirmed 2026-11-07 |
+| Today readiness/date | pass | owner-confirmed 2026-11-07 |
+| History paging | pass | owner-confirmed 2026-11-07 |
+| Relaunch persistence | pass | owner-confirmed 2026-11-07 |
+| Forget and re-pair | pass | owner-confirmed 2026-11-07 |
+| Server revocation | pass | owner-confirmed 2026-11-07 |
+| No secrets in logs | pass | owner-confirmed 2026-11-07 |
+| Existing web/API unchanged | pass | owner-confirmed 2026-11-07 |
+| Device/build/signing | pass | owner-confirmed 2026-11-07 |
 
-Owner: ____________________  Date: __________  Build: __________
+Owner confirmation: 2026-11-07  ·  Build: Phase 1  ·  Device: iPhone 16 Pro Max (iPhone17,2),
+iOS 27.2  ·  Simulator: iPhone 18 Pro, iOS 27.2

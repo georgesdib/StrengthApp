@@ -1,5 +1,8 @@
 # StrengthApp — iOS Phase 1
 
+**Status: Phase 1 complete 2026-11-07** — simulator-verified and owner-confirmed on the physical
+iPhone. Phase 2 is not started.
+
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 1 is
 **read-only**: pairing, today's readiness/status, recent history and settings/forget. Python remains
 the sole authority for readiness scores, prescriptions and training decisions.
@@ -11,7 +14,7 @@ The server contract is `docs/design/IOS-PHASE-1-CONTRACT.md` in the
 
 - Xcode 27.2 and an iOS 27.2 simulator or device.
 - The server repository running `strength-coach web` on the same trusted home network.
-- For a device build: the owner's personal team (7-day signing) and the iPhone 16 Pro.
+- For a device build: the owner's personal team (7-day signing) and the owner's iPhone.
 
 ## Run against the local server
 
@@ -28,7 +31,7 @@ The server contract is `docs/design/IOS-PHASE-1-CONTRACT.md` in the
    ```
 
 3. Build and run `StrengthApp` in Xcode on the iPhone 18 Pro simulator (Debug prefills
-   `http://127.0.0.1:8000`) or on the iPhone 16 Pro (enter the server's LAN address, for example
+   `http://127.0.0.1:8000`) or on the owner's iPhone (enter the server's LAN address, for example
    `http://192.168.1.10:8000`).
 
 4. Enter the 8-digit code and pair. The app stores only the token in the Keychain; the server
@@ -95,4 +98,5 @@ workspace-only sandbox may deny.
 
 ## Real-device acceptance
 
-See [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md).
+Completed 2026-11-07; the record is in [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md). Phase 2 is
+not started and needs its own approved contract.

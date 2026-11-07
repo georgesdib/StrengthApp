@@ -39,6 +39,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
     @Published private(set) var mutationFailureAmbiguous = false
+    @Published private(set) var pendingMutations: [PendingMutation] = []
+    @Published private(set) var recoveryMessage: String?
+    @Published private(set) var isRecovering = false
 
     @Published var serverURLText: String
     @Published var pairingCodeText: String = ""
@@ -57,7 +60,7 @@ final class AppModel: ObservableObject {
         store: PairedStore? = nil
     ) {
         let store = store ?? PairedStore()
-        self.client = client ?? IOSAPIClient()
+        self.client = client ?? IOSAPIClient(journal: MutationJournal())
         self.tokens = tokens ?? KeychainTokenStore()
         self.store = store
         self.serverURLText = store.serverURL ?? AppConfig.defaultServerURL
@@ -98,13 +101,18 @@ final class AppModel: ObservableObject {
             phase = .pairing
             return
         }
-        session = IOSSession(baseURL: baseURL, token: token)
+        session = IOSSession(
+            baseURL: baseURL,
+            token: token,
+            deviceID: store.device?.deviceID
+        )
         device = store.device
         pairedServerURL = baseURL.absoluteString
         serverURLText = baseURL.absoluteString
         if let device { pairingLabelText = device.label }
         phase = .paired
         await refresh()
+        await recoverPendingMutations()
     }
 
     // MARK: Pairing
@@ -150,9 +158,14 @@ final class AppModel: ObservableObject {
             serverURLText = baseURL.absoluteString
             pairingLabelText = response.device.label
             pairingCodeText = ""
-            session = IOSSession(baseURL: baseURL, token: response.token)
+            session = IOSSession(
+                baseURL: baseURL,
+                token: response.token,
+                deviceID: response.device.deviceId
+            )
             phase = .paired
             await refresh()
+            await recoverPendingMutations()
         } catch {
             pairingError = message(for: error)
         }
@@ -227,9 +240,15 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async -> Bool {
         guard !isSaving, let session else { return false }
+        guard permitsMutation(kind: .readiness, operationId: idempotencyKey) else {
+            return false
+        }
         isSaving = true
         mutationFailureAmbiguous = false
-        defer { isSaving = false }
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
         do {
             _ = try await client.writeReadiness(
                 ReadinessWriteRequest(values: values, note: note),
@@ -251,9 +270,15 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async {
         guard !isSaving, let session else { return }
+        guard permitsMutation(kind: .prescription, operationId: idempotencyKey) else {
+            return
+        }
         isSaving = true
         mutationFailureAmbiguous = false
-        defer { isSaving = false }
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
         mutationError = nil
         do {
             let issued = try await client.issuePrescription(
@@ -296,9 +321,15 @@ final class AppModel: ObservableObject {
         guard !isSaving, let session, case .issued(let issued) = prescriptionState else {
             return false
         }
+        guard permitsMutation(kind: .startWorkout, operationId: idempotencyKey) else {
+            return false
+        }
         isSaving = true
         mutationFailureAmbiguous = false
-        defer { isSaving = false }
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
         do {
             activeWorkout = try await client.startWorkout(
                 issuedPlanId: issued.issuedPlanId,
@@ -328,9 +359,15 @@ final class AppModel: ObservableObject {
 
     func addSet(_ body: AddSetRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        guard permitsMutation(kind: .addSet, operationId: idempotencyKey) else {
+            return false
+        }
         isSaving = true
         mutationFailureAmbiguous = false
-        defer { isSaving = false }
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
         do {
             activeWorkout = try await client.addSet(
                 workoutId: workout.workoutId,
@@ -348,9 +385,15 @@ final class AppModel: ObservableObject {
 
     func rateForm(_ body: FormRatingRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        guard permitsMutation(kind: .rateForm, operationId: idempotencyKey) else {
+            return false
+        }
         isSaving = true
         mutationFailureAmbiguous = false
-        defer { isSaving = false }
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
         do {
             activeWorkout = try await client.rateForm(
                 workoutId: workout.workoutId,
@@ -371,9 +414,15 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        guard permitsMutation(kind: .completeWorkout, operationId: idempotencyKey) else {
+            return false
+        }
         isSaving = true
         mutationFailureAmbiguous = false
-        defer { isSaving = false }
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
         do {
             activeWorkout = try await client.completeWorkout(
                 workoutId: workout.workoutId,
@@ -397,9 +446,15 @@ final class AppModel: ObservableObject {
 
     func abandonWorkout(idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        guard permitsMutation(kind: .abandonWorkout, operationId: idempotencyKey) else {
+            return false
+        }
         isSaving = true
         mutationFailureAmbiguous = false
-        defer { isSaving = false }
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
         do {
             activeWorkout = try await client.abandonWorkout(
                 workoutId: workout.workoutId,
@@ -436,6 +491,98 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: Durable pending operations
+
+    func recoverPendingMutations() async {
+        guard let session, !isRecovering, !isSaving else { return }
+        let entries = client.pendingMutations(for: session)
+        pendingMutations = entries
+        guard !entries.isEmpty else {
+            recoveryMessage = nil
+            return
+        }
+        isRecovering = true
+        defer {
+            isRecovering = false
+            refreshPendingMutations()
+        }
+        var message: String?
+        for entry in entries {
+            guard entry.state == .pending else {
+                message = "\(entry.kind.label) has an unresolved conflict."
+                continue
+            }
+            guard entry.isReplayable else {
+                client.markConflict(entry)
+                message = "\(entry.kind.label) is older than the safe replay window. Discard it and verify the server state."
+                continue
+            }
+            do {
+                switch entry.kind {
+                case .readiness:
+                    let _: ReadinessPayload = try await client.replay(entry, session: session)
+                case .prescription:
+                    let issued: IssuedPlanResponse = try await client.replay(entry, session: session)
+                    prescriptionState = .issued(issued)
+                case .startWorkout, .addSet, .rateForm,
+                     .completeWorkout, .abandonWorkout:
+                    activeWorkout = try await client.replay(entry, session: session)
+                }
+            } catch let api as APIError {
+                if api.code == "idempotency_conflict" {
+                    message = "A pending \(entry.kind.label.lowercased()) conflicts with a previous request. Discard it and refresh."
+                    break
+                }
+                if !Self.isAmbiguous(api) {
+                    message = api.errorDescription
+                    continue
+                }
+                message = api.errorDescription
+                break
+            } catch {
+                message = self.message(for: error)
+                break
+            }
+        }
+        recoveryMessage = message
+        await refresh()
+    }
+
+    func retryPendingMutations() async {
+        await recoverPendingMutations()
+    }
+
+    func discardPendingMutations() {
+        guard let session else { return }
+        client.discardAll(for: session)
+        pendingMutations = []
+        recoveryMessage = nil
+        mutationError = nil
+        mutationFailureAmbiguous = false
+    }
+
+    private func refreshPendingMutations() {
+        guard let session else {
+            pendingMutations = []
+            return
+        }
+        pendingMutations = client.pendingMutations(for: session)
+    }
+
+    /// A new mutation may proceed only when there is no unresolved operation, or when this is
+    /// the exact operation being retried. This keeps the journal bounded and ordered.
+    private func permitsMutation(kind: MutationKind, operationId: String) -> Bool {
+        let unresolved = pendingMutations
+        guard !unresolved.isEmpty else { return true }
+        if unresolved.contains(where: {
+            $0.kind == kind && $0.operationId == operationId && $0.state == .pending
+        }) {
+            return true
+        }
+        mutationError = "A previous operation is still awaiting confirmation. Retry or discard it before starting another."
+        return false
+    }
+
     // MARK: Local credential management
 
     func forgetDevice() {
@@ -443,6 +590,9 @@ final class AppModel: ObservableObject {
     }
 
     private func forgetLocally(message: String?) {
+        if let session {
+            client.discardAll(for: session)
+        }
         tokens.delete()
         store.device = nil
         device = nil
@@ -462,6 +612,9 @@ final class AppModel: ObservableObject {
         isLoadingProgress = false
         mutationError = nil
         mutationFailureAmbiguous = false
+        pendingMutations = []
+        recoveryMessage = nil
+        isRecovering = false
         pairedServerURL = store.serverURL
         phase = .pairing
         errorMessage = nil
@@ -488,7 +641,7 @@ final class AppModel: ObservableObject {
         case .http(let status, _, _), .server(let status, _, _, _, _):
             return status >= 500
         case .invalidBaseURL, .invalidPairingCode, .invalidLabel,
-             .unauthorized, .forbidden:
+             .journal, .unauthorized, .forbidden:
             return false
         }
     }

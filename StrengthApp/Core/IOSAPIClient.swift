@@ -4,6 +4,13 @@ import Foundation
 struct IOSSession: Equatable {
     let baseURL: URL
     let token: String
+    let deviceID: String?
+
+    init(baseURL: URL, token: String, deviceID: String? = nil) {
+        self.baseURL = baseURL
+        self.token = token
+        self.deviceID = deviceID
+    }
 }
 
 enum APIError: LocalizedError, Equatable {
@@ -13,6 +20,7 @@ enum APIError: LocalizedError, Equatable {
     case transport(String)
     case http(status: Int, message: String, fields: [String: String])
     case server(status: Int, code: String, message: String, fields: [String: String], details: [String: JSONValue])
+    case journal(String)
     case unauthorized
     case forbidden
     case decoding
@@ -31,6 +39,8 @@ enum APIError: LocalizedError, Equatable {
             return Self.httpDescription(status: status, message: message, fields: fields)
         case .server(let status, _, let message, let fields, _):
             return Self.httpDescription(status: status, message: message, fields: fields)
+        case .journal(let message):
+            return message
         case .unauthorized, .forbidden:
             return "This device is no longer paired. Pair it again."
         case .decoding:
@@ -184,10 +194,15 @@ final class IOSAPIClient {
     private let transport: HTTPTransport
     private let decoder: JSONDecoder
     private let encoder = JSONEncoder()
+    private let journal: MutationJournal?
     private let maxGETRetries = 2
 
-    init(transport: HTTPTransport = URLSessionTransport()) {
+    init(
+        transport: HTTPTransport = URLSessionTransport(),
+        journal: MutationJournal? = nil
+    ) {
         self.transport = transport
+        self.journal = journal
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         self.decoder = decoder
@@ -291,6 +306,8 @@ final class IOSAPIClient {
         try await post(
             path: "api/ios/v1/readiness",
             body: body,
+            kind: .readiness,
+            targetId: nil,
             session: session,
             idempotencyKey: idempotencyKey
         )
@@ -304,6 +321,8 @@ final class IOSAPIClient {
         try await post(
             path: "api/ios/v1/prescriptions",
             body: body,
+            kind: .prescription,
+            targetId: nil,
             session: session,
             idempotencyKey: idempotencyKey
         )
@@ -317,6 +336,8 @@ final class IOSAPIClient {
         try await post(
             path: "api/ios/v1/workouts",
             body: StartWorkoutRequest(issuedPlanId: issuedPlanId),
+            kind: .startWorkout,
+            targetId: issuedPlanId,
             session: session,
             idempotencyKey: idempotencyKey
         )
@@ -331,6 +352,8 @@ final class IOSAPIClient {
         try await post(
             path: "api/ios/v1/workouts/\(workoutId)/sets",
             body: body,
+            kind: .addSet,
+            targetId: workoutId,
             session: session,
             idempotencyKey: idempotencyKey
         )
@@ -345,6 +368,8 @@ final class IOSAPIClient {
         try await post(
             path: "api/ios/v1/workouts/\(workoutId)/form",
             body: body,
+            kind: .rateForm,
+            targetId: workoutId,
             session: session,
             idempotencyKey: idempotencyKey
         )
@@ -359,6 +384,8 @@ final class IOSAPIClient {
         try await post(
             path: "api/ios/v1/workouts/\(workoutId)/complete",
             body: body,
+            kind: .completeWorkout,
+            targetId: workoutId,
             session: session,
             idempotencyKey: idempotencyKey
         )
@@ -372,6 +399,8 @@ final class IOSAPIClient {
         try await post(
             path: "api/ios/v1/workouts/\(workoutId)/abandon",
             body: EmptyRequest(),
+            kind: .abandonWorkout,
+            targetId: workoutId,
             session: session,
             idempotencyKey: idempotencyKey
         )
@@ -393,6 +422,58 @@ final class IOSAPIClient {
         )
     }
 
+    // MARK: Pending operations
+
+    func pendingMutations(for session: IOSSession) -> [PendingMutation] {
+        journal?.all(
+            for: session.deviceID,
+            serverURL: session.baseURL.absoluteString
+        ) ?? []
+    }
+
+    func discard(_ entry: PendingMutation) {
+        try? journal?.remove(entry)
+    }
+
+    func discardAll(for session: IOSSession) {
+        try? journal?.removeAll(
+            for: session.deviceID,
+            serverURL: session.baseURL.absoluteString
+        )
+    }
+
+    func markConflict(_ entry: PendingMutation) {
+        try? journal?.markConflict(entry)
+    }
+
+    /// Replay a journaled request with its original UUID and exact encoded body.
+    func replay<T: Decodable>(
+        _ entry: PendingMutation,
+        session: IOSSession
+    ) async throws -> T {
+        guard entry.serverURL == session.baseURL.absoluteString,
+              entry.deviceId == session.deviceID else {
+            throw APIError.journal("The pending operation belongs to a different server or device.")
+        }
+        do {
+            let request = try makeRequest(
+                path: entry.path,
+                bodyData: entry.bodyData,
+                session: session,
+                idempotencyKey: entry.operationId
+            )
+            let (data, response) = try await performNoRetry(request)
+            try validate(response, data: data)
+            try? journal?.acknowledge(entry)
+            return try decode(T.self, from: data)
+        } catch {
+            if let api = error as? APIError {
+                handleJournalFailure(api, entry)
+            }
+            throw error
+        }
+    }
+
     // MARK: Requests
 
     private struct PairRequest: Encodable {
@@ -403,9 +484,75 @@ final class IOSAPIClient {
     private func post<T: Decodable, Body: Encodable>(
         path: String,
         body: Body,
+        kind: MutationKind,
+        targetId: String?,
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> T {
+        let bodyData = try encoder.encode(body)
+        return try await send(
+            path: path,
+            bodyData: bodyData,
+            kind: kind,
+            targetId: targetId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    private func send<T: Decodable>(
+        path: String,
+        bodyData: Data,
+        kind: MutationKind,
+        targetId: String?,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> T {
+        let entry = PendingMutation(
+            operationId: idempotencyKey,
+            deviceId: session.deviceID,
+            serverURL: session.baseURL.absoluteString,
+            kind: kind,
+            targetId: targetId,
+            path: path,
+            bodyData: bodyData,
+            createdAt: Date(),
+            state: .pending
+        )
+        if let journal {
+            do {
+                try journal.record(entry)
+            } catch {
+                throw APIError.journal(error.localizedDescription)
+            }
+        }
+        do {
+            let request = try makeRequest(
+                path: path,
+                bodyData: bodyData,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            let (data, response) = try await performNoRetry(request)
+            try validate(response, data: data)
+            // 2xx is definitive success; remove before decoding so a decode failure cannot
+            // cause the original mutation to be replayed after it already committed.
+            try? journal?.acknowledge(entry)
+            return try decode(T.self, from: data)
+        } catch {
+            if let api = error as? APIError {
+                handleJournalFailure(api, entry)
+            }
+            throw error
+        }
+    }
+
+    private func makeRequest(
+        path: String,
+        bodyData: Data,
+        session: IOSSession,
+        idempotencyKey: String
+    ) throws -> URLRequest {
         var request = URLRequest(
             url: try url(path: path, query: [], baseURL: session.baseURL)
         )
@@ -416,11 +563,32 @@ final class IOSAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(session.token)", forHTTPHeaderField: "Authorization")
         request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
-        request.httpBody = try encoder.encode(body)
-        let (data, response) = try await performNoRetry(request)
-        try validate(response, data: data)
-        return try decode(T.self, from: data)
+        request.httpBody = bodyData
+        return request
     }
+
+    private func handleJournalFailure(_ error: APIError, _ entry: PendingMutation) {
+        guard let journal else { return }
+        switch error {
+        case .http(let status, _, _):
+            if status >= 500 { return }
+            try? journal.remove(entry)
+        case .server(let status, let code, _, _, _):
+            if status >= 500 { return }
+            if code == "idempotency_conflict" {
+                try? journal.markConflict(entry)
+            } else {
+                try? journal.remove(entry)
+            }
+        case .unauthorized, .forbidden:
+            // No mutation was applied; do not retain personal payloads after auth failure.
+            try? journal.remove(entry)
+        case .transport, .decoding, .journal,
+             .invalidBaseURL, .invalidPairingCode, .invalidLabel:
+            return
+        }
+    }
+
 
     private func get<T: Decodable>(
         path: String,

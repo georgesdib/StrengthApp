@@ -36,9 +36,53 @@ struct TodayView: View {
                     }
                 }
 
+                if !model.pendingMutations.isEmpty {
+                    Section("Pending operation") {
+                        Text("A request was sent but not confirmed. It is kept with its original operation ID and will be retried against the server.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        ForEach(model.pendingMutations) { entry in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.kind.label)
+                                    .font(.subheadline)
+                                Text("\(entry.state == .conflict ? "Conflict" : "Awaiting confirmation") · \(entry.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let target = entry.targetId {
+                                    Text(target)
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        if let message = model.recoveryMessage {
+                            Text(message).foregroundStyle(.red)
+                        }
+                        Button {
+                            Task { await model.retryPendingMutations() }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                if model.isRecovering {
+                                    ProgressView()
+                                } else {
+                                    Text("Retry pending operation")
+                                }
+                                Spacer()
+                            }
+                        }
+                        .disabled(model.isRecovering || model.isSaving)
+                        Button("Discard pending operation", role: .destructive) {
+                            model.discardPendingMutations()
+                        }
+                        .disabled(model.isSaving)
+                    }
+                }
+
                 Section("Training") {
                     trainingContent
                 }
+                .disabled(!model.pendingMutations.isEmpty)
 
                 Section("Server") {
                     LabeledContent("Date", value: model.today?.date

@@ -205,7 +205,7 @@ record of what was exercised.
 | Abandon | pass | owner-confirmed 2026-11-07 |
 | Progress | pass | owner-confirmed 2026-11-07 |
 | Retry/idempotency and disabled switch | pass | owner-confirmed 2026-11-07 |
-| Force-quit/relaunch recovery | pass | acknowledged set recovered; ambiguous post-termination replay is deferred (R1) |
+| Force-quit/relaunch recovery | pass | acknowledged set recovered; R1 journal now covers attempted unacknowledged operations (post-acceptance; dedicated R1 device check pending) |
 | Secrets and rollback | pass | owner-confirmed 2026-11-07 |
 
 Owner confirmation: 2026-11-07  ·  Build: Phase 2  ·  Device: iPhone 16 Pro Max (iPhone17,2),

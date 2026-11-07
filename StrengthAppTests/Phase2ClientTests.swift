@@ -57,6 +57,63 @@ final class Phase2ClientTests: XCTestCase {
         XCTAssertEqual(unique.uniquePlanItemIndex(for: "competition_squat"), 0)
         XCTAssertEqual(unique.uniquePlanItemIndex(for: "bench_press"), 1)
     }
+    func testJournaledMutationReplaysWithOriginalKeyAndBody() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("client-journal-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let journal = MutationJournal(fileURL: url)
+        let transport = StubTransport { _ in
+            throw URLError(.timedOut)
+        }
+        let client = IOSAPIClient(transport: transport, journal: journal)
+        let session = IOSSession(
+            baseURL: URL(string: "http://127.0.0.1:8000")!,
+            token: "token-abc",
+            deviceID: "device-1"
+        )
+        let body = AddSetRequest(
+            exerciseId: "competition_squat", loadKg: 140, reps: 3,
+            rir: 2, velocityMps: 0.62, setIndex: 1, planItemIndex: 0
+        )
+        do {
+            _ = try await client.addSet(
+                workoutId: "workout-1", body: body,
+                session: session, idempotencyKey: "operation-1"
+            )
+            XCTFail("expected a transport failure")
+        } catch {
+            // The journal must retain the attempted operation.
+        }
+        let entries = journal.all(
+            for: "device-1", serverURL: "http://127.0.0.1:8000"
+        )
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].kind, .addSet)
+        XCTAssertEqual(entries[0].operationId, "operation-1")
+
+        transport.handler = { _ in
+            (200, Data(Fixtures.workoutWithSet.utf8))
+        }
+        let replayed: WorkoutDetail = try await client.replay(
+            entries[0], session: session
+        )
+        XCTAssertEqual(replayed.workoutId, "workout-1")
+        XCTAssertEqual(replayed.sets?.count, 1)
+        XCTAssertTrue(
+            journal.all(for: "device-1", serverURL: "http://127.0.0.1:8000").isEmpty
+        )
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].httpBody, transport.requests[1].httpBody)
+        XCTAssertEqual(
+            transport.requests[0].value(forHTTPHeaderField: "Idempotency-Key"),
+            "operation-1"
+        )
+        XCTAssertEqual(
+            transport.requests[1].value(forHTTPHeaderField: "Idempotency-Key"),
+            "operation-1"
+        )
+    }
+
     func testReadinessWriteUsesSnakeCaseAndIdempotency() async throws {
         let transport = StubTransport { _ in
             (200, Data(Fixtures.readinessWrite.utf8))
@@ -267,7 +324,8 @@ final class Phase2AppModelTests: XCTestCase {
     }
 
     private func pairedModel(
-        transport: HTTPTransport
+        transport: HTTPTransport,
+        journal: MutationJournal? = nil
     ) -> (AppModel, UserDefaults, String, InMemoryTokenStore) {
         let (defaults, suite) = makeDefaults()
         let store = PairedStore(defaults: defaults)
@@ -275,7 +333,7 @@ final class Phase2AppModelTests: XCTestCase {
         store.device = PairingDevice(deviceID: "device-1", label: "iPhone")
         let tokens = InMemoryTokenStore(token: "token-abc")
         let model = AppModel(
-            client: IOSAPIClient(transport: transport),
+            client: IOSAPIClient(transport: transport, journal: journal),
             tokens: tokens,
             store: store
         )
@@ -424,6 +482,115 @@ final class Phase2AppModelTests: XCTestCase {
         let result = await model.addSet(body, idempotencyKey: "set-ambiguous")
         XCTAssertFalse(result)
         XCTAssertTrue(model.mutationFailureAmbiguous)
+    }
+
+    func testLaunchReplaysAPendingAddSetFromTheJournal() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("app-model-journal-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let journal = MutationJournal(fileURL: url)
+        let pending = PendingMutation(
+            operationId: "pending-set",
+            deviceId: "device-1",
+            serverURL: "http://127.0.0.1:8000",
+            kind: .addSet,
+            targetId: "workout-1",
+            path: "api/ios/v1/workouts/workout-1/sets",
+            bodyData: Data(#"{"exercise_id":"competition_squat","load_kg":140,"reps":3,"rir":2,"velocity_mps":0.62,"set_index":1,"plan_item_index":0}"#.utf8),
+            createdAt: Date(),
+            state: .pending
+        )
+        try journal.record(pending)
+
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/workouts/workout-1/sets":
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(
+            transport: transport, journal: journal
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+        XCTAssertEqual(model.activeWorkout?.sets?.count, 1)
+        XCTAssertTrue(model.pendingMutations.isEmpty)
+        XCTAssertNil(model.recoveryMessage)
+        XCTAssertTrue(
+            journal.all(for: "device-1", serverURL: "http://127.0.0.1:8000").isEmpty
+        )
+    }
+
+    func testReplayConflictIsKeptAndTerminalFourHundredIsRemoved() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("client-conflict-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let journal = MutationJournal(fileURL: url)
+        let session = IOSSession(
+            baseURL: URL(string: "http://127.0.0.1:8000")!,
+            token: "token-abc",
+            deviceID: "device-1"
+        )
+        let conflict = PendingMutation(
+            operationId: "conflict-op",
+            deviceId: "device-1",
+            serverURL: "http://127.0.0.1:8000",
+            kind: .addSet,
+            targetId: "workout-1",
+            path: "api/ios/v1/workouts/workout-1/sets",
+            bodyData: Data("{}".utf8),
+            createdAt: Date(),
+            state: .pending
+        )
+        let terminal = PendingMutation(
+            operationId: "terminal-op",
+            deviceId: "device-1",
+            serverURL: "http://127.0.0.1:8000",
+            kind: .addSet,
+            targetId: "workout-1",
+            path: "api/ios/v1/workouts/workout-1/sets",
+            bodyData: Data("{}".utf8),
+            createdAt: Date(),
+            state: .pending
+        )
+        try journal.record(conflict)
+        try journal.record(terminal)
+
+        let transport = StubTransport { request in
+            let key = request.value(forHTTPHeaderField: "Idempotency-Key")
+            if key == "conflict-op" {
+                return (409, Data(#"{"error":"operation conflict","code":"idempotency_conflict"}"#.utf8))
+            }
+            return (409, Data(#"{"error":"workout is not active","code":"workout_not_active"}"#.utf8))
+        }
+        let client = IOSAPIClient(transport: transport, journal: journal)
+        do {
+            let _: WorkoutDetail = try await client.replay(conflict, session: session)
+            XCTFail("expected a conflict")
+        } catch {}
+        XCTAssertEqual(
+            journal.all(for: "device-1", serverURL: "http://127.0.0.1:8000")
+                .first(where: { $0.operationId == "conflict-op" })?.state,
+            .conflict
+        )
+
+        do {
+            let _: WorkoutDetail = try await client.replay(terminal, session: session)
+            XCTFail("expected a terminal conflict")
+        } catch {}
+        XCTAssertNil(
+            journal.all(for: "device-1", serverURL: "http://127.0.0.1:8000")
+                .first(where: { $0.operationId == "terminal-op" })
+        )
     }
 
     func testReadinessGateBecomesState() async {

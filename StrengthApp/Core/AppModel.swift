@@ -17,6 +17,12 @@ final class AppModel: ObservableObject {
         case failed(String)
     }
 
+    enum RecoveryIssue: Equatable {
+        case serverActiveWorkout(workoutId: String, sessionType: String?)
+        case workoutEndedElsewhere(workoutId: String)
+        case prescriptionUnavailable(reason: String)
+    }
+
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var bootstrap: BootstrapResponse?
     @Published private(set) var today: TodayResponse?
@@ -41,6 +47,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var mutationFailureAmbiguous = false
     @Published private(set) var pendingMutations: [PendingMutation] = []
     @Published private(set) var recoveryMessage: String?
+    @Published private(set) var recoveryIssue: RecoveryIssue?
     @Published private(set) var isRecovering = false
 
     @Published var serverURLText: String
@@ -53,6 +60,7 @@ final class AppModel: ObservableObject {
     private let pageSize = 50
     private var session: IOSSession?
     private var historyOffset = 0
+    private var workoutRefreshGrace = false
 
     init(
         client: IOSAPIClient? = nil,
@@ -183,12 +191,33 @@ final class AppModel: ObservableObject {
             let (newBootstrap, newToday) = try await (bootstrapTask, todayTask)
             bootstrap = newBootstrap
             today = newToday
-            if let active = newToday.activeWorkout {
-                activeWorkout = active
-            } else if activeWorkout?.status != "in_progress" {
-                // A start can race a refresh; keep the just-started workout until the next
-                // read reports it. Completed/abandoned workouts are cleared.
+            let previousActive = activeWorkout
+            if let serverActive = newToday.activeWorkout {
+                if previousActive?.workoutId != serverActive.workoutId {
+                    recoveryIssue = .serverActiveWorkout(
+                        workoutId: serverActive.workoutId,
+                        sessionType: serverActive.sessionType
+                    )
+                }
+                activeWorkout = serverActive
+                workoutRefreshGrace = false
+            } else if let previousActive, previousActive.status == "in_progress" {
+                if workoutRefreshGrace {
+                    // A mutation just returned an in-progress workout. Keep it for this read;
+                    // the next refresh can still reconcile an externally finished workout.
+                    workoutRefreshGrace = false
+                    activeWorkout = previousActive
+                } else {
+                    // The server no longer has the workout this session was showing. Do not
+                    // silently keep stale local state; surface it for reconciliation.
+                    activeWorkout = nil
+                    recoveryIssue = .workoutEndedElsewhere(
+                        workoutId: previousActive.workoutId
+                    )
+                }
+            } else {
                 activeWorkout = nil
+                workoutRefreshGrace = false
             }
             errorMessage = nil
         } catch {
@@ -339,6 +368,8 @@ final class AppModel: ObservableObject {
             // Keep the issued state so the preview sheet stays presented and can switch to
             // the active workout. The sheet binding clears it when the sheet is dismissed.
             mutationError = nil
+            recoveryIssue = nil
+            workoutRefreshGrace = true
             await refresh()
             return true
         } catch {
@@ -346,11 +377,18 @@ final class AppModel: ObservableObject {
                 handle(error)
                 return false
             }
-            if let api = error as? APIError,
-               ["workout_active", "plan_consumed", "plan_expired", "plan_superseded"]
-                .contains(api.code ?? "") {
-                prescriptionState = .idle
-                await refresh()
+            if let api = error as? APIError {
+                let code = api.code ?? ""
+                if ["plan_consumed", "plan_expired", "plan_superseded"].contains(code) {
+                    prescriptionState = .idle
+                    recoveryIssue = .prescriptionUnavailable(
+                        reason: "This prescription is no longer available. Refresh to load the current server state."
+                    )
+                    await refresh()
+                } else if code == "workout_active" {
+                    prescriptionState = .idle
+                    await refresh()
+                }
             }
             handleMutation(error)
             return false
@@ -376,8 +414,13 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             mutationError = nil
+            workoutRefreshGrace = true
             return true
         } catch {
+            if let api = error as? APIError,
+               ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
+                await refresh()
+            }
             handleMutation(error)
             return false
         }
@@ -402,8 +445,13 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             mutationError = nil
+            workoutRefreshGrace = true
             return true
         } catch {
+            if let api = error as? APIError,
+               ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
+                await refresh()
+            }
             handleMutation(error)
             return false
         }
@@ -431,6 +479,8 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             mutationError = nil
+            recoveryIssue = nil
+            workoutRefreshGrace = false
             await refresh()
             await loadHistory(reset: true)
             return true
@@ -462,6 +512,8 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             mutationError = nil
+            recoveryIssue = nil
+            workoutRefreshGrace = false
             await refresh()
             return true
         } catch {
@@ -524,9 +576,12 @@ final class AppModel: ObservableObject {
                 case .prescription:
                     let issued: IssuedPlanResponse = try await client.replay(entry, session: session)
                     prescriptionState = .issued(issued)
-                case .startWorkout, .addSet, .rateForm,
-                     .completeWorkout, .abandonWorkout:
+                case .startWorkout, .addSet, .rateForm:
                     activeWorkout = try await client.replay(entry, session: session)
+                    workoutRefreshGrace = true
+                case .completeWorkout, .abandonWorkout:
+                    activeWorkout = try await client.replay(entry, session: session)
+                    workoutRefreshGrace = false
                 }
             } catch let api as APIError {
                 if api.code == "idempotency_conflict" {
@@ -559,6 +614,26 @@ final class AppModel: ObservableObject {
         recoveryMessage = nil
         mutationError = nil
         mutationFailureAmbiguous = false
+    }
+
+    func clearRecoveryIssue() {
+        recoveryIssue = nil
+    }
+
+    func clearWorkoutRecovery() {
+        // Clear stale local state; the server remains the authority on the next refresh.
+        activeWorkout = nil
+        recoveryIssue = nil
+        workoutRefreshGrace = false
+        mutationError = nil
+    }
+
+    func abandonRecoveredWorkout() async {
+        guard !isSaving, activeWorkout != nil else { return }
+        let key = UUID().uuidString.lowercased()
+        if await abandonWorkout(idempotencyKey: key) {
+            recoveryIssue = nil
+        }
     }
 
     private func refreshPendingMutations() {
@@ -614,7 +689,9 @@ final class AppModel: ObservableObject {
         mutationFailureAmbiguous = false
         pendingMutations = []
         recoveryMessage = nil
+        recoveryIssue = nil
         isRecovering = false
+        workoutRefreshGrace = false
         pairedServerURL = store.serverURL
         phase = .pairing
         errorMessage = nil

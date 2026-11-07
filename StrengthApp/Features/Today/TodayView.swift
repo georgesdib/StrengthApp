@@ -79,6 +79,56 @@ struct TodayView: View {
                     }
                 }
 
+                if let issue = model.recoveryIssue {
+                    Section("Recovery") {
+                        switch issue {
+                        case .serverActiveWorkout(let workoutId, let sessionType):
+                            Text("The server has an active workout that this session did not have locally.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            Text("\(sessionType ?? "Workout") · \(workoutId)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                            NavigationLink {
+                                ActiveWorkoutView(model: model)
+                            } label: {
+                                Label("Resume server workout", systemImage: "arrow.clockwise")
+                            }
+                            .simultaneousGesture(TapGesture().onEnded {
+                                model.clearRecoveryIssue()
+                            })
+                            Button("Abandon server workout", role: .destructive) {
+                                Task { await model.abandonRecoveredWorkout() }
+                            }
+                            .disabled(model.isSaving)
+                            Button("Dismiss") { model.clearRecoveryIssue() }
+
+                        case .workoutEndedElsewhere(let workoutId):
+                            Text("Workout \(workoutId) is no longer active on the server. It may have been completed or abandoned elsewhere.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            Button("Refresh server state") {
+                                Task { await model.refresh() }
+                            }
+                            Button("Clear local state") {
+                                model.clearWorkoutRecovery()
+                            }
+
+                        case .prescriptionUnavailable(let reason):
+                            Text(reason)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            Button("Refresh server state") {
+                                Task {
+                                    await model.refresh()
+                                    model.clearRecoveryIssue()
+                                }
+                            }
+                            Button("Dismiss") { model.clearRecoveryIssue() }
+                        }
+                    }
+                }
+
                 Section("Training") {
                     trainingContent
                 }

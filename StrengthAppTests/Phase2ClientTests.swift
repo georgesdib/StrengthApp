@@ -614,6 +614,96 @@ final class Phase2AppModelTests: XCTestCase {
         )
     }
 
+    func testLaunchSurfacesServerActiveWorkoutForRecovery() async {
+        let activeToday = #"{"date":"2026-11-07","readiness":null,"readiness_score":null,"active_workout":"# + Fixtures.workoutInProgress + "}"
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(activeToday.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+
+        guard case .serverActiveWorkout(let workoutId, let sessionType) = model.recoveryIssue else {
+            return XCTFail("expected a server active workout recovery state")
+        }
+        XCTAssertEqual(workoutId, "workout-1")
+        XCTAssertEqual(sessionType, "squat")
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+    }
+
+    func testRefreshSurfacesWorkoutEndedElsewhere() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (200, Data(Fixtures.issuedPlan.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(
+            readinessAck: false, idempotencyKey: "issue-ended"
+        )
+        let started = await model.startWorkout(idempotencyKey: "start-ended")
+        XCTAssertTrue(started)
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+
+        await model.refresh()
+
+        guard case .workoutEndedElsewhere(let workoutId) = model.recoveryIssue else {
+            return XCTFail("expected a workout-ended recovery state")
+        }
+        XCTAssertEqual(workoutId, "workout-1")
+        XCTAssertNil(model.activeWorkout)
+    }
+
+    func testStartSurfacesConsumedPrescriptionRecovery() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (200, Data(Fixtures.issuedPlan.utf8))
+            case "/api/ios/v1/workouts":
+                return (410, Data(#"{"error":"issued plan has already been used","code":"plan_consumed"}"#.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(
+            readinessAck: false, idempotencyKey: "issue-consumed"
+        )
+        let started = await model.startWorkout(idempotencyKey: "start-consumed")
+        XCTAssertFalse(started)
+        guard case .prescriptionUnavailable = model.recoveryIssue else {
+            return XCTFail("expected a prescription recovery state")
+        }
+        guard case .idle = model.prescriptionState else {
+            return XCTFail("the unusable prescription should be cleared")
+        }
+    }
+
     func testReadinessGateBecomesState() async {
         let transport = StubTransport { request in
             switch request.url?.path {

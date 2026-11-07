@@ -6,6 +6,7 @@ struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var exerciseId = ""
+    @State private var selectedPlanItemIndex: Int?
     @State private var loadText = ""
     @State private var repsText = ""
     @State private var rirText = ""
@@ -37,6 +38,10 @@ struct ActiveWorkoutView: View {
         let planned = (workout.plan?.items ?? []).compactMap(\.exerciseId)
         let logged = (workout.sets ?? []).map(\.exerciseId)
         return Array(Set(planned + logged)).sorted()
+    }
+
+    private var planChoices: [PlanItemChoice] {
+        workout?.plan?.choices(for: exerciseId) ?? []
     }
 
     var body: some View {
@@ -122,6 +127,21 @@ struct ActiveWorkoutView: View {
                                 ForEach(exerciseOptions, id: \.self) { id in
                                     Text(Self.label(id)).tag(id)
                                 }
+                            }
+                            .onChange(of: exerciseId) { _, _ in
+                                selectedPlanItemIndex = nil
+                            }
+                            if planChoices.count > 1 {
+                                Picker("Prescription item", selection: $selectedPlanItemIndex) {
+                                    Text("Not attributed").tag(Int?.none)
+                                    ForEach(planChoices) { choice in
+                                        Text(choice.label).tag(Optional(choice.index))
+                                    }
+                                }
+                                .accessibilityIdentifier("set-plan-item")
+                                Text("This exercise appears more than once. Choose the exact prescription item, or leave it unattributed.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                             LabeledContent("Load (kg)") {
                                 TextField("optional", text: $loadText)
@@ -328,9 +348,12 @@ struct ActiveWorkoutView: View {
             return
         }
         let index = nextSetIndex(for: exerciseId, in: workout)
-        // A repeated exercise is ambiguous. Send nil rather than attributing to the first
-        // occurrence; the backend still logs the set and leaves the plan item unmatched.
-        let planIndex = workout.plan?.uniquePlanItemIndex(for: exerciseId)
+        // Unique exercises keep automatic attribution. A repeated exercise is only attributed
+        // when the owner selects the exact plan item; otherwise the safe nil fallback is kept.
+        let planIndex = workout.plan?.resolvedPlanItemIndex(
+            for: exerciseId,
+            selected: selectedPlanItemIndex
+        )
         let request = AddSetRequest(
             exerciseId: exerciseId,
             loadKg: load,

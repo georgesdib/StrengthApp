@@ -266,11 +266,45 @@ struct CompleteWorkoutRequest: Encodable, Equatable {
 }
 
 struct EmptyRequest: Encodable {}
+struct PlanItemChoice: Identifiable {
+    let index: Int
+    let item: PrescriptionItem
+
+    var id: Int { index }
+
+    var label: String {
+        var parts = ["Item \(index + 1)"]
+        if let sets = item.sets { parts.append("\(sets) sets") }
+        parts.append(item.repsLabel)
+        parts.append(item.loadLabel)
+        parts.append(item.effortLabel)
+        return parts.joined(separator: " · ")
+    }
+}
+
 extension PrescriptionPlan {
+    func choices(for exerciseId: String) -> [PlanItemChoice] {
+        items.enumerated()
+            .filter { $0.element.exerciseId == exerciseId }
+            .map { PlanItemChoice(index: $0.offset, item: $0.element) }
+    }
+
     /// The array offset only when the exercise appears exactly once. A repeated exercise is
     /// ambiguous and must remain unattributed rather than silently using the first match.
     func uniquePlanItemIndex(for exerciseId: String) -> Int? {
-        let matches = items.indices.filter { items[$0].exerciseId == exerciseId }
-        return matches.count == 1 ? matches[0] : nil
+        let matches = choices(for: exerciseId)
+        return matches.count == 1 ? matches[0].index : nil
+    }
+
+    /// Resolve the set attribution: auto for a unique exercise, explicit only for a valid
+    /// repeated-exercise selection, otherwise nil.
+    func resolvedPlanItemIndex(for exerciseId: String, selected: Int?) -> Int? {
+        let matches = choices(for: exerciseId)
+        if matches.count == 1 { return matches[0].index }
+        guard matches.count > 1, let selected,
+              matches.contains(where: { $0.index == selected }) else {
+            return nil
+        }
+        return selected
     }
 }

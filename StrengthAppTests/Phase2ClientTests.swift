@@ -18,6 +18,27 @@ final class Phase2ClientTests: XCTestCase {
         return dictionary
     }
 
+    func testPlanItemChoicesListRepeatedOccurrences() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let plan = try decoder.decode(
+            PrescriptionPlan.self,
+            from: Data(#"{"items":[{"order_index":0,"exercise_id":"competition_squat","sets":3,"reps_low":5,"reps_high":5,"load_kg":140,"rir_target":2},{"order_index":1,"exercise_id":"bench_press","sets":4,"reps_low":5,"reps_high":5,"load_kg":100,"rir_target":2},{"order_index":2,"exercise_id":"competition_squat","sets":2,"reps_low":3,"reps_high":3,"load_kg":120,"rir_target":3}]}"#.utf8)
+        )
+        let choices = plan.choices(for: "competition_squat")
+        XCTAssertEqual(choices.count, 2)
+        XCTAssertEqual(choices.map(\.index), [0, 2])
+        XCTAssertEqual(choices[0].label, "Item 1 · 3 sets · 5 · 140.0 kg · RIR 2")
+        XCTAssertEqual(choices[1].label, "Item 3 · 2 sets · 3 · 120.0 kg · RIR 3")
+        XCTAssertNil(plan.uniquePlanItemIndex(for: "competition_squat"))
+        XCTAssertEqual(plan.resolvedPlanItemIndex(for: "competition_squat", selected: 2), 2)
+        XCTAssertNil(plan.resolvedPlanItemIndex(for: "competition_squat", selected: nil))
+        XCTAssertNil(plan.resolvedPlanItemIndex(for: "competition_squat", selected: 99))
+        XCTAssertEqual(plan.choices(for: "bench_press").count, 1)
+        XCTAssertEqual(plan.uniquePlanItemIndex(for: "bench_press"), 1)
+        XCTAssertEqual(plan.resolvedPlanItemIndex(for: "bench_press", selected: nil), 1)
+    }
+
     func testOperationKeyReusesOnlyTheExactBody() {
         var token = OperationKey<AddSetRequest>()
         let first = AddSetRequest(

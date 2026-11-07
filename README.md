@@ -81,8 +81,8 @@ Intelligence/PCC UI in Phase 2.
   data protection and is excluded from backup. It is capped at 16 entries, retained 30 days and
   replayed automatically for 28 days; conflicting or stale entries stop and require review/discard.
   It is not an offline queue: only attempted mutations are recorded, and new mutations are blocked
-  while an unresolved one exists. Unit/simulator verification passes; a dedicated physical-iPhone
-  R1 check remains a follow-up.
+  while an unresolved one exists. R1 is closed 2026-11-07; verification is unit/simulator based
+  and a separate physical R1 pass was not performed.
 - 401/403 clears the local pairing and returns to the pairing screen. Other 4xx show the server
   message/code; 5xx shows a generic failure.
 - Plain HTTP on the trusted home LAN. No TLS, proxy, CA or remote access. No analytics, telemetry,

@@ -3,8 +3,8 @@
 **Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07** — both
 simulator-verified and owner-confirmed on the physical iPhone. Phase 3 is not started.
 
-R1 durable pending-mutation journal is closed post-acceptance; R3 explicit plan-item selection and
-R5 workout recovery/reconciliation UX are implemented.
+R1 durable pending-mutation journal, R3 explicit plan-item selection and R5 workout recovery/
+reconciliation UX are closed.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active

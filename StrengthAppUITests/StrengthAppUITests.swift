@@ -161,6 +161,20 @@ final class StrengthAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["0.62 m/s"].waitForExistence(timeout: 5))
         attachScreenshot(app, name: "12-set-logged")
 
+        // Force-quit after the acknowledged set and recover the active workout through Today.
+        app.terminate()
+        app.launch()
+        let resume = app.buttons["resume-workout"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 25))
+        resume.tap()
+        XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 15))
+        for _ in 0..<4 {
+            if app.staticTexts["0.62 m/s"].exists { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(app.staticTexts["0.62 m/s"].waitForExistence(timeout: 10))
+        attachScreenshot(app, name: "12b-workout-recovered")
+
         let finish = app.buttons["finish-workout"]
         scrollTo(finish, in: app)
         finish.tap()

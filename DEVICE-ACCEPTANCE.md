@@ -170,6 +170,9 @@ database before treating Phase 2 as accepted.
 
 - [ ] With the server stopped, a mutation shows a clear error; the app does not claim the save.
       Retrying the same action after the server returns does not duplicate the plan, set or session.
+- [ ] Force-quit after an acknowledged set and relaunch; the active workout and set are recovered
+      through Today. Note the Phase 2 limitation: a response lost before acknowledgement cannot be
+      replayed after termination because there is no durable pending-mutation journal (roadmap R1).
 - [ ] Changing the plan's Idempotency-Key with a different body is rejected by the server; the app
       shows the conflict instead of silently discarding it.
 - [ ] Set mutations_enabled: false, restart the server and refresh: bootstrap/read screens still
@@ -199,6 +202,7 @@ database before treating Phase 2 as accepted.
 | Abandon | pending | |
 | Progress | pending | |
 | Retry/idempotency and disabled switch | pending | |
+| Force-quit/relaunch recovery | pending | acknowledged set only; ambiguous post-termination replay is deferred (R1) |
 | Secrets and rollback | pending | |
 
 Owner confirmation: pending  ·  Build: Phase 2  ·  Device: iPhone 16 Pro Max (iPhone17,2),

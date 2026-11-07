@@ -82,12 +82,13 @@ Intelligence/PCC UI in Phase 2.
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 39 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 43 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
-idempotency headers, server conflict code/details decoding, progress decoding, and the
-issue/start/add-set/complete model flow.
+idempotency headers, server conflict code/details decoding, progress decoding, the
+issue/start/add-set/complete model flow, body-aware retry keys, unique-only plan-item attribution,
+duplicate-tap guarding and ambiguous-failure classification.
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
@@ -97,7 +98,7 @@ xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
 
 The optional UI smoke tests (`StrengthAppUITests`) verify pairing, Today, History, Settings,
 relaunch persistence and Forget, plus the Phase 2 flow (readiness → prescription → start → add a
-manual-VBT set → finish → Progress) against a real local server. They are skipped unless
+manual-VBT set → force-quit/relaunch recovery → finish → Progress) against a real local server. They are skipped unless
 `StrengthAppUITests/LiveConfig.swift` is generated with `enabled = true` and a fresh pairing code;
 the committed copy is disabled so the normal gate does not need a server. The shared scheme
 includes both test targets. The simulator test run needs normal (ad-hoc) simulator signing so the

@@ -18,6 +18,45 @@ final class Phase2ClientTests: XCTestCase {
         return dictionary
     }
 
+    func testOperationKeyReusesOnlyTheExactBody() {
+        var token = OperationKey<AddSetRequest>()
+        let first = AddSetRequest(
+            exerciseId: "competition_squat", loadKg: 140, reps: 3,
+            rir: 2, velocityMps: 0.62, setIndex: 1, planItemIndex: 0
+        )
+        let key = token.use(first)
+        XCTAssertEqual(token.use(first), key)
+
+        let changed = AddSetRequest(
+            exerciseId: "competition_squat", loadKg: 140, reps: 4,
+            rir: 2, velocityMps: 0.62, setIndex: 1, planItemIndex: 0
+        )
+        let changedKey = token.use(changed)
+        XCTAssertNotEqual(changedKey, key)
+
+        token.acknowledged()
+        XCTAssertNil(token.body)
+        XCTAssertNotEqual(token.use(changed), changedKey)
+    }
+
+    func testPlanItemAttributionOnlyUsesAUniqueExercise() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let repeated = try decoder.decode(
+            PrescriptionPlan.self,
+            from: Data(#"{"items":[{"order_index":0,"exercise_id":"competition_squat"},{"order_index":1,"exercise_id":"bench_press"},{"order_index":2,"exercise_id":"competition_squat"}]}"#.utf8)
+        )
+        XCTAssertNil(repeated.uniquePlanItemIndex(for: "competition_squat"))
+        XCTAssertEqual(repeated.uniquePlanItemIndex(for: "bench_press"), 1)
+        XCTAssertNil(repeated.uniquePlanItemIndex(for: "deadlift"))
+
+        let unique = try decoder.decode(
+            PrescriptionPlan.self,
+            from: Data(#"{"items":[{"order_index":0,"exercise_id":"competition_squat"},{"order_index":1,"exercise_id":"bench_press"}]}"#.utf8)
+        )
+        XCTAssertEqual(unique.uniquePlanItemIndex(for: "competition_squat"), 0)
+        XCTAssertEqual(unique.uniquePlanItemIndex(for: "bench_press"), 1)
+    }
     func testReadinessWriteUsesSnakeCaseAndIdempotency() async throws {
         let transport = StubTransport { _ in
             (200, Data(Fixtures.readinessWrite.utf8))
@@ -228,7 +267,7 @@ final class Phase2AppModelTests: XCTestCase {
     }
 
     private func pairedModel(
-        transport: StubTransport
+        transport: HTTPTransport
     ) -> (AppModel, UserDefaults, String, InMemoryTokenStore) {
         let (defaults, suite) = makeDefaults()
         let store = PairedStore(defaults: defaults)
@@ -308,6 +347,83 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertNil(model.activeWorkout)
         XCTAssertGreaterThanOrEqual(model.sessions.count, 1)
         XCTAssertNotNil(tokens.token)
+    }
+
+    func testConcurrentDuplicateAddSetCallsOnlySendOneMutation() async {
+        let transport = AsyncStubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (200, Data(Fixtures.issuedPlan.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            case "/api/ios/v1/workouts/workout-1/sets":
+                try await Task.sleep(nanoseconds: 200_000_000)
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(
+            readinessAck: false, idempotencyKey: "issue-duplicate"
+        )
+        let started = await model.startWorkout(idempotencyKey: "start-duplicate")
+        XCTAssertTrue(started)
+
+        let body = AddSetRequest(
+            exerciseId: "competition_squat", loadKg: 140, reps: 3,
+            rir: 2, velocityMps: 0.62, setIndex: 1, planItemIndex: 0
+        )
+        async let first = model.addSet(body, idempotencyKey: "set-duplicate")
+        async let second = model.addSet(body, idempotencyKey: "set-duplicate")
+        let results = await [first, second]
+        XCTAssertEqual(results.filter { $0 }.count, 1)
+        let setRequests = transport.requests.filter {
+            $0.url?.path == "/api/ios/v1/workouts/workout-1/sets"
+        }
+        XCTAssertEqual(setRequests.count, 1)
+        XCTAssertEqual(setRequests.first?.value(forHTTPHeaderField: "Idempotency-Key"),
+                       "set-duplicate")
+    }
+
+    func testAmbiguousFailureIsMarkedAndDefinitiveFourHundredIsNot() async {
+        let transport = AsyncStubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (200, Data(Fixtures.issuedPlan.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            case "/api/ios/v1/workouts/workout-1/sets":
+                return (500, Data())
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(
+            readinessAck: false, idempotencyKey: "issue-ambiguous"
+        )
+        let started = await model.startWorkout(idempotencyKey: "start-ambiguous")
+        XCTAssertTrue(started)
+        let body = AddSetRequest(
+            exerciseId: "competition_squat", loadKg: 140, reps: 3,
+            rir: 2, velocityMps: nil, setIndex: 1, planItemIndex: 0
+        )
+        let result = await model.addSet(body, idempotencyKey: "set-ambiguous")
+        XCTAssertFalse(result)
+        XCTAssertTrue(model.mutationFailureAmbiguous)
     }
 
     func testReadinessGateBecomesState() async {

@@ -10,19 +10,20 @@ struct ActiveWorkoutView: View {
     @State private var repsText = ""
     @State private var rirText = ""
     @State private var velocityText = ""
-    @State private var addKey = UUID().uuidString.lowercased()
+    @State private var addOperation = OperationKey<AddSetRequest>()
     @State private var addError: String?
 
     @State private var ratingExercise = ""
     @State private var rating = 4
-    @State private var formKey = UUID().uuidString.lowercased()
+    @State private var formOperation = OperationKey<FormRatingRequest>()
     @State private var formError: String?
 
     @State private var rpe = 7
     @State private var notRecorded = false
     @State private var durationText = ""
     @State private var notes = ""
-    @State private var finishKey = UUID().uuidString.lowercased()
+    @State private var finishOperation = OperationKey<CompleteWorkoutRequest>()
+    @State private var finishLocked = false
     @State private var finishError: String?
 
     @State private var abandonKey = UUID().uuidString.lowercased()
@@ -192,22 +193,31 @@ struct ActiveWorkoutView: View {
                         }
 
                         Section("Finish") {
+                            if finishLocked {
+                                Text("The finish response was lost. Retry the same finish; editing is locked until the server state is known.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                             Toggle("Session RPE not recorded", isOn: $notRecorded)
+                                .disabled(finishLocked)
                             if !notRecorded {
                                 Picker("Session RPE", selection: $rpe) {
                                     ForEach(1...10, id: \.self) { value in
                                         Text("\(value)").tag(value)
                                     }
                                 }
+                                .disabled(finishLocked)
                             }
                             LabeledContent("Duration (min)") {
                                 TextField("optional", text: $durationText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .accessibilityIdentifier("finish-duration")
+                                    .disabled(finishLocked)
                             }
                             TextField("Notes", text: $notes, axis: .vertical)
                                 .lineLimit(2...4)
+                                .disabled(finishLocked)
                             if let error = finishError {
                                 Text(error).foregroundStyle(.red)
                             }
@@ -216,7 +226,11 @@ struct ActiveWorkoutView: View {
                             } label: {
                                 HStack {
                                     Spacer()
-                                    if model.isSaving { ProgressView() } else { Text("Finish workout") }
+                                    if model.isSaving {
+                                        ProgressView()
+                                    } else {
+                                        Text(finishLocked ? "Retry finish" : "Finish workout")
+                                    }
                                     Spacer()
                                 }
                             }
@@ -229,6 +243,7 @@ struct ActiveWorkoutView: View {
                                 confirmingAbandon = true
                             }
                             .accessibilityIdentifier("abandon-workout")
+                            .disabled(finishLocked || model.isSaving)
                             if let error = abandonError {
                                 Text(error).foregroundStyle(.red)
                             }
@@ -313,9 +328,9 @@ struct ActiveWorkoutView: View {
             return
         }
         let index = nextSetIndex(for: exerciseId, in: workout)
-        let planIndex = (workout.plan?.items ?? []).firstIndex {
-            $0.exerciseId == exerciseId
-        }
+        // A repeated exercise is ambiguous. Send nil rather than attributing to the first
+        // occurrence; the backend still logs the set and leaves the plan item unmatched.
+        let planIndex = workout.plan?.uniquePlanItemIndex(for: exerciseId)
         let request = AddSetRequest(
             exerciseId: exerciseId,
             loadKg: load,
@@ -325,12 +340,13 @@ struct ActiveWorkoutView: View {
             setIndex: index,
             planItemIndex: planIndex
         )
-        if await model.addSet(request, idempotencyKey: addKey) {
+        let key = addOperation.use(request)
+        if await model.addSet(request, idempotencyKey: key) {
             loadText = ""
             repsText = ""
             rirText = ""
             velocityText = ""
-            addKey = UUID().uuidString.lowercased()
+            addOperation.acknowledged()
             addError = nil
         } else {
             addError = model.mutationError
@@ -344,8 +360,9 @@ struct ActiveWorkoutView: View {
             rating: rating,
             note: nil
         )
-        if await model.rateForm(request, idempotencyKey: formKey) {
-            formKey = UUID().uuidString.lowercased()
+        let key = formOperation.use(request)
+        if await model.rateForm(request, idempotencyKey: key) {
+            formOperation.acknowledged()
         } else {
             formError = model.mutationError
         }
@@ -366,14 +383,22 @@ struct ActiveWorkoutView: View {
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? nil : notes
         )
-        if await model.completeWorkout(request, idempotencyKey: finishKey) {
+        let key = finishLocked ? finishOperation.key : finishOperation.use(request)
+        if await model.completeWorkout(request, idempotencyKey: key) {
+            finishOperation.acknowledged()
             dismiss()
         } else {
             finishError = model.mutationError
+            // A lost response is ambiguous: lock the body and retry the exact operation.
+            // A definitive 4xx can still be corrected with a new body.
+            if model.mutationFailureAmbiguous {
+                finishLocked = true
+            }
         }
     }
 
     private func abandon() async {
+        guard !finishLocked else { return }
         abandonError = nil
         if await model.abandonWorkout(idempotencyKey: abandonKey) {
             dismiss()

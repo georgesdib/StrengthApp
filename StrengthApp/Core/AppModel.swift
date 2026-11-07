@@ -38,6 +38,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var isSaving = false
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
+    @Published private(set) var mutationFailureAmbiguous = false
 
     @Published var serverURLText: String
     @Published var pairingCodeText: String = ""
@@ -225,8 +226,9 @@ final class AppModel: ObservableObject {
         note: String?,
         idempotencyKey: String
     ) async -> Bool {
-        guard let session else { return false }
+        guard !isSaving, let session else { return false }
         isSaving = true
+        mutationFailureAmbiguous = false
         defer { isSaving = false }
         do {
             _ = try await client.writeReadiness(
@@ -248,8 +250,9 @@ final class AppModel: ObservableObject {
         confirmations: [String: Bool]? = nil,
         idempotencyKey: String
     ) async {
-        guard let session else { return }
+        guard !isSaving, let session else { return }
         isSaving = true
+        mutationFailureAmbiguous = false
         defer { isSaving = false }
         mutationError = nil
         do {
@@ -286,13 +289,15 @@ final class AppModel: ObservableObject {
     func clearPrescription() {
         prescriptionState = .idle
         mutationError = nil
+        mutationFailureAmbiguous = false
     }
 
     func startWorkout(idempotencyKey: String) async -> Bool {
-        guard let session, case .issued(let issued) = prescriptionState else {
+        guard !isSaving, let session, case .issued(let issued) = prescriptionState else {
             return false
         }
         isSaving = true
+        mutationFailureAmbiguous = false
         defer { isSaving = false }
         do {
             activeWorkout = try await client.startWorkout(
@@ -322,8 +327,9 @@ final class AppModel: ObservableObject {
     }
 
     func addSet(_ body: AddSetRequest, idempotencyKey: String) async -> Bool {
-        guard let session, let workout = activeWorkout else { return false }
+        guard !isSaving, let session, let workout = activeWorkout else { return false }
         isSaving = true
+        mutationFailureAmbiguous = false
         defer { isSaving = false }
         do {
             activeWorkout = try await client.addSet(
@@ -341,8 +347,9 @@ final class AppModel: ObservableObject {
     }
 
     func rateForm(_ body: FormRatingRequest, idempotencyKey: String) async -> Bool {
-        guard let session, let workout = activeWorkout else { return false }
+        guard !isSaving, let session, let workout = activeWorkout else { return false }
         isSaving = true
+        mutationFailureAmbiguous = false
         defer { isSaving = false }
         do {
             activeWorkout = try await client.rateForm(
@@ -363,8 +370,9 @@ final class AppModel: ObservableObject {
         _ body: CompleteWorkoutRequest,
         idempotencyKey: String
     ) async -> Bool {
-        guard let session, let workout = activeWorkout else { return false }
+        guard !isSaving, let session, let workout = activeWorkout else { return false }
         isSaving = true
+        mutationFailureAmbiguous = false
         defer { isSaving = false }
         do {
             activeWorkout = try await client.completeWorkout(
@@ -378,14 +386,19 @@ final class AppModel: ObservableObject {
             await loadHistory(reset: true)
             return true
         } catch {
+            if let api = error as? APIError,
+               ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
+                await refresh()
+            }
             handleMutation(error)
             return false
         }
     }
 
     func abandonWorkout(idempotencyKey: String) async -> Bool {
-        guard let session, let workout = activeWorkout else { return false }
+        guard !isSaving, let session, let workout = activeWorkout else { return false }
         isSaving = true
+        mutationFailureAmbiguous = false
         defer { isSaving = false }
         do {
             activeWorkout = try await client.abandonWorkout(
@@ -397,6 +410,10 @@ final class AppModel: ObservableObject {
             await refresh()
             return true
         } catch {
+            if let api = error as? APIError,
+               ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
+                await refresh()
+            }
             handleMutation(error)
             return false
         }
@@ -444,6 +461,7 @@ final class AppModel: ObservableObject {
         isSaving = false
         isLoadingProgress = false
         mutationError = nil
+        mutationFailureAmbiguous = false
         pairedServerURL = store.serverURL
         phase = .pairing
         errorMessage = nil
@@ -452,9 +470,26 @@ final class AppModel: ObservableObject {
 
     private func handleMutation(_ error: Error) {
         if let api = error as? APIError, api.isAuthenticationFailure {
+            mutationFailureAmbiguous = false
             forgetLocally(message: api.errorDescription)
         } else {
             mutationError = message(for: error)
+            mutationFailureAmbiguous = Self.isAmbiguous(error)
+        }
+    }
+
+    /// A transport failure, a decoding failure, or a 5xx may have reached the server even though
+    /// the client has no definitive response. A 4xx without a response body is definitive.
+    private static func isAmbiguous(_ error: Error) -> Bool {
+        guard let api = error as? APIError else { return true }
+        switch api {
+        case .transport, .decoding:
+            return true
+        case .http(let status, _, _), .server(let status, _, _, _, _):
+            return status >= 500
+        case .invalidBaseURL, .invalidPairingCode, .invalidLabel,
+             .unauthorized, .forbidden:
+            return false
         }
     }
 

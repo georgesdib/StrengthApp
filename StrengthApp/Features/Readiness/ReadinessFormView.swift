@@ -33,8 +33,7 @@ struct ReadinessFormView: View {
     @State private var text: [String: String] = [:]
     @State private var note = ""
     @State private var localError: String?
-    @State private var submittedValues: [String: Double]?
-    @State private var submittedKey = UUID().uuidString.lowercased()
+    @State private var operation = OperationKey<ReadinessWriteRequest>()
 
     var body: some View {
         Form {
@@ -142,19 +141,17 @@ struct ReadinessFormView: View {
             return
         }
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key: String
-        if values == submittedValues {
-            key = submittedKey
-        } else {
-            key = UUID().uuidString.lowercased()
-            submittedKey = key
-            submittedValues = values
-        }
+        let request = ReadinessWriteRequest(
+            values: values,
+            note: trimmedNote.isEmpty ? nil : trimmedNote
+        )
+        let key = operation.use(request)
         if await model.saveReadiness(
             values: values,
-            note: trimmedNote.isEmpty ? nil : trimmedNote,
+            note: request.note,
             idempotencyKey: key
         ) {
+            operation.acknowledged()
             dismiss()
         }
     }

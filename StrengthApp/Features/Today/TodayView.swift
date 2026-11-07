@@ -197,6 +197,14 @@ struct TodayView: View {
     }
 
     private func startPrescription() {
+        // If the last issue response was lost, Start is not a new plan request: retry the exact
+        // operation and body rather than creating a different plan.
+        if case .failed = model.prescriptionState,
+           model.mutationFailureAmbiguous,
+           lastIssueKey != nil {
+            retryIssue()
+            return
+        }
         pendingReadinessAck = false
         lastIssueAck = false
         lastIssueConfirmations = nil
@@ -213,9 +221,7 @@ struct TodayView: View {
         pendingReadinessAck = acknowledge
         lastIssueAck = acknowledge
         lastIssueConfirmations = nil
-        if lastIssueKey == nil {
-            lastIssueKey = UUID().uuidString.lowercased()
-        }
+        lastIssueKey = UUID().uuidString.lowercased()
         guard let key = lastIssueKey else { return }
         Task {
             await model.issuePrescription(
@@ -234,9 +240,7 @@ struct TodayView: View {
         )
         lastIssueConfirmations = confirmations
         lastIssueAck = pendingReadinessAck
-        if lastIssueKey == nil {
-            lastIssueKey = UUID().uuidString.lowercased()
-        }
+        lastIssueKey = UUID().uuidString.lowercased()
         guard let key = lastIssueKey else { return }
         Task {
             await model.issuePrescription(

@@ -228,7 +228,7 @@ struct ProgressAttendance: Decodable {
 
 // MARK: - Requests
 
-struct ReadinessWriteRequest: Encodable {
+struct ReadinessWriteRequest: Encodable, Equatable {
     let values: [String: Double]
     let note: String?
 }
@@ -242,7 +242,7 @@ struct StartWorkoutRequest: Encodable {
     let issuedPlanId: String
 }
 
-struct AddSetRequest: Encodable {
+struct AddSetRequest: Encodable, Equatable {
     let exerciseId: String
     let loadKg: Double?
     let reps: Int
@@ -252,13 +252,13 @@ struct AddSetRequest: Encodable {
     let planItemIndex: Int?
 }
 
-struct FormRatingRequest: Encodable {
+struct FormRatingRequest: Encodable, Equatable {
     let exerciseId: String
     let rating: Int
     let note: String?
 }
 
-struct CompleteWorkoutRequest: Encodable {
+struct CompleteWorkoutRequest: Encodable, Equatable {
     let sessionRpe: Double?
     let notRecorded: Bool
     let durationMin: Double?
@@ -266,3 +266,11 @@ struct CompleteWorkoutRequest: Encodable {
 }
 
 struct EmptyRequest: Encodable {}
+extension PrescriptionPlan {
+    /// The array offset only when the exercise appears exactly once. A repeated exercise is
+    /// ambiguous and must remain unattributed rather than silently using the first match.
+    func uniquePlanItemIndex(for exerciseId: String) -> Int? {
+        let matches = items.indices.filter { items[$0].exerciseId == exerciseId }
+        return matches.count == 1 ? matches[0] : nil
+    }
+}

@@ -24,6 +24,27 @@ final class StubTransport: HTTPTransport {
     }
 }
 
+final class AsyncStubTransport: HTTPTransport {
+    var handler: (URLRequest) async throws -> (Int, Data)
+    private(set) var requests: [URLRequest] = []
+
+    init(handler: @escaping (URLRequest) async throws -> (Int, Data)) {
+        self.handler = handler
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let (status, data) = try await handler(request)
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: status,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        return (data, response)
+    }
+}
+
 final class InMemoryTokenStore: TokenStoring {
     var token: String?
 

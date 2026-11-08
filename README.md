@@ -61,13 +61,15 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
   shown on the same form with manual override; missing fields stay missing; errors stay visible.
 - **Workout ready** — once the server finishes building, Today shows a ready card with the
   session type, date, exercise count and warnings. Start workout starts by issued-plan id and
-  opens the active workout screen directly; no preview sheet opens automatically.
+  opens the active workout screen directly; no preview sheet opens automatically. Request workout
+  can ask for server-decided, top-set/back-off or straight-set main-lift structure.
 - **Workout** — plan and logged sets, add set with load/reps/RIR, optional mean velocity, an optional
-  per-rep velocity disclosure with a rep summary, an explicit prescription-item picker when the
-  exercise appears more than once (default Not attributed), and form ratings that show the current
-  value and label a later save as a correction, additive plan editing (add/swap/remove and set
-  count) through the authenticated online exercise catalogue, finish with session RPE or explicit
-  not-recorded, abandon with confirmation.
+  per-rep velocity disclosure with a rep summary and comma/space-separated input, an explicit
+  prescription-item picker when the exercise appears more than once (default Not attributed), and
+  form ratings that show the current value and label a later save as a correction, additive plan
+  editing (add/swap/remove and set count) through the authenticated online exercise catalogue,
+  finish with one sRPE picker (Not recorded or 1–10), optional productivity (Not recorded or 1–5),
+  abandon with confirmation.
 - **History** — paginated sessions with sets, tonnage, duration, main lifts and review state;
   tap a session for a read-only outline, duration and set summary; load more, empty and error states.
 - **Progress** — the server dashboard: sRPE coverage, performance points, weekly volume, attendance
@@ -105,7 +107,7 @@ offline queue, per-rep VBT, review/rubric or Apple Intelligence/PCC UI. Plan edi
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 93 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 94 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and

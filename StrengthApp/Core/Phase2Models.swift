@@ -112,6 +112,9 @@ struct PlanSettings: Codable, Equatable {
     var sessionType: String = "auto"
     var minimumSession: Bool = false
     var minimumTargetMinutes: Int?
+    /// nil lets the server/resolver decide; true asks for top set/back-off; false asks for
+    /// straight sets. The server still owns eligibility and every load/repetition decision.
+    var topSet: Bool? = nil
 }
 
 /// The 202 acknowledgement: the request exists, the plan does not yet.
@@ -463,19 +466,22 @@ struct CompleteWorkoutRequest: Codable, Equatable {
     let durationMin: Double?
     let notes: String?
     let endedAt: String?
+    let productivity: Int?
 
     init(
         sessionRpe: Double?,
         notRecorded: Bool,
         durationMin: Double?,
         notes: String?,
-        endedAt: String? = nil
+        endedAt: String? = nil,
+        productivity: Int? = nil
     ) {
         self.sessionRpe = sessionRpe
         self.notRecorded = notRecorded
         self.durationMin = durationMin
         self.notes = notes
         self.endedAt = endedAt
+        self.productivity = productivity
     }
 }
 

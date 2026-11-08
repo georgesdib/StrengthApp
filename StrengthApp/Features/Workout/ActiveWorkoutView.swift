@@ -21,8 +21,8 @@ struct ActiveWorkoutView: View {
     @State private var formOperation = OperationKey<FormRatingRequest>()
     @State private var formError: String?
 
-    @State private var rpe = 7
-    @State private var notRecorded = false
+    @State private var rpe: Int? = 7
+    @State private var productivity: Int? = nil
     @State private var durationText = ""
     @State private var notes = ""
     @State private var finishOperation = OperationKey<CompleteWorkoutRequest>()
@@ -295,7 +295,9 @@ struct ActiveWorkoutView: View {
                                 isExpanded: $showingRepVelocity
                             ) {
                                 TextField("e.g. 0.62, 0.58, 0.55", text: $repVelocityText)
-                                    .keyboardType(.decimalPad)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
                                     .accessibilityIdentifier("set-rep-velocities")
                                 Text("Comma or space separated m/s for reps 1..n. Leave the mean empty and the server derives it.")
                                     .font(.caption)
@@ -367,16 +369,20 @@ struct ActiveWorkoutView: View {
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
-                            Toggle("Session RPE not recorded", isOn: $notRecorded)
-                                .disabled(finishLocked)
-                            if !notRecorded {
-                                Picker("Session RPE", selection: $rpe) {
-                                    ForEach(1...10, id: \.self) { value in
-                                        Text("\(value)").tag(value)
-                                    }
+                            Picker("Session RPE", selection: $rpe) {
+                                Text("Not recorded").tag(Int?.none)
+                                ForEach(1...10, id: \.self) { value in
+                                    Text("\(value)").tag(Int?.some(value))
                                 }
-                                .disabled(finishLocked)
                             }
+                            .disabled(finishLocked)
+                            Picker("Productivity", selection: $productivity) {
+                                Text("Not recorded").tag(Int?.none)
+                                ForEach(1...5, id: \.self) { value in
+                                    Text(Self.productivityLabel(value)).tag(Int?.some(value))
+                                }
+                            }
+                            .disabled(finishLocked)
                             LabeledContent("Duration (min)") {
                                 TextField("measured automatically", text: $durationText)
                                     .keyboardType(.decimalPad)
@@ -666,11 +672,12 @@ struct ActiveWorkoutView: View {
             return
         }
         let request = CompleteWorkoutRequest(
-            sessionRpe: notRecorded ? nil : Double(rpe),
-            notRecorded: notRecorded,
+            sessionRpe: rpe.map(Double.init),
+            notRecorded: rpe == nil,
             durationMin: duration,
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? nil : notes
+                ? nil : notes,
+            productivity: productivity
         )
         let key = finishLocked ? finishOperation.key : finishOperation.use(request)
         if await model.completeWorkout(request, idempotencyKey: key) {
@@ -712,6 +719,17 @@ struct ActiveWorkoutView: View {
     private func parseInt(_ text: String) -> Int? {
         let value = text.trimmingCharacters(in: .whitespaces)
         return value.isEmpty ? nil : Int(value)
+    }
+
+    private static func productivityLabel(_ value: Int) -> String {
+        switch value {
+        case 1: return "1 — not at all"
+        case 2: return "2 — slightly"
+        case 3: return "3 — moderately"
+        case 4: return "4 — very"
+        case 5: return "5 — extremely"
+        default: return "\(value)"
+        }
     }
 
     private static func label(_ value: String) -> String {

@@ -780,6 +780,33 @@ struct PlanSettingsView: View {
         SessionOption(id: "accessory", label: "Accessory"),
     ]
 
+    private enum MainLiftStructure: String, CaseIterable, Identifiable {
+        case server = "Server decides"
+        case topSet = "Top set + back-off"
+        case straight = "Straight sets"
+
+        var id: String { rawValue }
+    }
+
+    private var structure: Binding<MainLiftStructure> {
+        Binding(
+            get: {
+                switch settings.topSet {
+                case .some(true): return .topSet
+                case .some(false): return .straight
+                case nil: return .server
+                }
+            },
+            set: { value in
+                switch value {
+                case .server: settings.topSet = nil
+                case .topSet: settings.topSet = true
+                case .straight: settings.topSet = false
+                }
+            }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -789,6 +816,17 @@ struct PlanSettingsView: View {
                             Text(option.label).tag(option.id)
                         }
                     }
+                }
+                Section("Main-lift structure") {
+                    Picker("Structure", selection: structure) {
+                        ForEach(MainLiftStructure.allCases) { option in
+                            Text(option.rawValue).tag(option)
+                        }
+                    }
+                    .accessibilityIdentifier("main-lift-structure")
+                    Text("Top set/back-off is applied by the server only when the resolver supports it for this session. Straight sets asks for no top-set structure.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Length") {
                     Toggle("Allow a minimum session", isOn: $settings.minimumSession)
@@ -805,7 +843,7 @@ struct PlanSettingsView: View {
                     }
                 }
                 Section {
-                    Text("The server builds the prescription. This only chooses the session type and whether a shortened session is acceptable.")
+                    Text("The server builds the prescription. This only chooses the session type, main-lift structure and whether a shortened session is acceptable. With the resolver enabled, the server uses it to build the plan.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

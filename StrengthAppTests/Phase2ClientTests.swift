@@ -1041,6 +1041,25 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertFalse(model.offlineSyncError?.isEmpty ?? true)
     }
 
+    func testTopSetAndProductivityEncodeForTheServer() throws {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let settings = try encoder.encode(
+            PlanSettings(sessionType: "squat", topSet: true)
+        )
+        let settingsText = try XCTUnwrap(String(data: settings, encoding: .utf8))
+        XCTAssertTrue(settingsText.contains("\"top_set\":true"))
+
+        let complete = try encoder.encode(
+            CompleteWorkoutRequest(
+                sessionRpe: 7, notRecorded: false, durationMin: 45,
+                notes: nil, productivity: 4
+            )
+        )
+        let completeText = try XCTUnwrap(String(data: complete, encoding: .utf8))
+        XCTAssertTrue(completeText.contains("\"productivity\":4"))
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

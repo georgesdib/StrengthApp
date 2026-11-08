@@ -87,22 +87,37 @@ struct HealthKitReadinessObservation: Equatable {
     }
 }
 
+enum HealthKitMetricStatus: Equatable {
+    case eligible
+    case missing
+    case stale
+}
+
 struct HealthKitReadinessSelection: Equatable {
     let hrv: HealthKitReadinessObservation?
     let rhr: HealthKitReadinessObservation?
     let bodyweight: HealthKitReadinessObservation?
     let staleFields: Set<HealthKitReadinessField>
+    let metricStates: [HealthKitReadinessField: HealthKitMetricStatus]
 
     init(
         hrv: HealthKitReadinessObservation?,
         rhr: HealthKitReadinessObservation?,
         bodyweight: HealthKitReadinessObservation? = nil,
-        staleFields: Set<HealthKitReadinessField>
+        staleFields: Set<HealthKitReadinessField>,
+        metricStates: [HealthKitReadinessField: HealthKitMetricStatus]? = nil
     ) {
         self.hrv = hrv
         self.rhr = rhr
         self.bodyweight = bodyweight
         self.staleFields = staleFields
+        self.metricStates = metricStates ?? [
+            .hrvMs: hrv != nil ? .eligible : (staleFields.contains(.hrvMs) ? .stale : .missing),
+            .rhrBpm: rhr != nil ? .eligible : (staleFields.contains(.rhrBpm) ? .stale : .missing),
+            .bodyweightKg: bodyweight != nil
+                ? .eligible
+                : (staleFields.contains(.bodyweightKg) ? .stale : .missing),
+        ]
     }
 
     var isEmpty: Bool { hrv == nil && rhr == nil && bodyweight == nil }
@@ -110,6 +125,10 @@ struct HealthKitReadinessSelection: Equatable {
 
     var observations: [HealthKitReadinessObservation] {
         [hrv, rhr, bodyweight].compactMap { $0 }
+    }
+
+    func status(for field: HealthKitReadinessField) -> HealthKitMetricStatus {
+        metricStates[field] ?? .missing
     }
 
     /// Pick at most one eligible sample per field. Apple Watch wins only when positively
@@ -132,11 +151,38 @@ struct HealthKitReadinessSelection: Equatable {
         if !bodyweightCandidates.isEmpty && bodyweightEligible.isEmpty {
             stale.insert(.bodyweightKg)
         }
+        let selectedHrv = choose(hrvEligible)
+        let selectedRhr = choose(rhrEligible)
+        let selectedBodyweight = choose(bodyweightEligible)
+        var states: [HealthKitReadinessField: HealthKitMetricStatus] = [:]
+        for field in HealthKitReadinessField.allCases {
+            let selected: HealthKitReadinessObservation?
+            let candidates: [HealthKitReadinessObservation]
+            switch field {
+            case .hrvMs:
+                selected = selectedHrv
+                candidates = hrvCandidates
+            case .rhrBpm:
+                selected = selectedRhr
+                candidates = rhrCandidates
+            case .bodyweightKg:
+                selected = selectedBodyweight
+                candidates = bodyweightCandidates
+            }
+            if selected != nil {
+                states[field] = .eligible
+            } else if candidates.isEmpty {
+                states[field] = .missing
+            } else {
+                states[field] = .stale
+            }
+        }
         return HealthKitReadinessSelection(
-            hrv: choose(hrvEligible),
-            rhr: choose(rhrEligible),
-            bodyweight: choose(bodyweightEligible),
-            staleFields: stale
+            hrv: selectedHrv,
+            rhr: selectedRhr,
+            bodyweight: selectedBodyweight,
+            staleFields: stale,
+            metricStates: states
         )
     }
 
@@ -199,7 +245,7 @@ enum HealthKitReadinessState: Equatable {
         case .noEligibleSample:
             return "No eligible HealthKit sample was returned. This can mean no data or that read access was not granted."
         case .eligibleSample:
-            return "A HealthKit sample is available."
+            return "One or more HealthKit samples are available."
         case .staleSample:
             return "The HealthKit sample is outside the accepted window."
         case .importError(let message):

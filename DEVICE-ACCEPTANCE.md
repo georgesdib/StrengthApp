@@ -264,6 +264,10 @@ the client-side record to fill in after the physical pass.
 - [ ] If no eligible sample exists, the copy says it can mean no data or access not granted; it
       does not claim denial and does not show zero.
 - [ ] A stale sample is identified as stale and is not imported as today's value.
+- [ ] Partial availability is independent: HRV eligible + RHR stale, RHR eligible + HRV missing,
+      both missing/stale, and both eligible each show the correct per-metric wording.
+- [ ] If the POST succeeds but the authoritative GET fails, the import is shown as accepted with a
+      refresh error; no duplicate import is attempted.
 
 ## Precedence, identity and persistence
 

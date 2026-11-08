@@ -159,6 +159,68 @@ final class HealthKitReadinessTests: XCTestCase {
         XCTAssertTrue(selection.staleFields.isEmpty)
     }
 
+    func testPartialAndStaleMetricStatesAreIndependent() {
+        let now = Date()
+        let hrv = observation(
+            .hrvMs, 55, id: "hrv", at: now, sourceClass: .appleWatch
+        )
+        let staleRhr = observation(
+            .rhrBpm, 52, id: "rhr-stale",
+            at: now.addingTimeInterval(-2 * 24 * 60 * 60),
+            sourceClass: .appleWatch
+        )
+        let partial = HealthKitReadinessSelection.make(
+            hrvCandidates: [hrv], rhrCandidates: [staleRhr],
+            serverDate: serverDate(now), now: now
+        )
+        XCTAssertEqual(partial.status(for: .hrvMs), .eligible)
+        XCTAssertEqual(partial.status(for: .rhrBpm), .stale)
+        XCTAssertEqual(partial.status(for: .bodyweightKg), .missing)
+        XCTAssertNotNil(partial.hrv)
+        XCTAssertNil(partial.rhr)
+
+        let rhr = observation(
+            .rhrBpm, 52, id: "rhr", at: now, sourceClass: .appleWatch
+        )
+        let missingHrv = HealthKitReadinessSelection.make(
+            hrvCandidates: [], rhrCandidates: [rhr],
+            serverDate: serverDate(now), now: now
+        )
+        XCTAssertEqual(missingHrv.status(for: .hrvMs), .missing)
+        XCTAssertEqual(missingHrv.status(for: .rhrBpm), .eligible)
+        XCTAssertNil(missingHrv.hrv)
+        XCTAssertNotNil(missingHrv.rhr)
+
+        let allMissing = HealthKitReadinessSelection.make(
+            hrvCandidates: [], rhrCandidates: [],
+            serverDate: serverDate(now), now: now
+        )
+        XCTAssertEqual(allMissing.status(for: .hrvMs), .missing)
+        XCTAssertEqual(allMissing.status(for: .rhrBpm), .missing)
+        XCTAssertEqual(allMissing.status(for: .bodyweightKg), .missing)
+
+        let allStale = HealthKitReadinessSelection.make(
+            hrvCandidates: [observation(
+                .hrvMs, 55, id: "stale-hrv",
+                at: now.addingTimeInterval(-49 * 60 * 60),
+                sourceClass: .appleWatch
+            )],
+            rhrCandidates: [staleRhr],
+            serverDate: serverDate(now), now: now
+        )
+        XCTAssertEqual(allStale.status(for: .hrvMs), .stale)
+        XCTAssertEqual(allStale.status(for: .rhrBpm), .stale)
+        XCTAssertTrue(allStale.isEmpty)
+
+        let both = HealthKitReadinessSelection.make(
+            hrvCandidates: [hrv], rhrCandidates: [rhr],
+            serverDate: serverDate(now), now: now
+        )
+        XCTAssertEqual(both.status(for: .hrvMs), .eligible)
+        XCTAssertEqual(both.status(for: .rhrBpm), .eligible)
+        XCTAssertFalse(both.isEmpty)
+    }
+
     func testStaleSamplesRemainStaleAndAreNotImported() {
         let now = Date()
         let staleHrv = observation(

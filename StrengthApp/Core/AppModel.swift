@@ -23,6 +23,17 @@ final class AppModel: ObservableObject {
         case prescriptionUnavailable(reason: String)
     }
 
+    struct RefreshOutcome: Equatable {
+        let succeeded: Bool
+        let message: String?
+
+        static let success = RefreshOutcome(succeeded: true, message: nil)
+
+        static func failure(_ message: String) -> RefreshOutcome {
+            RefreshOutcome(succeeded: false, message: message)
+        }
+    }
+
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var bootstrap: BootstrapResponse?
     @Published private(set) var today: TodayResponse?
@@ -30,6 +41,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var historyTotal = 0
     @Published private(set) var isPairing = false
     @Published private(set) var isRefreshing = false
+    @Published private(set) var healthKitRefreshError: String?
     @Published private(set) var isLoadingHistory = false
     @Published private(set) var hasLoadedHistory = false
     @Published private(set) var device: PairingDevice?
@@ -70,6 +82,11 @@ final class AppModel: ObservableObject {
     private var workoutRefreshGrace = false
     private var healthKitOperation = OperationKey<HealthKitReadinessRequest>()
     private var healthKitFollowUp = false
+    private var refreshInFlight = false
+    private var refreshPending = false
+    private var refreshWaiters: [CheckedContinuation<RefreshOutcome, Never>] = []
+    private var readinessLockBusy = false
+    private var readinessLockWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(
         client: IOSAPIClient? = nil,
@@ -210,10 +227,46 @@ final class AppModel: ObservableObject {
 
     // MARK: Reads
 
-    func refresh() async {
-        guard let session, !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
+    /// Coalescing authoritative refresh. A request arriving while another refresh is in
+    /// flight is never dropped: it forces one more GET after the current one and every caller
+    /// receives the final outcome.
+    @discardableResult
+    func refresh() async -> RefreshOutcome {
+        guard session != nil else {
+            return .failure("Pair this device before refreshing.")
+        }
+        refreshPending = true
+        if !refreshInFlight {
+            refreshInFlight = true
+            isRefreshing = true
+            Task { await self.runRefreshLoop() }
+        }
+        return await withCheckedContinuation { continuation in
+            refreshWaiters.append(continuation)
+        }
+    }
+
+    private func runRefreshLoop() async {
+        var last = RefreshOutcome.failure("Refresh did not complete.")
+        while refreshPending {
+            refreshPending = false
+            last = await performRefresh()
+        }
+        refreshInFlight = false
+        isRefreshing = false
+        let waiters = refreshWaiters
+        refreshWaiters = []
+        for waiter in waiters {
+            waiter.resume(returning: last)
+        }
+    }
+
+    private func performRefresh() async -> RefreshOutcome {
+        await acquireReadinessLock()
+        defer { releaseReadinessLock() }
+        guard let session else {
+            return .failure("Pair this device before refreshing.")
+        }
         do {
             async let bootstrapTask = client.bootstrap(session: session)
             async let todayTask = client.today(session: session)
@@ -255,9 +308,31 @@ final class AppModel: ObservableObject {
             } else if healthKitState == .featureDisabled || healthKitState == .unavailable {
                 healthKitState = .enabled
             }
+            healthKitRefreshError = nil
             errorMessage = nil
+            return .success
         } catch {
             handle(error)
+            return .failure(message(for: error))
+        }
+    }
+
+    private func acquireReadinessLock() async {
+        if !readinessLockBusy {
+            readinessLockBusy = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            readinessLockWaiters.append(continuation)
+        }
+    }
+
+    private func releaseReadinessLock() {
+        if readinessLockWaiters.isEmpty {
+            readinessLockBusy = false
+        } else {
+            let next = readinessLockWaiters.removeFirst()
+            next.resume()
         }
     }
 
@@ -395,10 +470,15 @@ final class AppModel: ObservableObject {
 
     private func runHealthKitImport(session: IOSSession, date: String) async {
         isImportingHealthKit = true
+        healthKitRefreshError = nil
+        var lockHeld = false
         defer {
+            if lockHeld { releaseReadinessLock() }
             isImportingHealthKit = false
             refreshPendingMutations()
         }
+        await acquireReadinessLock()
+        lockHeld = true
         do {
             let selection = try await healthKit.selectSamples(
                 serverDate: date,
@@ -428,7 +508,17 @@ final class AppModel: ObservableObject {
             )
             healthKitOperation.acknowledged()
             mutationError = nil
-            await refresh()
+            // The mutation is acknowledged and journaled before the refresh. A failed GET is
+            // recoverable and must not turn a successful POST into a retry.
+            lockHeld = false
+            releaseReadinessLock()
+            let outcome = await refresh()
+            if outcome.succeeded {
+                healthKitRefreshError = nil
+            } else {
+                healthKitRefreshError = outcome.message
+                    ?? "Readiness was saved, but the authoritative refresh failed."
+            }
         } catch {
             healthKitState = .importError(message(for: error))
             handleMutation(error)
@@ -838,6 +928,7 @@ final class AppModel: ObservableObject {
         healthKitEnabled = false
         healthKitState = .featureDisabled
         healthKitSelection = nil
+        healthKitRefreshError = nil
         healthKitOperation = OperationKey<HealthKitReadinessRequest>()
         healthKitFollowUp = false
         pairedServerURL = store.serverURL

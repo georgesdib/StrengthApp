@@ -436,6 +436,137 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertTrue(model.pendingMutations.isEmpty)
     }
 
+    private func healthKitSelection() -> HealthKitReadinessSelection {
+        let now = Date()
+        let hrv = HealthKitReadinessObservation(
+            field: .hrvMs, value: 55, sampleID: "sample-hrv", sampleAt: now,
+            sourceName: "Apple Watch", sourceBundleID: "com.apple.health",
+            sourceClass: .appleWatch, sourceModel: "Watch6,18",
+            sourceManufacturer: "Apple Inc."
+        )
+        let rhr = HealthKitReadinessObservation(
+            field: .rhrBpm, value: 52, sampleID: "sample-rhr", sampleAt: now,
+            sourceName: "Apple Watch", sourceBundleID: "com.apple.health",
+            sourceClass: .appleWatch, sourceModel: "Watch6,18",
+            sourceManufacturer: "Apple Inc."
+        )
+        return HealthKitReadinessSelection(
+            hrv: hrv, rhr: rhr, staleFields: []
+        )
+    }
+
+    private func waitForCounter(_ counter: TestCounter, atLeast target: Int) async {
+        for _ in 0..<200 {
+            if counter.value >= target { return }
+            await Task.yield()
+        }
+    }
+
+    func testConcurrentRefreshRequestsAreCoalescedWithoutLosingFinalGet() async {
+        let gate = TestGate()
+        let todayCount = TestCounter()
+        let transport = AsyncStubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                let count = todayCount.increment()
+                if count == 2 { await gate.wait() }
+                return (200, Data(Fixtures.today.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+
+        let first = Task { await model.refresh() }
+        await waitForCounter(todayCount, atLeast: 2)
+        let second = Task { await model.refresh() }
+        await Task.yield()
+        await gate.openGate()
+
+        let firstOutcome = await first.value
+        let secondOutcome = await second.value
+        XCTAssertTrue(firstOutcome.succeeded)
+        XCTAssertTrue(secondOutcome.succeeded)
+        XCTAssertEqual(todayCount.value, 3)
+    }
+
+    func testHealthKitPostSurvivesRefreshFailureWithoutRetryingMutation() async {
+        let todayCount = TestCounter()
+        let healthKitCount = TestCounter()
+        let fake = FakeHealthKitReadinessProvider()
+        fake.selection = healthKitSelection()
+        let transport = AsyncStubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                let count = todayCount.increment()
+                if count >= 2 {
+                    return (500, Data(#"{"error":"temporary","code":"server_error"}"#.utf8))
+                }
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/healthkit/readiness":
+                _ = healthKitCount.increment()
+                return (200, Data(Fixtures.readinessWrite.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport, healthKit: fake)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.setHealthKitEnabled(true)
+
+        XCTAssertEqual(healthKitCount.value, 1)
+        XCTAssertNotNil(model.healthKitRefreshError)
+        XCTAssertEqual(model.healthKitState, .eligibleSample)
+        XCTAssertTrue(model.pendingMutations.isEmpty)
+    }
+
+    func testImportStartedDuringRefreshWaitsAndThenRefreshesAgain() async {
+        let gate = TestGate()
+        let todayCount = TestCounter()
+        let healthKitCount = TestCounter()
+        let fake = FakeHealthKitReadinessProvider()
+        fake.selection = healthKitSelection()
+        let transport = AsyncStubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                let count = todayCount.increment()
+                if count == 3 { await gate.wait() }
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/healthkit/readiness":
+                _ = healthKitCount.increment()
+                return (200, Data(Fixtures.readinessWrite.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport, healthKit: fake)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.setHealthKitEnabled(true)
+        XCTAssertEqual(healthKitCount.value, 1)
+
+        let refreshTask = Task { await model.refresh() }
+        await waitForCounter(todayCount, atLeast: 3)
+        let importTask = Task { await model.importHealthKit() }
+        await Task.yield()
+        await gate.openGate()
+        _ = await refreshTask.value
+        await importTask.value
+
+        XCTAssertEqual(healthKitCount.value, 2)
+        XCTAssertEqual(todayCount.value, 4)
+        XCTAssertNil(model.healthKitRefreshError)
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

@@ -374,6 +374,11 @@ struct TodayView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            if let refreshError = model.healthKitRefreshError {
+                Text("Readiness was saved, but the authoritative refresh failed: \(refreshError) Retry refresh; do not import again.")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
             if let payload = model.today?.readiness {
                 healthKitValueRow(
                     "HRV", field: "hrv_ms", value: payload.hrvMs,
@@ -428,9 +433,19 @@ struct TodayView: View {
                     .foregroundStyle(.secondary)
             }
         } else {
-            Text("\(label): no sample")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            let status = model.healthKitSelection.flatMap {
+                HealthKitReadinessField(rawValue: field).map($0.status(for:))
+            }
+            switch status {
+            case .stale:
+                Text("\(label): stale HealthKit sample")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            default:
+                Text("\(label): no sample")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

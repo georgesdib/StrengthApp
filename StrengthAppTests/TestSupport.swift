@@ -66,6 +66,44 @@ final class InMemoryTokenStore: TokenStoring {
 }
 
 
+
+actor TestGate {
+    private var open = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if open { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func openGate() {
+        open = true
+        let pending = waiters
+        waiters = []
+        for waiter in pending { waiter.resume() }
+    }
+}
+
+final class TestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func increment() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        count += 1
+        return count
+    }
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+}
+
 final class FakeHealthKitReadinessProvider: HealthKitReadinessProviding {
     var isAvailable = true
     var authorizationRequests = 0

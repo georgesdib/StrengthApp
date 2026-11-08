@@ -607,6 +607,32 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertEqual(fake.selectionCalls, 1)
     }
 
+    func testHistoryDetailDecodesOutlineDurationAndSets() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let detail = try decoder.decode(HistoryDetail.self, from: Data(#"""
+        {
+          "session_id": "s1",
+          "occurred_on": "2026-11-08",
+          "workout_label": "Squat",
+          "session_type": "squat",
+          "set_count": 2,
+          "duration_min": 44.5,
+          "duration_basis": "measured",
+          "tonnage_kg": 1200,
+          "main_lifts": ["competition_squat"],
+          "sets": [
+            {"set_id": 1, "exercise_id": "competition_squat", "load_kg": 140, "reps": 3, "rir": 2},
+            {"set_id": 2, "exercise_id": "competition_squat", "load_kg": 130, "reps": 5, "rir": 3}
+          ]
+        }
+        """#.utf8))
+        XCTAssertEqual(detail.durationMin, 44.5)
+        XCTAssertEqual(detail.durationBasis, "measured")
+        XCTAssertEqual(detail.sets?.count, 2)
+        XCTAssertEqual(detail.sets?.first?.summary, "140.0 kg × 3 · RIR 2")
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

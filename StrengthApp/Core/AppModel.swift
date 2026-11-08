@@ -372,6 +372,16 @@ final class AppModel: ObservableObject {
         await loadHistory(reset: false)
     }
 
+    func historyDetail(sessionID: String) async throws -> HistoryDetail {
+        guard let session else { throw APIError.transport("Pair this device first.") }
+        do {
+            return try await client.historyDetail(sessionID: sessionID, session: session)
+        } catch {
+            handle(error)
+            throw error
+        }
+    }
+
     // MARK: Phase 2 mutations
 
     func saveReadiness(

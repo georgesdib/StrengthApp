@@ -130,6 +130,44 @@ struct HistoryResponse: Decodable {
     let sessions: [HistorySession]
 }
 
+struct HistoryDetail: Decodable {
+    let sessionId: String
+    let occurredOn: String
+    let workoutLabel: String?
+    let sessionType: String?
+    let dayGuess: String?
+    let setCount: Int?
+    let workingSetCount: Int?
+    let exerciseCount: Int?
+    let mainLifts: [String]?
+    let tonnageKg: Double?
+    let durationMin: Double?
+    let durationBasis: String?
+    let sets: [HistoryDetailSet]?
+}
+
+struct HistoryDetailSet: Decodable, Identifiable {
+    let setId: Int?
+    let exerciseId: String
+    let loadKg: Double?
+    let reps: Int?
+    let rir: Int?
+    let velocityMps: Double?
+
+    var id: String { "\(setId ?? 0)-\(exerciseId)" }
+
+    var summary: String {
+        let load = loadKg.map { String(format: "%.1f kg", $0) } ?? "bodyweight"
+        let reps = reps.map(String.init) ?? "?"
+        var value = "\(load) × \(reps)"
+        if let rir { value += " · RIR \(rir)" }
+        if let velocityMps, velocityMps > 0 {
+            value += " · \(String(format: "%.2f", velocityMps)) m/s"
+        }
+        return value
+    }
+}
+
 struct HistorySession: Decodable, Identifiable {
     let sessionId: String
     let occurredOn: String
@@ -138,6 +176,8 @@ struct HistorySession: Decodable, Identifiable {
     let setCount: Int?
     let workingSetCount: Int?
     let tonnageKg: Double?
+    let durationMin: Double?
+    let durationBasis: String?
     let mainLifts: [String]?
     // SQLite stores this as 0/1 and the server passes it through as an integer.
     let needsReview: Int?

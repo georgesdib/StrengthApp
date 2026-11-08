@@ -298,6 +298,14 @@ final class IOSAPIClient {
         )
     }
 
+    func historyDetail(sessionID: String, session: IOSSession) async throws -> HistoryDetail {
+        try await get(
+            path: "api/ios/v1/history/\(sessionID)",
+            query: [],
+            session: session
+        )
+    }
+
     func writeReadiness(
         _ body: ReadinessWriteRequest,
         session: IOSSession,

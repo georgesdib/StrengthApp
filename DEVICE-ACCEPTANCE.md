@@ -41,8 +41,10 @@ requesting a prescription, it is out of scope.
       server; an unknown/insufficient day is not shown as a zero score.
 - [ ] Today shows "No active workout" when none is open; if one is open, its summary is shown.
 - [ ] Pull to refresh updates the screen; a server stop shows a clear error, not fabricated data.
-- [ ] History loads the default page, shows date/session type/sets/tonnage/lifts, and "Load more"
+- [ ] History loads the default page, shows date/session type/sets/tonnage/duration/lifts, and "Load more"
       appends older sessions without duplicates.
+- [ ] Tapping a history row opens the outline, duration and set summary; no web-only detail is
+      required.
 - [ ] Empty history shows the empty state; a server error shows the retry state.
 
 ## Persistence and local forget
@@ -257,6 +259,8 @@ the client-side record to fill in after the physical pass.
 - [ ] Settings -> HealthKit -> enable **Readiness from HealthKit**.
 - [ ] Grant read access to HRV, Resting Heart Rate and Body Mass only. The Body Mass prompt appears
       when the toggle is enabled/refreshed; no write access is requested.
+- [ ] The readiness form shows HealthKit HRV/RHR/bodyweight values, source and age alongside the
+      manual fields; entering a manual value overrides it and leaving it blank keeps the automatic one.
 - [ ] Today shows the HealthKit section with the import action.
 - [ ] Import from HealthKit (or pull to refresh) completes.
 - [ ] HRV is the newest eligible sample within 48 hours; RHR is from the current server-local day;

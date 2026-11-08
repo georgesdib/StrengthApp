@@ -113,6 +113,10 @@ xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
   -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 ```
 
+The physical-device Phase 3A checklist and rollback steps are in
+[`DEVICE-ACCEPTANCE.md`](DEVICE-ACCEPTANCE.md); the server-side backup, migration and
+pairing-code runbook is `docs/IOS-CLIENT-PLAN.md` §13.3.
+
 The optional UI smoke tests (`StrengthAppUITests`) verify pairing, Today, History, Settings,
 relaunch persistence and Forget, plus the Phase 2 flow (readiness → prescription → start → add a
 manual-VBT set → force-quit/relaunch recovery → finish → Progress) against a real local server. They are skipped unless

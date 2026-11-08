@@ -210,3 +210,89 @@ record of what was exercised.
 
 Owner confirmation: 2026-11-07  ·  Build: Phase 2  ·  Device: iPhone 16 Pro Max (iPhone17,2),
 iOS 27.2  ·  Simulator: iPhone 18 Pro, iOS 27.2
+---
+
+# Phase 3A device acceptance checklist — pending
+
+**Status: not yet run on the physical iPhone.** The implementation is unit/simulator/live-server
+verified. The canonical server-side commands, backup, migration, pairing-code and rollback runbook
+is `docs/IOS-CLIENT-PLAN.md` §13.3 in the `strength-training-app` repository. This checklist is
+the client-side record to fill in after the physical pass.
+
+## Before you start
+
+- [ ] The server repository is at the Phase 3A implementation commit and the client repository is
+      at the Phase 3A client commit.
+- [ ] Stop the running `strength-coach web` process. Confirm the port is no longer listening.
+- [ ] Take and verify a full live-database backup before applying migration 0054. The archive
+      contains health data; keep it off the phone and out of git.
+- [ ] Start the server normally; on startup it applies `0054_healthkit_readiness.sql`.
+- [ ] Verify `schema_migration` is at `0054`, `healthkit_readiness` exists, and
+      `PRAGMA quick_check` is `ok`.
+- [ ] The server is reachable only on the trusted home LAN, over plain HTTP, with no port
+      forwarding or public address.
+- [ ] Xcode 27.2, the personal team, the owner's iPhone and local-network permission are ready.
+- [ ] The server reports `healthkit_readiness: true` in bootstrap.
+
+## Pairing code
+
+- [ ] Mint a fresh code only when the phone is ready:
+
+      ```bash
+      .venv/bin/strength-coach --db data/coach.db ios pair --label "iPhone Phase 3A"
+      ```
+
+- [ ] The CLI prints a grouped 8-digit code and its expiry. The code is one-use, has a 300-second
+      default TTL and allows five attempts. Do not store it in a screenshot, ticket or commit.
+- [ ] Enter the server LAN URL (for example `http://192.168.1.10:8000`), the code and the label
+      in the app's Pairing screen. Pairing returns to Today.
+- [ ] A malformed, wrong, expired or reused code shows the server error and creates no device.
+- [ ] If the phone is already paired, skip the fresh pairing; test the HealthKit path without
+      disturbing the existing keychain item.
+
+## HealthKit setup and import
+
+- [ ] Settings -> HealthKit -> enable **Readiness from HealthKit**.
+- [ ] Grant read access to HRV and Resting Heart Rate only. No write access is requested.
+- [ ] Today shows the HealthKit section with the import action.
+- [ ] Import from HealthKit (or pull to refresh) completes.
+- [ ] HRV is the newest eligible sample within 48 hours; RHR is from the current server-local day.
+- [ ] Today shows effective HRV/RHR values, effective source, sample age, score/status and basis.
+- [ ] Stored `healthkit` provenance is distinct from the effective values.
+- [ ] If no eligible sample exists, the copy says it can mean no data or access not granted; it
+      does not claim denial and does not show zero.
+- [ ] A stale sample is identified as stale and is not imported as today's value.
+
+## Precedence, identity and persistence
+
+- [ ] Record a manual HRV and/or RHR, then import again: the manual values remain effective and the
+      HealthKit observation remains visible as provenance.
+- [ ] Import the same sample twice: no duplicate observation is created.
+- [ ] Force-quit/relaunch: the HealthKit toggle and server data are still present.
+- [ ] No sleep, workout, cardio or write access is requested or displayed.
+- [ ] Existing manual readiness, prescription, workout, completion and Progress flows still work.
+
+## Rollback if rejected
+
+- [ ] Stop the server.
+- [ ] Turn the client HealthKit toggle off; manual readiness remains unaffected.
+- [ ] If a schema rollback is required, remove the client importer and canonical-merge integration
+      first, then drop `healthkit_readiness` and delete the `0054` schema_migration row together.
+- [ ] If restoring the pre-test database is safer, extract only `data/coach.db` from the verified
+      backup with the server stopped, and remove `-wal`/`-shm` sidecars. This discards any
+      training recorded after the backup.
+
+## Sign-off
+
+| Check | Result | Notes |
+|---|---|---|
+| Backup and migration verification | pending | |
+| Pairing and code rejection paths | pending | |
+| HealthKit opt-in and read-only permission | pending | |
+| HRV/RHR source, freshness and effective display | pending | |
+| No-sample/stale indeterminate states | pending | |
+| Manual precedence and sample identity | pending | |
+| Existing Phase 2 workflow unchanged | pending | |
+| Rollback understood | pending | |
+
+Owner confirmation: pending · Build: Phase 3A · Device: pending · iOS: pending

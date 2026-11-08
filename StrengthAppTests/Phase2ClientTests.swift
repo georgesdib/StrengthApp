@@ -807,6 +807,169 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertNil(relaunched.activeWorkout?.sets?.first(where: { $0.setId == localSetId }))
     }
 
+    func testOfflineCaptureSyncReplaysWhenServerWorkoutMatches() async throws {
+        var online = true
+        let activeToday = #"{"date":"2026-11-07","readiness":null,"readiness_score":null,"active_workout":"# + Fixtures.workoutInProgress + "}"
+        let transport = StubTransport { request in
+            guard online else { return (500, Data()) }
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(activeToday.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            case "/api/ios/v1/workouts/workout-1/sets":
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let offlineURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("offline-sync-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: offlineURL) }
+        let (model, defaults, suite, _) = pairedModel(
+            transport: transport,
+            offlineStore: OfflineCaptureStore(fileURL: offlineURL)
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(readinessAck: false, idempotencyKey: "issue-sync")
+        let started = await model.startWorkout(idempotencyKey: "start-sync")
+        XCTAssertTrue(started)
+
+        online = false
+        let add = AddSetRequest(
+            exerciseId: "competition_squat", loadKg: 140, reps: 3,
+            rir: 2, velocityMps: nil, setIndex: 1, planItemIndex: 0
+        )
+        let queued = await model.addSet(add, idempotencyKey: "sync-set")
+        XCTAssertTrue(queued)
+        XCTAssertEqual(model.pendingOfflineCount, 1)
+
+        online = true
+        await model.syncOfflineCapture()
+        XCTAssertEqual(model.pendingOfflineCount, 0)
+        XCTAssertNil(model.offlineSyncError)
+        XCTAssertTrue(transport.requests.contains {
+            $0.url?.path == "/api/ios/v1/workouts/workout-1/sets"
+        })
+    }
+
+    func testOfflineCaptureSyncDoesNotApplyToAnotherWorkout() async throws {
+        var online = true
+        let transport = StubTransport { request in
+            guard online else { return (500, Data()) }
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let offlineURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("offline-conflict-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: offlineURL) }
+        let (model, defaults, suite, _) = pairedModel(
+            transport: transport,
+            offlineStore: OfflineCaptureStore(fileURL: offlineURL)
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(readinessAck: false, idempotencyKey: "issue-conflict")
+        let started = await model.startWorkout(idempotencyKey: "start-conflict")
+        XCTAssertTrue(started)
+
+        online = false
+        let add = AddSetRequest(
+            exerciseId: "competition_squat", loadKg: 140, reps: 3,
+            rir: 2, velocityMps: nil, setIndex: 1, planItemIndex: 0
+        )
+        let queued = await model.addSet(add, idempotencyKey: "conflict-set")
+        XCTAssertTrue(queued)
+        online = true
+        await model.syncOfflineCapture()
+        XCTAssertEqual(model.pendingOfflineCount, 1)
+        XCTAssertNotNil(model.offlineSyncError)
+    }
+
+    func testFailedFormRatingDoesNotBlockFinishOrVanish() async throws {
+        var online = true
+        let activeToday = #"{"date":"2026-11-07","readiness":null,"readiness_score":null,"active_workout":"# + Fixtures.workoutInProgress + "}"
+        let transport = StubTransport { request in
+            guard online else { return (500, Data()) }
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(activeToday.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            case "/api/ios/v1/workouts/workout-1/sets":
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            case "/api/ios/v1/workouts/workout-1/form":
+                return (400, Data(#"{"error":"form rejected"}"#.utf8))
+            case "/api/ios/v1/workouts/workout-1/complete":
+                return (200, Data(Fixtures.workoutCompleted.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let offlineURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("offline-form-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: offlineURL) }
+        let (model, defaults, suite, _) = pairedModel(
+            transport: transport,
+            offlineStore: OfflineCaptureStore(fileURL: offlineURL)
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(readinessAck: false, idempotencyKey: "issue-form")
+        let started = await model.startWorkout(idempotencyKey: "start-form")
+        XCTAssertTrue(started)
+
+        online = false
+        let add = AddSetRequest(
+            exerciseId: "competition_squat", loadKg: 140, reps: 3,
+            rir: 2, velocityMps: nil, setIndex: 1, planItemIndex: 0
+        )
+        let added = await model.addSet(add, idempotencyKey: "form-set")
+        XCTAssertTrue(added)
+        let rated = await model.rateForm(
+            FormRatingRequest(exerciseId: "competition_squat", rating: 4, note: nil),
+            idempotencyKey: "form-rate"
+        )
+        XCTAssertTrue(rated)
+        let finished = await model.completeWorkout(
+            CompleteWorkoutRequest(sessionRpe: 7, notRecorded: false, durationMin: nil, notes: nil),
+            idempotencyKey: "form-finish"
+        )
+        XCTAssertTrue(finished)
+        online = true
+        await model.syncOfflineCapture()
+        XCTAssertEqual(model.pendingOfflineOperations.map(\.kind), [.rateForm])
+        XCTAssertEqual(model.pendingOfflineOperations.first?.state, .failed)
+        XCTAssertTrue(transport.requests.contains {
+            $0.url?.path == "/api/ios/v1/workouts/workout-1/complete"
+        })
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

@@ -318,3 +318,29 @@ pairing-code and rollback runbook is `docs/IOS-CLIENT-PLAN.md` §13.3 in the
 | Rollback understood | pass | owner-confirmed 2026-11-08 |
 
 Owner confirmation: pass 2026-11-08 · Build: Phase 3A · Device: physical iPhone · iOS: 27.2
+
+
+---
+
+# Phase 4 offline acceptance checklist — pending
+
+**Status: not yet run on the physical iPhone.** Run after backing up the live database and installing
+the Chunk 4 client.
+
+- [ ] Start a workout online, then stop the server or enable airplane mode.
+- [ ] Add sets, record a form rating, force-quit and relaunch; the cached workout and pending
+      operations are restored.
+- [ ] Cancel an unsent pending set and an unsent finish; the local snapshot updates.
+- [ ] Restart the server or disable airplane mode; foreground the app and verify FIFO replay.
+- [ ] Verify each queued operation reaches the server exactly once, with the original performed
+      timestamps.
+- [ ] Queue a finish offline, reconnect and verify the session materializes with the actual finish
+      time and measured duration.
+- [ ] Simulate an ended-elsewhere/different-active-workout case; verify no queued work is attached
+      to the wrong workout and a visible conflict is shown.
+- [ ] Verify Retry and Discard (per operation and all capture) behave explicitly.
+- [ ] Verify Request workout/Start workout, plan edits, readiness and HealthKit stay unavailable or
+      server-required while offline.
+- [ ] Confirm no background sync runs.
+
+Owner confirmation: pending · Build: Phase 4 · Device: pending · iOS: pending

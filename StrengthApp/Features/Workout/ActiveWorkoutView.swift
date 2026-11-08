@@ -63,6 +63,16 @@ struct ActiveWorkoutView: View {
                                 Text("\(model.pendingOfflineCount) queued operation\(model.pendingOfflineCount == 1 ? "" : "s"). These are not server-confirmed yet.")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
+                                if let error = model.offlineSyncError {
+                                    Text(error).font(.caption).foregroundStyle(.red)
+                                }
+                                if model.isSyncingOffline {
+                                    HStack { ProgressView(); Text("Syncing…") }
+                                } else {
+                                    Button("Sync now") {
+                                        Task { await model.syncOfflineCapture() }
+                                    }
+                                }
                             }
                         }
 

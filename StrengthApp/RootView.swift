@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -18,7 +19,14 @@ struct RootView: View {
                 MainTabView(model: model)
             }
         }
-        .task { await model.onLaunch() }
+        .task {
+            model.startNetworkMonitoring()
+            await model.onLaunch()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await model.syncOfflineCapture() }
+        }
     }
 }
 

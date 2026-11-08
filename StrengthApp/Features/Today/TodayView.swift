@@ -12,6 +12,7 @@ struct TodayView: View {
     @State private var showingWorkout = false
     @State private var startKey = UUID().uuidString.lowercased()
     @State private var startError: String?
+    @State private var confirmingDiscardOffline = false
 
     var body: some View {
         NavigationStack {
@@ -142,22 +143,54 @@ struct TodayView: View {
                             systemImage: model.isOffline ? "wifi.slash" : "clock.arrow.circlepath"
                         )
                         .foregroundStyle(.orange)
+                        if let error = model.offlineSyncError {
+                            Text(error)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+                        if model.isSyncingOffline {
+                            HStack {
+                                ProgressView()
+                                Text("Syncing…")
+                            }
+                        } else {
+                            Button("Sync now") {
+                                Task { await model.syncOfflineCapture() }
+                            }
+                            .disabled(model.isSaving)
+                        }
                         ForEach(model.pendingOfflineOperations) { operation in
                             HStack {
                                 Text(operation.kind.label)
                                 Spacer()
-                                if operation.isCancellable {
+                                if operation.state == .failed || operation.state == .conflict {
+                                    Text(operation.state.rawValue.capitalized)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                    Button("Retry") {
+                                        Task { _ = await model.retryOfflineOperation(operation.operationId) }
+                                    }
+                                    .font(.caption)
+                                    Button("Discard", role: .destructive) {
+                                        Task { _ = await model.discardOfflineOperation(operation.operationId) }
+                                    }
+                                    .font(.caption)
+                                } else if operation.isCancellable {
                                     Button("Cancel", role: .destructive) {
                                         Task { _ = await model.cancelOfflineOperation(operation.operationId) }
                                     }
                                     .font(.caption)
                                 } else {
-                                    Text(operation.state.rawValue.capitalized)
+                                    Text("Pending")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                             }
                         }
+                        Button("Discard all local capture", role: .destructive) {
+                            confirmingDiscardOffline = true
+                        }
+                        .font(.footnote)
                     }
                 }
 
@@ -237,6 +270,14 @@ struct TodayView: View {
                     beginPrescription(with: draftSettings)
                 }
             }
+            .alert("Discard all offline capture?", isPresented: $confirmingDiscardOffline) {
+                Button("Discard", role: .destructive) {
+                    Task { _ = await model.discardAllOfflineCapture() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The cached workout and every queued local operation will be removed. Nothing unsent will reach the server.")
+            }
             .alert("Readiness is not score-ready", isPresented: showingReadinessPrompt) {
                 Button("Start anyway") { issuePrescription(acknowledge: true) }
                 Button("Cancel", role: .cancel) { model.clearPrescription() }
@@ -267,6 +308,14 @@ struct TodayView: View {
                     Text("The session is saved on this phone but is not server-confirmed yet.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    if model.isSyncingOffline {
+                        HStack { ProgressView(); Text("Syncing…") }
+                    } else {
+                        Button("Sync now") {
+                            Task { await model.syncOfflineCapture() }
+                        }
+                        .font(.footnote)
+                    }
                     Button("Cancel queued finish", role: .destructive) {
                         Task { _ = await model.cancelOfflineFinish() }
                     }
@@ -302,8 +351,8 @@ struct TodayView: View {
                             Label("Request workout", systemImage: "play.circle")
                         }
                         .accessibilityIdentifier("start-workout")
-                        .disabled(model.isSaving || model.isOffline)
-                        if model.isOffline {
+                        .disabled(model.isSaving || model.isOffline || model.hasPendingOfflineCapture)
+                        if model.isOffline || model.hasPendingOfflineCapture {
                             Text("Requesting a workout requires the server.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -361,8 +410,8 @@ struct TodayView: View {
                 }
             }
             .accessibilityIdentifier("start-ready-workout")
-            .disabled(model.isSaving || model.isOffline)
-            if model.isOffline {
+            .disabled(model.isSaving || model.isOffline || model.hasPendingOfflineCapture)
+            if model.isOffline || model.hasPendingOfflineCapture {
                 Text("Starting requires the server.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

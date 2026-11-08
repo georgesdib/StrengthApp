@@ -377,7 +377,8 @@ final class IOSAPIClient {
         workoutId: String,
         body: AddSetRequest,
         session: IOSSession,
-        idempotencyKey: String
+        idempotencyKey: String,
+        journaling: Bool = true
     ) async throws -> WorkoutDetail {
         try await post(
             path: "api/ios/v1/workouts/\(workoutId)/sets",
@@ -385,7 +386,8 @@ final class IOSAPIClient {
             kind: .addSet,
             targetId: workoutId,
             session: session,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            journaling: journaling
         )
     }
 
@@ -468,7 +470,8 @@ final class IOSAPIClient {
         workoutId: String,
         body: FormRatingRequest,
         session: IOSSession,
-        idempotencyKey: String
+        idempotencyKey: String,
+        journaling: Bool = true
     ) async throws -> WorkoutDetail {
         try await post(
             path: "api/ios/v1/workouts/\(workoutId)/form",
@@ -476,7 +479,8 @@ final class IOSAPIClient {
             kind: .rateForm,
             targetId: workoutId,
             session: session,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            journaling: journaling
         )
     }
 
@@ -484,7 +488,8 @@ final class IOSAPIClient {
         workoutId: String,
         body: CompleteWorkoutRequest,
         session: IOSSession,
-        idempotencyKey: String
+        idempotencyKey: String,
+        journaling: Bool = true
     ) async throws -> WorkoutDetail {
         try await post(
             path: "api/ios/v1/workouts/\(workoutId)/complete",
@@ -492,7 +497,8 @@ final class IOSAPIClient {
             kind: .completeWorkout,
             targetId: workoutId,
             session: session,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            journaling: journaling
         )
     }
 
@@ -592,7 +598,8 @@ final class IOSAPIClient {
         kind: MutationKind,
         targetId: String?,
         session: IOSSession,
-        idempotencyKey: String
+        idempotencyKey: String,
+        journaling: Bool = true
     ) async throws -> T {
         let bodyData = try encoder.encode(body)
         return try await send(
@@ -601,7 +608,8 @@ final class IOSAPIClient {
             kind: kind,
             targetId: targetId,
             session: session,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            journaling: journaling
         )
     }
 
@@ -611,7 +619,8 @@ final class IOSAPIClient {
         kind: MutationKind,
         targetId: String?,
         session: IOSSession,
-        idempotencyKey: String
+        idempotencyKey: String,
+        journaling: Bool = true
     ) async throws -> T {
         let entry = PendingMutation(
             operationId: idempotencyKey,
@@ -624,7 +633,7 @@ final class IOSAPIClient {
             createdAt: Date(),
             state: .pending
         )
-        if let journal {
+        if journaling, let journal {
             do {
                 try journal.record(entry)
             } catch {
@@ -642,10 +651,10 @@ final class IOSAPIClient {
             try validate(response, data: data)
             // 2xx is definitive success; remove before decoding so a decode failure cannot
             // cause the original mutation to be replayed after it already committed.
-            try? journal?.acknowledge(entry)
+            if journaling { try? journal?.acknowledge(entry) }
             return try decode(T.self, from: data)
         } catch {
-            if let api = error as? APIError {
+            if journaling, let api = error as? APIError {
                 handleJournalFailure(api, entry)
             }
             throw error

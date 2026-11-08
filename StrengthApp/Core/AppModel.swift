@@ -52,6 +52,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var activeWorkout: WorkoutDetail?
     @Published private(set) var offlineCapture: OfflineCapture?
     @Published private(set) var isOffline = false
+    @Published private(set) var isSyncingOffline = false
+    @Published private(set) var offlineSyncError: String?
     @Published private(set) var exerciseCatalogue: [ExerciseOption] = []
     @Published private(set) var isLoadingExerciseCatalogue = false
     @Published private(set) var exerciseCatalogueError: String?
@@ -94,6 +96,7 @@ final class AppModel: ObservableObject {
     private var workoutRefreshGrace = false
     private var healthKitOperation = OperationKey<HealthKitReadinessRequest>()
     private var healthKitFollowUp = false
+    private var networkMonitor: NetworkMonitor?
     private var refreshInFlight = false
     private var refreshPending = false
     private var refreshWaiters: [CheckedContinuation<RefreshOutcome, Never>] = []
@@ -175,6 +178,15 @@ final class AppModel: ObservableObject {
 
     // MARK: Lifecycle
 
+    func startNetworkMonitoring() {
+        guard networkMonitor == nil else { return }
+        networkMonitor = NetworkMonitor { [weak self] in
+            Task { @MainActor in
+                await self?.syncOfflineCapture()
+            }
+        }
+    }
+
     func onLaunch() async {
         guard phase == .loading else { return }
         guard let savedURL = store.serverURL,
@@ -196,6 +208,7 @@ final class AppModel: ObservableObject {
         let refreshed = await refresh()
         isOffline = !refreshed.succeeded
         await recoverPendingMutations()
+        await syncOfflineCapture()
         if refreshed.succeeded, healthKitEnabled {
             await importHealthKit()
         }
@@ -609,6 +622,10 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async {
         guard !isSaving, let session else { return }
+        guard !hasPendingOfflineCapture else {
+            mutationError = "Resolve or discard the pending offline capture before requesting another workout."
+            return
+        }
         guard permitsMutation(kind: .prescription, operationId: idempotencyKey) else {
             return
         }
@@ -804,6 +821,10 @@ final class AppModel: ObservableObject {
 
     func startWorkout(idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, case .issued(let issued) = prescriptionState else {
+            return false
+        }
+        guard !hasPendingOfflineCapture else {
+            mutationError = "Resolve or discard the pending offline capture before starting another workout."
             return false
         }
         guard permitsMutation(kind: .startWorkout, operationId: idempotencyKey) else {
@@ -1426,6 +1447,180 @@ final class AppModel: ObservableObject {
         var candidate = -1
         while used.contains(candidate) { candidate -= 1 }
         return candidate
+    }
+
+    func syncOfflineCapture() async {
+        guard !isSaving, !isSyncingOffline,
+              let session, let cached = activeWorkout,
+              hasPendingOfflineCapture else { return }
+        isSyncingOffline = true
+        offlineSyncError = nil
+        defer { isSyncingOffline = false }
+        do {
+            let serverToday = try await client.today(session: session)
+            guard let serverActive = serverToday.activeWorkout,
+                  serverActive.workoutId == cached.workoutId else {
+                offlineSyncError = "The server no longer has this workout active. The local capture was kept; resolve it below."
+                return
+            }
+            for operation in pendingOfflineOperations {
+                if operation.state == .failed {
+                    continue
+                }
+                if operation.state == .conflict {
+                    break
+                }
+                _ = try offlineStore.markAttempted(operation.operationId)
+                do {
+                    switch operation.body {
+                    case .addSet(let body):
+                        let updated = try await client.addSet(
+                            workoutId: operation.workoutId,
+                            body: body,
+                            session: session,
+                            idempotencyKey: operation.operationId,
+                            journaling: false
+                        )
+                        activeWorkout = updated
+                        offlineCapture = try offlineStore.remove(operation.operationId)
+                        offlineCapture = try offlineStore.setActiveWorkout(updated)
+                    case .rateForm(let body):
+                        let updated = try await client.rateForm(
+                            workoutId: operation.workoutId,
+                            body: body,
+                            session: session,
+                            idempotencyKey: operation.operationId,
+                            journaling: false
+                        )
+                        activeWorkout = updated
+                        offlineCapture = try offlineStore.remove(operation.operationId)
+                        offlineCapture = try offlineStore.setActiveWorkout(updated)
+                    case .completeWorkout(let body):
+                        _ = try await client.completeWorkout(
+                            workoutId: operation.workoutId,
+                            body: body,
+                            session: session,
+                            idempotencyKey: operation.operationId,
+                            journaling: false
+                        )
+                        _ = try? offlineStore.remove(operation.operationId)
+                        offlineCapture = try? offlineStore.load()
+                        activeWorkout = nil
+                        if hasPendingOfflineCapture {
+                            offlineSyncError = "The workout finished on the server, but some local operations still need attention."
+                        } else {
+                            try? offlineStore.clear()
+                            offlineCapture = try? offlineStore.load()
+                        }
+                        await refresh()
+                        await loadHistory(reset: true)
+                        return
+                    }
+                } catch {
+                    if error is APIError, !shouldQueueOffline(error) {
+                        if operation.kind == .rateForm {
+                            offlineCapture = try? offlineStore.updateState(
+                                operationId: operation.operationId,
+                                state: .failed,
+                                error: message(for: error)
+                            )
+                            continue
+                        }
+                        offlineCapture = try? offlineStore.updateState(
+                            operationId: operation.operationId,
+                            state: .conflict,
+                            error: message(for: error)
+                        )
+                        offlineSyncError = message(for: error)
+                        break
+                    }
+                    _ = try? offlineStore.updateState(
+                        operationId: operation.operationId,
+                        state: .pending,
+                        error: message(for: error)
+                    )
+                    offlineCapture = try? offlineStore.load()
+                    isOffline = true
+                    offlineSyncError = message(for: error)
+                    break
+                }
+            }
+            offlineCapture = try? offlineStore.load()
+            if !hasPendingOfflineCapture {
+                isOffline = false
+                offlineSyncError = nil
+            } else if offlineSyncError == nil {
+                isOffline = false
+            }
+        } catch {
+            isOffline = true
+            offlineSyncError = message(for: error)
+        }
+    }
+
+    func retryOfflineOperation(_ operationId: String) async -> Bool {
+        do {
+            offlineCapture = try offlineStore.updateState(
+                operationId: operationId,
+                state: .pending,
+                error: nil
+            )
+            offlineSyncError = nil
+            await syncOfflineCapture()
+            return true
+        } catch {
+            mutationError = message(for: error)
+            return false
+        }
+    }
+
+    func discardOfflineOperation(_ operationId: String) async -> Bool {
+        guard let operation = pendingOfflineOperations.first(where: {
+            $0.operationId == operationId
+        }) else { return false }
+        do {
+            var updated = activeWorkout
+            if let localSetId = operation.localSetId {
+                updated = updated?.replacing(sets: (updated?.sets ?? []).filter {
+                    $0.setId != localSetId
+                })
+            }
+            if let localFormId = operation.localFormId {
+                updated = updated?.replacing(forms: (updated?.forms ?? []).filter {
+                    $0.formId != localFormId
+                })
+            }
+            _ = try offlineStore.remove(operationId)
+            if let updated {
+                offlineCapture = try offlineStore.setActiveWorkout(updated)
+                activeWorkout = updated
+            } else {
+                offlineCapture = try offlineStore.load()
+            }
+            if !hasPendingOfflineCapture {
+                isOffline = false
+                offlineSyncError = nil
+            }
+            return true
+        } catch {
+            mutationError = message(for: error)
+            return false
+        }
+    }
+
+    func discardAllOfflineCapture() async -> Bool {
+        do {
+            try offlineStore.clear()
+            offlineCapture = try offlineStore.load()
+            activeWorkout = nil
+            offlineSyncError = nil
+            isOffline = false
+            await refresh()
+            return true
+        } catch {
+            mutationError = message(for: error)
+            return false
+        }
     }
 
     func cancelOfflineOperation(_ operationId: String) async -> Bool {

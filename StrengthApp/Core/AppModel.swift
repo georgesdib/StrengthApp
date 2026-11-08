@@ -339,10 +339,11 @@ final class AppModel: ObservableObject {
                 }
             }
             let previousActive = activeWorkout
-            if hasPendingOfflineCapture, let cached = offlineCapture?.activeWorkout {
-                // Until Phase 4 replay lands, never let the server read discard local performed
-                // work. The cached snapshot is the authoritative local capture view.
-                activeWorkout = cached
+            if hasPendingOfflineCapture {
+                // Pending offline work owns the local active-workout view. A completed finish
+                // leaves this nil while failed/conflict operations remain; do not resurrect a
+                // server workout for that state.
+                activeWorkout = offlineCapture?.activeWorkout
                 workoutRefreshGrace = false
             } else if let serverActive = newToday.activeWorkout {
                 if previousActive?.workoutId != serverActive.workoutId {
@@ -1466,10 +1467,27 @@ final class AppModel: ObservableObject {
                 return
             }
             for operation in pendingOfflineOperations {
+                if operation.state == .expired {
+                    if operation.kind == .rateForm {
+                        continue
+                    }
+                    offlineSyncError = "An offline operation is older than the 28-day replay window. Reconcile or discard it before continuing."
+                    break
+                }
                 if operation.state == .failed {
                     continue
                 }
                 if operation.state == .conflict {
+                    break
+                }
+                if !operation.isReplayable(now: Date()) {
+                    offlineCapture = try? offlineStore.updateState(
+                        operationId: operation.operationId,
+                        state: .expired,
+                        error: "Older than the 28-day replay window; reconcile or discard it."
+                    )
+                    if operation.kind == .rateForm { continue }
+                    offlineSyncError = "An offline operation is older than the 28-day replay window. Reconcile or discard it before continuing."
                     break
                 }
                 _ = try offlineStore.markAttempted(operation.operationId)
@@ -1506,7 +1524,7 @@ final class AppModel: ObservableObject {
                             journaling: false
                         )
                         _ = try? offlineStore.remove(operation.operationId)
-                        offlineCapture = try? offlineStore.load()
+                        offlineCapture = try? offlineStore.setActiveWorkout(nil)
                         activeWorkout = nil
                         if hasPendingOfflineCapture {
                             offlineSyncError = "The workout finished on the server, but some local operations still need attention."
@@ -1564,6 +1582,12 @@ final class AppModel: ObservableObject {
     }
 
     func retryOfflineOperation(_ operationId: String) async -> Bool {
+        guard pendingOfflineOperations.first(where: {
+            $0.operationId == operationId
+        })?.state != .expired else {
+            mutationError = "Expired offline work cannot be replayed; reconcile or discard it."
+            return false
+        }
         do {
             offlineCapture = try offlineStore.updateState(
                 operationId: operationId,

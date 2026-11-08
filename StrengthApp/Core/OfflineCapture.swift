@@ -24,6 +24,7 @@ enum OfflineOperationState: String, Codable {
     case synced
     case failed
     case conflict
+    case expired
 }
 
 enum OfflineOperationBody: Codable, Equatable {
@@ -157,7 +158,14 @@ final class OfflineCaptureStore {
     func load() throws -> OfflineCapture {
         lock.lock()
         defer { lock.unlock() }
-        return try loadUnlocked()
+        let capture = try loadUnlocked()
+        let normalized = expireUnsafeOperations(capture)
+        if normalized.operations.count == capture.operations.count,
+           zip(normalized.operations, capture.operations).allSatisfy({ $0.state == $1.state }) {
+            return normalized
+        }
+        try saveUnlocked(normalized)
+        return normalized
     }
 
     func save(_ capture: OfflineCapture) throws {
@@ -305,6 +313,19 @@ final class OfflineCaptureStore {
         try saveUnlocked(OfflineCapture(updatedAt: now()))
     }
 
+    private func expireUnsafeOperations(_ capture: OfflineCapture) -> OfflineCapture {
+        let cutoff = now().addingTimeInterval(-Self.replayWindow)
+        var result = capture
+        for index in result.operations.indices {
+            guard result.operations[index].state == .pending,
+                  result.operations[index].createdAt < cutoff else { continue }
+            result.operations[index].state = .expired
+            result.operations[index].lastError =
+                "Older than the 28-day replay window; reconcile or discard it."
+        }
+        return result
+    }
+
     private func validate(_ operation: OfflineOperation, against capture: OfflineCapture) throws {
         if let localSetId = operation.localSetId {
             guard operation.kind == .addSet, localSetId < 0 else {
@@ -344,11 +365,7 @@ final class OfflineCaptureStore {
             guard capture.version == OfflineCapture.currentVersion else {
                 throw OfflineCaptureStoreError.unsupportedVersion(capture.version)
             }
-            let cutoff = now().addingTimeInterval(-Self.retention)
-            let pruned = capture.operations.filter { $0.createdAt >= cutoff }
-            var result = capture
-            result.operations = pruned
-            return result
+            return capture
         } catch let error as OfflineCaptureStoreError {
             throw error
         } catch {
@@ -360,8 +377,6 @@ final class OfflineCaptureStore {
         var clean = capture
         clean.version = OfflineCapture.currentVersion
         clean.updatedAt = now()
-        let cutoff = now().addingTimeInterval(-Self.retention)
-        clean.operations = clean.operations.filter { $0.createdAt >= cutoff }
         guard clean.operations.count <= Self.maxOperations else {
             throw OfflineCaptureStoreError.full
         }

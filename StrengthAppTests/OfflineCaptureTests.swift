@@ -211,7 +211,11 @@ final class OfflineCaptureTests: XCTestCase {
         _ = try cleanupStore.setActiveWorkout(workout())
         _ = try cleanupStore.record(old)
         now = clock.addingTimeInterval(OfflineCaptureStore.retention + 1)
-        XCTAssertTrue(try cleanupStore.load().operations.isEmpty)
+        let retained = try cleanupStore.load().operations
+        XCTAssertEqual(retained.count, 1)
+        XCTAssertEqual(retained.first?.state, .expired)
+        XCTAssertTrue(try cleanupStore.replayable(now: now).isEmpty)
+        XCTAssertNotNil(retained.first?.lastError)
     }
 
     func testUnsupportedVersionIsRejected() throws {

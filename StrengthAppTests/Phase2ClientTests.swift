@@ -907,6 +907,7 @@ final class Phase2AppModelTests: XCTestCase {
 
     func testFailedFormRatingDoesNotBlockFinishOrVanish() async throws {
         var online = true
+        var serverFinished = false
         let activeToday = #"{"date":"2026-11-07","readiness":null,"readiness_score":null,"active_workout":"# + Fixtures.workoutInProgress + "}"
         let transport = StubTransport { request in
             guard online else { return (500, Data()) }
@@ -914,7 +915,7 @@ final class Phase2AppModelTests: XCTestCase {
             case "/api/ios/v1/bootstrap":
                 return (200, Data(Fixtures.bootstrapPhase2.utf8))
             case "/api/ios/v1/today":
-                return (200, Data(activeToday.utf8))
+                return (200, Data(serverFinished ? Fixtures.today.utf8 : activeToday.utf8))
             case "/api/ios/v1/prescriptions":
                 return (202, Data(Fixtures.planAck.utf8))
             case "/api/ios/v1/plans/current":
@@ -926,6 +927,7 @@ final class Phase2AppModelTests: XCTestCase {
             case "/api/ios/v1/workouts/workout-1/form":
                 return (400, Data(#"{"error":"form rejected"}"#.utf8))
             case "/api/ios/v1/workouts/workout-1/complete":
+                serverFinished = true
                 return (200, Data(Fixtures.workoutCompleted.utf8))
             default:
                 return (404, Data())
@@ -968,6 +970,75 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertTrue(transport.requests.contains {
             $0.url?.path == "/api/ios/v1/workouts/workout-1/complete"
         })
+        XCTAssertNil(model.activeWorkout)
+        XCTAssertNil(model.offlineCapture?.activeWorkout)
+
+        let (relaunched, relaunchDefaults, relaunchSuite, _) = pairedModel(
+            transport: transport,
+            offlineStore: OfflineCaptureStore(fileURL: offlineURL)
+        )
+        defer { relaunchDefaults.removePersistentDomain(forName: relaunchSuite) }
+        await relaunched.onLaunch()
+        XCTAssertNil(relaunched.activeWorkout)
+        XCTAssertEqual(relaunched.pendingOfflineOperations.map(\.kind), [.rateForm])
+        let discarded = await relaunched.discardOfflineOperation(
+            try XCTUnwrap(relaunched.pendingOfflineOperations.first?.operationId)
+        )
+        XCTAssertTrue(discarded)
+        await relaunched.refresh()
+        XCTAssertNil(relaunched.activeWorkout)
+    }
+
+    func testExpiredOfflineOperationIsNeverSent() async throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let cached = try decoder.decode(
+            WorkoutDetail.self,
+            from: Data(Fixtures.workoutInProgress.utf8)
+        )
+        let offlineURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("offline-expired-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: offlineURL) }
+        let captureStore = OfflineCaptureStore(fileURL: offlineURL)
+        _ = try captureStore.setActiveWorkout(cached)
+        let old = OfflineOperation(
+            operationId: "expired-set",
+            workoutId: cached.workoutId,
+            body: .addSet(
+                AddSetRequest(
+                    exerciseId: "competition_squat", loadKg: 140, reps: 3,
+                    rir: 2, velocityMps: nil, setIndex: 1, planItemIndex: 0
+                )
+            ),
+            createdAt: Date().addingTimeInterval(-(OfflineCaptureStore.replayWindow + 60)),
+            localSetId: -1
+        )
+        _ = try captureStore.record(old)
+
+        let activeToday = #"{"date":"2026-11-07","readiness":null,"readiness_score":null,"active_workout":"# + Fixtures.workoutInProgress + "}"
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(activeToday.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(
+            transport: transport,
+            offlineStore: captureStore
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        XCTAssertEqual(model.pendingOfflineOperations.first?.state, .expired)
+        XCTAssertTrue(transport.requests.allSatisfy {
+            $0.url?.path != "/api/ios/v1/workouts/workout-1/sets"
+        })
+        XCTAssertFalse(model.offlineSyncError?.isEmpty ?? true)
     }
 
     private func pairedModel(

@@ -163,7 +163,15 @@ struct TodayView: View {
                             HStack {
                                 Text(operation.kind.label)
                                 Spacer()
-                                if operation.state == .failed || operation.state == .conflict {
+                                if operation.state == .expired {
+                                    Text("Expired")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                    Button("Discard", role: .destructive) {
+                                        Task { _ = await model.discardOfflineOperation(operation.operationId) }
+                                    }
+                                    .font(.caption)
+                                } else if operation.state == .failed || operation.state == .conflict {
                                     Text(operation.state.rawValue.capitalized)
                                         .font(.caption)
                                         .foregroundStyle(.red)

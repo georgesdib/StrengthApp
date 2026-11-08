@@ -389,6 +389,77 @@ final class IOSAPIClient {
         )
     }
 
+    func exerciseCatalogue(session: IOSSession) async throws -> ExerciseCatalogueResponse {
+        try await get(path: "api/ios/v1/exercises", query: [], session: session)
+    }
+
+    func swapPlanExercise(
+        workoutId: String,
+        itemIndex: Int,
+        body: PlanSwapRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/plan/items/\(itemIndex)/swap",
+            body: body,
+            kind: .planEdit,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func removePlanExercise(
+        workoutId: String,
+        itemIndex: Int,
+        body: PlanRemoveRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/plan/items/\(itemIndex)/remove",
+            body: body,
+            kind: .planEdit,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func changePlanSets(
+        workoutId: String,
+        itemIndex: Int,
+        body: PlanSetsRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/plan/items/\(itemIndex)/sets",
+            body: body,
+            kind: .planEdit,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func addPlanExercise(
+        workoutId: String,
+        body: PlanAddRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/plan/exercises",
+            body: body,
+            kind: .planEdit,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func rateForm(
         workoutId: String,
         body: FormRatingRequest,

@@ -158,6 +158,12 @@ record of what was exercised.
       rep summary and expandable rep velocities, with the mean derived if omitted.
 - [ ] Rate form for an exercise, then record a correction: the current rating is shown, the button
       says "Save correction", and the earlier rating remains in the append-only record.
+- [ ] Add an exercise from the plan menu: the online catalogue picker loads, and the added item has
+      the server defaults (3 sets, 8–12 reps, RIR 2) with no invented load.
+- [ ] Swap an exercise before logging sets; the replacement has no load. After logging a set, the
+      swap action is disabled/explained.
+- [ ] Lower a planned set count; it stops before going below the logged-set count. The last plan
+      item cannot be removed.
 - [ ] Repeating the same set request (for example after a lost response) does not duplicate it.
 - [ ] Optional 1-5 form ratings save and survive a refresh.
 - [ ] Finish with a session RPE 1-10; the workout completes, appears in History and contributes to

@@ -50,6 +50,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var pairingError: String?
     @Published private(set) var activeWorkout: WorkoutDetail?
+    @Published private(set) var exerciseCatalogue: [ExerciseOption] = []
+    @Published private(set) var isLoadingExerciseCatalogue = false
+    @Published private(set) var exerciseCatalogueError: String?
     @Published private(set) var progress: ProgressResponse?
     @Published private(set) var progressError: String?
     @Published private(set) var hasLoadedProgress = false
@@ -865,6 +868,132 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func loadExerciseCatalogue(force: Bool = false) async {
+        guard let session else { return }
+        if !force && !exerciseCatalogue.isEmpty { return }
+        guard !isLoadingExerciseCatalogue else { return }
+        isLoadingExerciseCatalogue = true
+        exerciseCatalogueError = nil
+        defer { isLoadingExerciseCatalogue = false }
+        do {
+            exerciseCatalogue = try await client.exerciseCatalogue(session: session).exercises
+        } catch {
+            exerciseCatalogueError = message(for: error)
+            if let api = error as? APIError, api.isAuthenticationFailure {
+                forgetLocally(message: api.errorDescription)
+            }
+        }
+    }
+
+    func swapPlanExercise(
+        workoutId: String,
+        itemIndex: Int,
+        exerciseId: String,
+        expectedExerciseId: String,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard let session else { return false }
+        return await performPlanEdit(idempotencyKey: idempotencyKey) {
+            try await client.swapPlanExercise(
+                workoutId: workoutId,
+                itemIndex: itemIndex,
+                body: PlanSwapRequest(
+                    exerciseId: exerciseId,
+                    expectedExerciseId: expectedExerciseId
+                ),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+        }
+    }
+
+    func removePlanExercise(
+        workoutId: String,
+        itemIndex: Int,
+        expectedExerciseId: String,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard let session else { return false }
+        return await performPlanEdit(idempotencyKey: idempotencyKey) {
+            try await client.removePlanExercise(
+                workoutId: workoutId,
+                itemIndex: itemIndex,
+                body: PlanRemoveRequest(expectedExerciseId: expectedExerciseId),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+        }
+    }
+
+    func changePlanSets(
+        workoutId: String,
+        itemIndex: Int,
+        delta: Int,
+        expectedExerciseId: String,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard let session else { return false }
+        return await performPlanEdit(idempotencyKey: idempotencyKey) {
+            try await client.changePlanSets(
+                workoutId: workoutId,
+                itemIndex: itemIndex,
+                body: PlanSetsRequest(
+                    delta: delta,
+                    expectedExerciseId: expectedExerciseId
+                ),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+        }
+    }
+
+    func addPlanExercise(
+        workoutId: String,
+        exerciseId: String,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard let session else { return false }
+        return await performPlanEdit(idempotencyKey: idempotencyKey) {
+            try await client.addPlanExercise(
+                workoutId: workoutId,
+                body: PlanAddRequest(exerciseId: exerciseId),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+        }
+    }
+
+    private func performPlanEdit(
+        idempotencyKey: String,
+        _ operation: () async throws -> WorkoutDetail
+    ) async -> Bool {
+        guard !isSaving, session != nil, activeWorkout != nil else { return false }
+        guard permitsMutation(kind: .planEdit, operationId: idempotencyKey) else {
+            return false
+        }
+        isSaving = true
+        mutationFailureAmbiguous = false
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
+        do {
+            activeWorkout = try await operation()
+            mutationError = nil
+            workoutRefreshGrace = true
+            return true
+        } catch {
+            if let api = error as? APIError,
+               ["workout_not_active", "plan_consumed", "plan_changed",
+                "sets_already_logged", "sets_below_logged", "last_plan_item",
+                "exercise_already_present"].contains(api.code ?? "") {
+                await refresh()
+            }
+            handleMutation(error)
+            return false
+        }
+    }
+
     func completeWorkout(
         _ body: CompleteWorkoutRequest,
         idempotencyKey: String
@@ -988,7 +1117,7 @@ final class AppModel: ObservableObject {
                     let ack: PlanAckEnvelope = try await client.replay(entry, session: session)
                     _ = ack
                     await reconcilePlanState()
-                case .startWorkout, .addSet, .rateForm:
+                case .startWorkout, .addSet, .rateForm, .planEdit:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = true
                 case .completeWorkout, .abandonWorkout:
@@ -1091,6 +1220,9 @@ final class AppModel: ObservableObject {
         historyOffset = 0
         hasLoadedHistory = false
         activeWorkout = nil
+        exerciseCatalogue = []
+        isLoadingExerciseCatalogue = false
+        exerciseCatalogueError = nil
         progress = nil
         progressError = nil
         hasLoadedProgress = false

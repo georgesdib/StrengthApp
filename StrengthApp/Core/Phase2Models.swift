@@ -223,6 +223,7 @@ struct WorkoutSet: Decodable, Identifiable {
     let setId: Int?
     let exerciseId: String
     let setIndex: Int?
+    let planItemIndex: Int?
     let loadKg: Double?
     let reps: Int?
     let rir: Int?
@@ -443,6 +444,37 @@ struct CompleteWorkoutRequest: Encodable, Equatable {
 }
 
 struct EmptyRequest: Encodable {}
+
+// MARK: - Exercise catalogue and plan edits (R8)
+
+struct ExerciseOption: Decodable, Identifiable, Equatable {
+    let id: String
+    let display: String
+    let pattern: String?
+}
+
+struct ExerciseCatalogueResponse: Decodable {
+    let exercises: [ExerciseOption]
+}
+
+struct PlanSwapRequest: Encodable, Equatable {
+    let exerciseId: String
+    let expectedExerciseId: String
+}
+
+struct PlanRemoveRequest: Encodable, Equatable {
+    let expectedExerciseId: String
+}
+
+struct PlanSetsRequest: Encodable, Equatable {
+    let delta: Int
+    let expectedExerciseId: String
+}
+
+struct PlanAddRequest: Encodable, Equatable {
+    let exerciseId: String
+}
+
 struct PlanItemChoice: Identifiable {
     let index: Int
     let item: PrescriptionItem

@@ -670,6 +670,33 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertNil(workout.formRating(for: "competition_deadlift"))
     }
 
+    func testExerciseCatalogueAndPlanItemAttributionDecode() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let catalogue = try decoder.decode(
+            ExerciseCatalogueResponse.self,
+            from: Data(#"""
+            {"exercises":[
+              {"id":"competition_squat","display":"Competition Squat","pattern":"squat"},
+              {"id":"bench_press","display":"Bench Press","pattern":null}
+            ]}
+            """#.utf8)
+        )
+        XCTAssertEqual(catalogue.exercises.count, 2)
+        XCTAssertEqual(catalogue.exercises[0].display, "Competition Squat")
+        XCTAssertNil(catalogue.exercises[1].pattern)
+
+        let set = try decoder.decode(
+            WorkoutSet.self,
+            from: Data(#"""
+            {"set_id":1,"exercise_id":"competition_squat","set_index":1,
+             "plan_item_index":2,"load_kg":140,"reps":3}
+            """#.utf8)
+        )
+        XCTAssertEqual(set.planItemIndex, 2)
+        XCTAssertEqual(set.exerciseId, "competition_squat")
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

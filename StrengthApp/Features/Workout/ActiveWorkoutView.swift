@@ -32,6 +32,9 @@ struct ActiveWorkoutView: View {
     @State private var abandonKey = UUID().uuidString.lowercased()
     @State private var confirmingAbandon = false
     @State private var abandonError: String?
+    @State private var planPicker: PlanPickerMode?
+    @State private var pendingRemoval: PlanRemoval?
+    @State private var planEditError: String?
 
     private var workout: WorkoutDetail? { model.activeWorkout }
 
@@ -59,11 +62,14 @@ struct ActiveWorkoutView: View {
                             }
                         }
 
-                        Section("Plan") {
-                            ForEach(workout.plan?.items ?? []) { item in
+                        Section {
+                            let planItems = workout.plan?.items ?? []
+                            ForEach(Array(planItems.enumerated()), id: \.offset) { index, item in
+                                let exercise = item.exerciseId ?? ""
+                                let setState = planSetState(index: index, exerciseId: exercise)
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack {
-                                        Text(Self.label(item.exerciseId ?? "exercise"))
+                                        Text(Self.label(exercise.isEmpty ? "exercise" : exercise))
                                             .font(.headline)
                                         Spacer()
                                         if let sets = item.sets {
@@ -71,6 +77,50 @@ struct ActiveWorkoutView: View {
                                                 .font(.subheadline)
                                                 .foregroundStyle(.secondary)
                                         }
+                                        Menu {
+                                            Button("Swap exercise") {
+                                                planPicker = .swap(index: index)
+                                            }
+                                            .disabled(setState.logged > 0 || exercise.isEmpty)
+                                            Button("Remove exercise", role: .destructive) {
+                                                pendingRemoval = PlanRemoval(
+                                                    index: index,
+                                                    exerciseId: exercise,
+                                                    label: Self.label(exercise)
+                                                )
+                                            }
+                                            .disabled(planItems.count == 1 || exercise.isEmpty)
+                                            Divider()
+                                            Button("Add one set") {
+                                                Task {
+                                                    await changeSets(
+                                                        workout: workout,
+                                                        index: index,
+                                                        delta: 1,
+                                                        exerciseId: exercise
+                                                    )
+                                                }
+                                            }
+                                            .disabled(model.isSaving || (item.sets ?? 1) >= 20)
+                                            Button("Remove one set") {
+                                                Task {
+                                                    await changeSets(
+                                                        workout: workout,
+                                                        index: index,
+                                                        delta: -1,
+                                                        exerciseId: exercise
+                                                    )
+                                                }
+                                            }
+                                            .disabled(model.isSaving || !canDecrease(
+                                                item: item,
+                                                state: setState
+                                            ))
+                                        } label: {
+                                            Image(systemName: "ellipsis.circle")
+                                                .accessibilityLabel("Plan options")
+                                        }
+                                        .disabled(model.isSaving)
                                     }
                                     HStack(spacing: 8) {
                                         Text(item.repsLabel)
@@ -79,8 +129,30 @@ struct ActiveWorkoutView: View {
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    if setState.logged > 0 {
+                                        Text("Swap is unavailable after sets are logged.")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                                 .padding(.vertical, 2)
+                            }
+                            if let planEditError {
+                                Text(planEditError)
+                                    .foregroundStyle(.red)
+                                    .accessibilityIdentifier("plan-edit-error")
+                            }
+                        } header: {
+                            HStack {
+                                Text("Plan")
+                                Spacer()
+                                Button {
+                                    planPicker = .add
+                                } label: {
+                                    Label("Add", systemImage: "plus")
+                                }
+                                .accessibilityIdentifier("add-plan-exercise")
+                                .disabled(model.isSaving)
                             }
                         }
 
@@ -347,6 +419,29 @@ struct ActiveWorkoutView: View {
             } message: {
                 Text("Logged sets stay in this workout, but the session will not be completed.")
             }
+            .sheet(item: $planPicker) { mode in
+                ExercisePickerSheet(model: model, title: mode.title) { exerciseId in
+                    planPicker = nil
+                    Task {
+                        switch mode {
+                        case .swap(let index):
+                            await swapExercise(index: index, exerciseId: exerciseId)
+                        case .add:
+                            await addExercise(exerciseId: exerciseId)
+                        }
+                    }
+                }
+            }
+            .alert(item: $pendingRemoval) { removal in
+                Alert(
+                    title: Text("Remove \(removal.label)?"),
+                    message: Text("Logged sets are kept. The original prescription stays unchanged."),
+                    primaryButton: .destructive(Text("Remove")) {
+                        Task { await removeExercise(removal) }
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
     }
 
     private func hideKeyboard() {
@@ -442,6 +537,88 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    private func planSetState(index: Int, exerciseId: String) -> PlanSetState {
+        var attributed = 0
+        var ambiguous = 0
+        for set in workout?.sets ?? [] where set.exerciseId == exerciseId {
+            if let itemIndex = set.planItemIndex {
+                if itemIndex == index { attributed += 1 }
+            } else {
+                ambiguous += 1
+            }
+        }
+        return PlanSetState(attributed: attributed, ambiguous: ambiguous)
+    }
+
+    private func canDecrease(item: PrescriptionItem, state: PlanSetState) -> Bool {
+        let current = item.sets ?? 1
+        return state.ambiguous == 0 && current > 1 && current - 1 >= state.attributed
+    }
+
+    private func swapExercise(index: Int, exerciseId: String) async {
+        guard let workout,
+              let items = workout.plan?.items,
+              items.indices.contains(index),
+              let expected = items[index].exerciseId else { return }
+        planEditError = nil
+        let key = UUID().uuidString.lowercased()
+        if !(await model.swapPlanExercise(
+            workoutId: workout.workoutId,
+            itemIndex: index,
+            exerciseId: exerciseId,
+            expectedExerciseId: expected,
+            idempotencyKey: key
+        )) {
+            planEditError = model.mutationError
+        }
+    }
+
+    private func removeExercise(_ removal: PlanRemoval) async {
+        guard let workout else { return }
+        planEditError = nil
+        let key = UUID().uuidString.lowercased()
+        if !(await model.removePlanExercise(
+            workoutId: workout.workoutId,
+            itemIndex: removal.index,
+            expectedExerciseId: removal.exerciseId,
+            idempotencyKey: key
+        )) {
+            planEditError = model.mutationError
+        }
+    }
+
+    private func changeSets(
+        workout: WorkoutDetail,
+        index: Int,
+        delta: Int,
+        exerciseId: String
+    ) async {
+        planEditError = nil
+        let key = UUID().uuidString.lowercased()
+        if !(await model.changePlanSets(
+            workoutId: workout.workoutId,
+            itemIndex: index,
+            delta: delta,
+            expectedExerciseId: exerciseId,
+            idempotencyKey: key
+        )) {
+            planEditError = model.mutationError
+        }
+    }
+
+    private func addExercise(exerciseId: String) async {
+        guard let workout else { return }
+        planEditError = nil
+        let key = UUID().uuidString.lowercased()
+        if !(await model.addPlanExercise(
+            workoutId: workout.workoutId,
+            exerciseId: exerciseId,
+            idempotencyKey: key
+        )) {
+            planEditError = model.mutationError
+        }
+    }
+
     private func finish(_ workout: WorkoutDetail) async {
         finishError = nil
         let duration = parseDouble(durationText)
@@ -506,5 +683,114 @@ struct ActiveWorkoutView: View {
     private static func durationLabel(_ seconds: Int) -> String {
         let minutes = seconds / 60
         return "\(minutes) min"
+    }
+}
+
+enum PlanPickerMode: Identifiable {
+    case swap(index: Int)
+    case add
+
+    var id: String {
+        switch self {
+        case .swap(let index): return "swap-\(index)"
+        case .add: return "add"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .swap: return "Swap exercise"
+        case .add: return "Add exercise"
+        }
+    }
+}
+
+struct PlanRemoval: Identifiable {
+    let index: Int
+    let exerciseId: String
+    let label: String
+
+    var id: String { "\(index)-\(exerciseId)" }
+}
+
+struct PlanSetState {
+    let attributed: Int
+    let ambiguous: Int
+
+    var logged: Int { attributed + ambiguous }
+}
+
+private struct ExercisePickerSheet: View {
+    @ObservedObject var model: AppModel
+    let title: String
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+
+    private var filtered: [ExerciseOption] {
+        guard !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return model.exerciseCatalogue
+        }
+        let query = search.localizedLowercase
+        return model.exerciseCatalogue.filter { option in
+            option.display.localizedLowercase.contains(query)
+                || option.id.localizedLowercase.contains(query)
+                || (option.pattern?.localizedLowercase.contains(query) ?? false)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let error = model.exerciseCatalogueError {
+                    Section {
+                        Text(error).foregroundStyle(.orange)
+                        Button("Try again") {
+                            Task { await model.loadExerciseCatalogue(force: true) }
+                        }
+                    }
+                }
+                if model.exerciseCatalogue.isEmpty, model.isLoadingExerciseCatalogue {
+                    HStack {
+                        Spacer()
+                        ProgressView("Loading exercises…")
+                        Spacer()
+                    }
+                } else if filtered.isEmpty {
+                    ContentUnavailableView(
+                        "No exercises",
+                        systemImage: "magnifyingglass",
+                        description: Text("Try another search.")
+                    )
+                } else {
+                    ForEach(filtered) { option in
+                        Button {
+                            onSelect(option.id)
+                            dismiss()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option.display)
+                                    .foregroundStyle(.primary)
+                                if let pattern = option.pattern, !pattern.isEmpty {
+                                    Text(pattern.replacingOccurrences(of: "_", with: " "))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .accessibilityIdentifier("exercise-option-\(option.id)")
+                    }
+                }
+            }
+            .searchable(text: $search, prompt: "Search exercises")
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .task { await model.loadExerciseCatalogue() }
+            .refreshable { await model.loadExerciseCatalogue(force: true) }
+        }
     }
 }

@@ -140,6 +140,22 @@ final class StrengthAppUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 25))
         attachScreenshot(app, name: "11-workout")
 
+        // R8: the authenticated catalogue feeds the add-exercise picker; the server applies
+        // its own 3x8-12 @ RIR 2 defaults because the phone sends only the exercise id.
+        let addPlan = app.buttons["add-plan-exercise"]
+        XCTAssertTrue(addPlan.waitForExistence(timeout: 10))
+        addPlan.tap()
+        XCTAssertTrue(app.navigationBars["Add exercise"].waitForExistence(timeout: 10))
+        let exerciseSearch = app.searchFields.firstMatch
+        XCTAssertTrue(exerciseSearch.waitForExistence(timeout: 5))
+        exerciseSearch.tap()
+        exerciseSearch.typeText("lat pulldown")
+        let latPulldown = app.buttons["exercise-option-lat_pulldown"]
+        XCTAssertTrue(latPulldown.waitForExistence(timeout: 10))
+        latPulldown.tap()
+        XCTAssertTrue(app.staticTexts["Lat Pulldown"].waitForExistence(timeout: 10))
+        attachScreenshot(app, name: "11b-plan-exercise-added")
+
         let reps = app.textFields["set-reps"]
         scrollTo(reps, in: app)
         XCTAssertTrue(reps.waitForExistence(timeout: 10))

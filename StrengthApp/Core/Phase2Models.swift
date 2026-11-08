@@ -477,6 +477,7 @@ struct PlanAddRequest: Encodable, Equatable {
 
 struct PlanItemChoice: Identifiable {
     let index: Int
+    let identity: Int
     let item: PrescriptionItem
 
     var id: Int { index }
@@ -495,7 +496,13 @@ extension PrescriptionPlan {
     func choices(for exerciseId: String) -> [PlanItemChoice] {
         items.enumerated()
             .filter { $0.element.exerciseId == exerciseId }
-            .map { PlanItemChoice(index: $0.offset, item: $0.element) }
+            .map {
+                PlanItemChoice(
+                    index: $0.offset,
+                    identity: $0.element.orderIndex ?? $0.offset,
+                    item: $0.element
+                )
+            }
     }
 
     /// The array offset only when the exercise appears exactly once. A repeated exercise is
@@ -515,5 +522,16 @@ extension PrescriptionPlan {
             return nil
         }
         return selected
+    }
+
+    /// The stable identity sent to the server. The picker tag still uses the display position.
+    func resolvedPlanItemIdentity(for exerciseId: String, selected: Int?) -> Int? {
+        let matches = choices(for: exerciseId)
+        if matches.count == 1 { return matches[0].identity }
+        guard matches.count > 1, let selected,
+              let choice = matches.first(where: { $0.index == selected }) else {
+            return nil
+        }
+        return choice.identity
     }
 }

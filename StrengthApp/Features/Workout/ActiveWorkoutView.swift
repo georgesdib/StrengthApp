@@ -66,7 +66,8 @@ struct ActiveWorkoutView: View {
                             let planItems = workout.plan?.items ?? []
                             ForEach(Array(planItems.enumerated()), id: \.offset) { index, item in
                                 let exercise = item.exerciseId ?? ""
-                                let setState = planSetState(index: index, exerciseId: exercise)
+                                let identity = item.orderIndex ?? index
+                                let setState = planSetState(identity: identity, exerciseId: exercise)
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack {
                                         Text(Self.label(exercise.isEmpty ? "exercise" : exercise))
@@ -494,7 +495,7 @@ struct ActiveWorkoutView: View {
         let index = nextSetIndex(for: exerciseId, in: workout)
         // Unique exercises keep automatic attribution. A repeated exercise is only attributed
         // when the owner selects the exact plan item; otherwise the safe nil fallback is kept.
-        let planIndex = workout.plan?.resolvedPlanItemIndex(
+        let planIndex = workout.plan?.resolvedPlanItemIdentity(
             for: exerciseId,
             selected: selectedPlanItemIndex
         )
@@ -537,12 +538,12 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func planSetState(index: Int, exerciseId: String) -> PlanSetState {
+    private func planSetState(identity: Int, exerciseId: String) -> PlanSetState {
         var attributed = 0
         var ambiguous = 0
         for set in workout?.sets ?? [] where set.exerciseId == exerciseId {
-            if let itemIndex = set.planItemIndex {
-                if itemIndex == index { attributed += 1 }
+            if let itemIdentity = set.planItemIndex {
+                if itemIdentity == identity { attributed += 1 }
             } else {
                 ambiguous += 1
             }

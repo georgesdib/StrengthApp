@@ -697,6 +697,24 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertEqual(set.exerciseId, "competition_squat")
     }
 
+    func testPlanIdentityUsesStableOrderIndexAfterRemoval() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let plan = try decoder.decode(
+            PrescriptionPlan.self,
+            from: Data(#"""
+            {"items":[
+              {"order_index":1,"exercise_id":"competition_bench_press"},
+              {"order_index":2,"exercise_id":"competition_squat"}
+            ]}
+            """#.utf8)
+        )
+        XCTAssertEqual(plan.choices(for: "competition_bench_press").first?.index, 0)
+        XCTAssertEqual(plan.choices(for: "competition_bench_press").first?.identity, 1)
+        XCTAssertEqual(plan.resolvedPlanItemIdentity(for: "competition_bench_press", selected: nil), 1)
+        XCTAssertEqual(plan.resolvedPlanItemIdentity(for: "competition_squat", selected: nil), 2)
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

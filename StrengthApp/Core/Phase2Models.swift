@@ -59,7 +59,7 @@ enum JSONValue: Decodable, Equatable {
 
 // MARK: - Prescription
 
-struct PrescriptionPlan: Decodable {
+struct PrescriptionPlan: Codable {
     let forDate: String?
     let sessionType: String?
     let sessionLabel: String?
@@ -68,7 +68,7 @@ struct PrescriptionPlan: Decodable {
     let issues: [String]?
 }
 
-struct PrescriptionItem: Decodable, Identifiable {
+struct PrescriptionItem: Codable, Identifiable {
     let orderIndex: Int?
     let exerciseId: String?
     let sets: Int?
@@ -197,7 +197,7 @@ struct PlanProgress: Equatable {
 
 // MARK: - Workout
 
-struct WorkoutDetail: Decodable, Identifiable {
+struct WorkoutDetail: Codable, Identifiable {
     let workoutId: String
     let prescriptionId: String?
     let forDate: String?
@@ -219,7 +219,7 @@ struct WorkoutDetail: Decodable, Identifiable {
     }
 }
 
-struct WorkoutSet: Decodable, Identifiable {
+struct WorkoutSet: Codable, Identifiable {
     let setId: Int?
     let exerciseId: String
     let setIndex: Int?
@@ -245,20 +245,20 @@ struct WorkoutSet: Decodable, Identifiable {
     }
 }
 
-struct WorkoutRep: Decodable, Identifiable {
+struct WorkoutRep: Codable, Identifiable {
     let repIndex: Int
     let velocityMps: Double
 
     var id: Int { repIndex }
 }
 
-struct WorkoutRepDetail: Decodable {
+struct WorkoutRepDetail: Codable {
     let reps: [WorkoutRep]
     let source: String?
     let batchId: String?
 }
 
-struct WorkoutRepSummary: Decodable {
+struct WorkoutRepSummary: Codable {
     let count: Int
     let first: Double
     let last: Double
@@ -269,7 +269,7 @@ struct WorkoutRepSummary: Decodable {
     let lossPct: Double?
 }
 
-struct WorkoutForm: Decodable, Identifiable {
+struct WorkoutForm: Codable, Identifiable {
     let formId: Int?
     let workoutId: String?
     let exerciseId: String
@@ -392,14 +392,14 @@ struct StartWorkoutRequest: Encodable {
     let issuedPlanId: String
 }
 
-struct RepVelocity: Encodable, Equatable, Identifiable {
+struct RepVelocity: Codable, Equatable, Identifiable {
     let repIndex: Int
     let velocityMps: Double
 
     var id: Int { repIndex }
 }
 
-struct AddSetRequest: Encodable, Equatable {
+struct AddSetRequest: Codable, Equatable {
     let exerciseId: String
     let loadKg: Double?
     let reps: Int
@@ -408,6 +408,7 @@ struct AddSetRequest: Encodable, Equatable {
     let setIndex: Int?
     let planItemIndex: Int?
     let repVelocities: [RepVelocity]?
+    let performedAt: String?
 
     init(
         exerciseId: String,
@@ -417,7 +418,8 @@ struct AddSetRequest: Encodable, Equatable {
         velocityMps: Double?,
         setIndex: Int?,
         planItemIndex: Int?,
-        repVelocities: [RepVelocity]? = nil
+        repVelocities: [RepVelocity]? = nil,
+        performedAt: String? = nil
     ) {
         self.exerciseId = exerciseId
         self.loadKg = loadKg
@@ -427,20 +429,36 @@ struct AddSetRequest: Encodable, Equatable {
         self.setIndex = setIndex
         self.planItemIndex = planItemIndex
         self.repVelocities = repVelocities
+        self.performedAt = performedAt
     }
 }
 
-struct FormRatingRequest: Encodable, Equatable {
+struct FormRatingRequest: Codable, Equatable {
     let exerciseId: String
     let rating: Int
     let note: String?
 }
 
-struct CompleteWorkoutRequest: Encodable, Equatable {
+struct CompleteWorkoutRequest: Codable, Equatable {
     let sessionRpe: Double?
     let notRecorded: Bool
     let durationMin: Double?
     let notes: String?
+    let endedAt: String?
+
+    init(
+        sessionRpe: Double?,
+        notRecorded: Bool,
+        durationMin: Double?,
+        notes: String?,
+        endedAt: String? = nil
+    ) {
+        self.sessionRpe = sessionRpe
+        self.notRecorded = notRecorded
+        self.durationMin = durationMin
+        self.notes = notes
+        self.endedAt = endedAt
+    }
 }
 
 struct EmptyRequest: Encodable {}

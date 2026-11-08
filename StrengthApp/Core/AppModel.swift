@@ -57,6 +57,8 @@ final class AppModel: ObservableObject {
     /// Settings the owner chose for the current request, kept for retry after a lost response.
     @Published private(set) var planSettings = PlanSettings()
     private var planPollTask: Task<Void, Never>?
+    private var planPollFailures = 0
+    private static let maxPlanPollFailures = 10
     @Published private(set) var isSaving = false
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
@@ -663,6 +665,7 @@ final class AppModel: ObservableObject {
         guard let session else { return true }
         do {
             let state = try await client.planState(session: session)
+            planPollFailures = 0
             applyPlanState(state)
             switch state.status {
             case "queued", "building":
@@ -674,7 +677,17 @@ final class AppModel: ObservableObject {
             handle(error)
             return true
         } catch {
-            // A failed read is not a failed request: keep waiting, the plan may already exist.
+            // A failed read is not a failed request: the plan may already exist, so keep
+            // waiting. Ten consecutive failures is not a blip though, and spinning forever
+            // would hide a real problem behind a card that never resolves.
+            planPollFailures += 1
+            if planPollFailures >= Self.maxPlanPollFailures {
+                stopPlanPolling()
+                prescriptionState = .failed(
+                    "Could not read the plan state. The request may still finish; refresh to check."
+                )
+                return true
+            }
             return false
         }
     }

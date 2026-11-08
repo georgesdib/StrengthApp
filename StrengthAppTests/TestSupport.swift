@@ -275,32 +275,34 @@ enum Fixtures {
     }
     """#
 
-    /// The authoritative ready read, reusing the legacy fixture's plan body.
+    /// The authoritative ready read, reusing the legacy fixture's plan body. Built with
+    /// JSONSerialization so the embedded plan cannot be corrupted by string escaping.
     static let plansReady: String = {
         guard let data = issuedPlan.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let plan = object["plan"],
-              let planData = try? JSONSerialization.data(withJSONObject: plan),
-              let planText = String(data: planData, encoding: .utf8) else {
+              let plan = object["plan"] else {
             return #"{"status":"none"}"#
         }
-        return #"""
-        {
-          "status": "ready",
-          "issued_plan_id": "plan-1",
-          "for_date": "2026-11-07",
-          "elapsed_seconds": 3,
-          "request_expires_at": "2026-11-07T16:15:00+00:00",
-          "plan_expires_at": "2026-11-07T17:00:00+00:00",
-          "retry_after_ms": 0,
-          "settings": {"session_type": "auto", "minimum_session": false},
-          "session_type": "squat",
-          "plan": #(planText),
-          "readiness": null,
-          "warnings": [],
-          "error": null
+        let payload: [String: Any] = [
+            "status": "ready",
+            "issued_plan_id": "plan-1",
+            "for_date": "2026-11-07",
+            "elapsed_seconds": 3,
+            "request_expires_at": "2026-11-07T16:15:00+00:00",
+            "plan_expires_at": "2026-11-07T17:00:00+00:00",
+            "retry_after_ms": 0,
+            "settings": ["session_type": "auto", "minimum_session": false],
+            "session_type": "squat",
+            "plan": plan,
+            "readiness": NSNull(),
+            "warnings": [],
+            "error": NSNull(),
+        ]
+        guard let out = try? JSONSerialization.data(withJSONObject: payload),
+              let text = String(data: out, encoding: .utf8) else {
+            return #"{"status":"none"}"#
         }
-        """#
+        return text
     }()
 
     static let issuedPlan = #"""

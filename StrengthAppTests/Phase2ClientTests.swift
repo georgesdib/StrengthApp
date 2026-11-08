@@ -997,6 +997,9 @@ final class Phase2AppModelTests: XCTestCase {
     }
 
     func testStartSurfacesConsumedPrescriptionRecovery() async {
+        // A consumed plan is no longer the device's live row, so the authoritative read must
+        // stop reporting it once start fails; a static "ready" would resurrect the preview.
+        var consumed = false
         let transport = StubTransport { request in
             switch request.url?.path {
             case "/api/ios/v1/bootstrap":
@@ -1006,8 +1009,11 @@ final class Phase2AppModelTests: XCTestCase {
             case "/api/ios/v1/prescriptions":
                 return (202, Data(Fixtures.planAck.utf8))
             case "/api/ios/v1/plans/current":
-                return (200, Data(Fixtures.plansReady.utf8))
+                return consumed
+                    ? (200, Data(#"{"status":"none"}"#.utf8))
+                    : (200, Data(Fixtures.plansReady.utf8))
             case "/api/ios/v1/workouts":
+                consumed = true
                 return (410, Data(#"{"error":"issued plan has already been used","code":"plan_consumed"}"#.utf8))
             default:
                 return (404, Data())

@@ -46,6 +46,7 @@ struct OfflineOperation: Codable, Equatable, Identifiable {
     let body: OfflineOperationBody
     let createdAt: Date
     let localSetId: Int?
+    let localFormId: Int?
     var state: OfflineOperationState
     var lastError: String?
     var attemptedAt: Date?
@@ -67,6 +68,7 @@ struct OfflineOperation: Codable, Equatable, Identifiable {
         body: OfflineOperationBody,
         createdAt: Date,
         localSetId: Int? = nil,
+        localFormId: Int? = nil,
         state: OfflineOperationState = .pending,
         lastError: String? = nil,
         attemptedAt: Date? = nil
@@ -76,6 +78,7 @@ struct OfflineOperation: Codable, Equatable, Identifiable {
         self.body = body
         self.createdAt = createdAt
         self.localSetId = localSetId
+        self.localFormId = localFormId
         self.state = state
         self.lastError = lastError
         self.attemptedAt = attemptedAt
@@ -181,9 +184,24 @@ final class OfflineCaptureStore {
     }
 
     func record(_ operation: OfflineOperation) throws -> OfflineCapture {
+        try record(operation, activeWorkout: nil)
+    }
+
+    /// Atomically append an operation and the optimistic workout it belongs to.
+    func record(_ operation: OfflineOperation, activeWorkout: WorkoutDetail?) throws -> OfflineCapture {
         lock.lock()
         defer { lock.unlock() }
         var capture = try loadUnlocked()
+        if let activeWorkout {
+            if let current = capture.activeWorkout?.workoutId,
+               current != activeWorkout.workoutId,
+               !capture.operations.isEmpty {
+                throw OfflineCaptureStoreError.invalidOperation(
+                    "Resolve queued work before switching to a different active workout."
+                )
+            }
+            capture.activeWorkout = activeWorkout
+        }
         guard !capture.operations.contains(where: {
             $0.operationId == operation.operationId
         }) else {

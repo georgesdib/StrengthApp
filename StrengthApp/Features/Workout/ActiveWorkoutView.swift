@@ -53,6 +53,19 @@ struct ActiveWorkoutView: View {
         Group {
                 if let workout {
                     Form {
+                        if model.offlineCaptureActive {
+                            Section("Offline capture") {
+                                Label(
+                                    model.isOffline ? "Offline — saved on this phone" : "Pending server acknowledgement",
+                                    systemImage: model.isOffline ? "wifi.slash" : "clock.arrow.circlepath"
+                                )
+                                .foregroundStyle(.orange)
+                                Text("\(model.pendingOfflineCount) queued operation\(model.pendingOfflineCount == 1 ? "" : "s"). These are not server-confirmed yet.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
                         Section("Workout") {
                             LabeledContent("Session", value: Self.label(workout.sessionType ?? "workout"))
                             LabeledContent("Date", value: workout.forDate ?? "—")
@@ -181,9 +194,20 @@ struct ActiveWorkoutView: View {
                                             if let velocity = set.velocityLabel {
                                                 Text(velocity)
                                             }
+                                            if set.isPendingLocal {
+                                                Text("Pending")
+                                                    .foregroundStyle(.orange)
+                                            }
                                         }
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                        if set.isPendingLocal, let localId = set.setId {
+                                            Button("Remove pending set", role: .destructive) {
+                                                Task { await removePendingSet(localId) }
+                                            }
+                                            .font(.caption)
+                                            .disabled(model.isSaving)
+                                        }
                                         if let summary = set.repSummary {
                                             Text("Per-rep \(summary.count) reps · \(String(format: "%.2f", summary.first)) → \(String(format: "%.2f", summary.last)) m/s · loss \(String(format: "%.2f", summary.lossAbs)) m/s")
                                                 .font(.caption2)
@@ -344,7 +368,7 @@ struct ActiveWorkoutView: View {
                                 .disabled(finishLocked)
                             }
                             LabeledContent("Duration (min)") {
-                                TextField("optional", text: $durationText)
+                                TextField("measured automatically", text: $durationText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .accessibilityIdentifier("finish-duration")
@@ -458,9 +482,6 @@ struct ActiveWorkoutView: View {
         if ratingExercise.isEmpty, let first = exerciseOptions.first {
             ratingExercise = first
         }
-        if durationText.isEmpty, let elapsed = workout.elapsedSeconds, elapsed > 0 {
-            durationText = String(format: "%.1f", Double(elapsed) / 60.0)
-        }
     }
 
     private func addSet(to workout: WorkoutDetail) async {
@@ -535,6 +556,12 @@ struct ActiveWorkoutView: View {
             formOperation.acknowledged()
         } else {
             formError = model.mutationError
+        }
+    }
+
+    private func removePendingSet(_ localSetId: Int) async {
+        if !(await model.cancelOfflineSet(localSetId: localSetId)) {
+            addError = model.mutationError
         }
     }
 

@@ -715,11 +715,104 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertEqual(plan.resolvedPlanItemIdentity(for: "competition_squat", selected: nil), 2)
     }
 
+    func testOfflineCapturePersistsAddFormFinishAndCancellation() async throws {
+        var offline = false
+        let transport = StubTransport { request in
+            if offline {
+                return (500, Data())
+            }
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let offlineURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("offline-integration-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: offlineURL) }
+        let captureStore = OfflineCaptureStore(fileURL: offlineURL)
+        let (model, defaults, suite, _) = pairedModel(
+            transport: transport,
+            offlineStore: captureStore
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(readinessAck: false, idempotencyKey: "issue-offline")
+        let started = await model.startWorkout(idempotencyKey: "start-offline")
+        XCTAssertTrue(started)
+        let workoutId = try XCTUnwrap(model.activeWorkout?.workoutId)
+
+        offline = true
+        let add = AddSetRequest(
+            exerciseId: "competition_squat",
+            loadKg: 140,
+            reps: 3,
+            rir: 2,
+            velocityMps: nil,
+            setIndex: 1,
+            planItemIndex: 0
+        )
+        let added = await model.addSet(add, idempotencyKey: "offline-set")
+        XCTAssertTrue(added)
+        XCTAssertTrue(model.activeWorkout?.sets?.last?.isPendingLocal == true)
+        let rated = await model.rateForm(
+            FormRatingRequest(exerciseId: "competition_squat", rating: 4, note: nil),
+            idempotencyKey: "offline-form"
+        )
+        XCTAssertTrue(rated)
+        XCTAssertEqual(
+            model.activeWorkout?.formRating(for: "competition_squat")?.formId,
+            -1
+        )
+        let finished = await model.completeWorkout(
+            CompleteWorkoutRequest(
+                sessionRpe: 7,
+                notRecorded: false,
+                durationMin: nil,
+                notes: "offline"
+            ),
+            idempotencyKey: "offline-finish"
+        )
+        XCTAssertTrue(finished)
+        XCTAssertTrue(model.offlineFinishPending)
+        XCTAssertEqual(model.pendingOfflineOperations.map(\.kind), [.addSet, .rateForm, .completeWorkout])
+
+        let (relaunched, relaunchDefaults, relaunchSuite, _) = pairedModel(
+            transport: transport,
+            offlineStore: captureStore
+        )
+        defer { relaunchDefaults.removePersistentDomain(forName: relaunchSuite) }
+        await relaunched.onLaunch()
+        XCTAssertEqual(relaunched.activeWorkout?.workoutId, workoutId)
+        XCTAssertEqual(relaunched.pendingOfflineCount, 3)
+        XCTAssertTrue(relaunched.offlineFinishPending)
+
+        let localSetId = try XCTUnwrap(relaunched.pendingOfflineOperations.first?.localSetId)
+        let cancelledFinish = await relaunched.cancelOfflineFinish()
+        XCTAssertTrue(cancelledFinish)
+        XCTAssertEqual(relaunched.pendingOfflineCount, 2)
+        XCTAssertFalse(relaunched.offlineFinishPending)
+        let cancelledSet = await relaunched.cancelOfflineSet(localSetId: localSetId)
+        XCTAssertTrue(cancelledSet)
+        XCTAssertEqual(relaunched.pendingOfflineCount, 1)
+        XCTAssertNil(relaunched.activeWorkout?.sets?.first(where: { $0.setId == localSetId }))
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,
         healthKit: (any HealthKitReadinessProviding)? = nil,
-        healthKitEnabled: Bool = false
+        healthKitEnabled: Bool = false,
+        offlineStore: OfflineCaptureStore? = nil
     ) -> (AppModel, UserDefaults, String, InMemoryTokenStore) {
         let (defaults, suite) = makeDefaults()
         if healthKitEnabled {
@@ -729,12 +822,16 @@ final class Phase2AppModelTests: XCTestCase {
         store.serverURL = "http://127.0.0.1:8000"
         store.device = PairingDevice(deviceID: "device-1", label: "iPhone")
         let tokens = InMemoryTokenStore(token: "token-abc")
+        let offlineURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("app-model-offline-\(UUID().uuidString).json")
+        let captureStore = offlineStore ?? OfflineCaptureStore(fileURL: offlineURL)
         let model = AppModel(
             client: IOSAPIClient(transport: transport, journal: journal),
             tokens: tokens,
             store: store,
             healthKit: healthKit,
-            healthKitDefaults: defaults
+            healthKitDefaults: defaults,
+            offlineStore: captureStore
         )
         return (model, defaults, suite, tokens)
     }
@@ -853,7 +950,7 @@ final class Phase2AppModelTests: XCTestCase {
                        "set-duplicate")
     }
 
-    func testAmbiguousFailureIsMarkedAndDefinitiveFourHundredIsNot() async {
+    func testTransientSetFailureIsQueuedForOfflineCapture() async {
         let transport = AsyncStubTransport { request in
             switch request.url?.path {
             case "/api/ios/v1/bootstrap":
@@ -885,8 +982,10 @@ final class Phase2AppModelTests: XCTestCase {
             rir: 2, velocityMps: nil, setIndex: 1, planItemIndex: 0
         )
         let result = await model.addSet(body, idempotencyKey: "set-ambiguous")
-        XCTAssertFalse(result)
-        XCTAssertTrue(model.mutationFailureAmbiguous)
+        XCTAssertTrue(result)
+        XCTAssertFalse(model.mutationFailureAmbiguous)
+        XCTAssertTrue(model.hasPendingOfflineCapture)
+        XCTAssertEqual(model.activeWorkout?.sets?.last?.setId ?? 0, -1)
     }
 
     func testLaunchReplaysAPendingAddSetFromTheJournal() async throws {

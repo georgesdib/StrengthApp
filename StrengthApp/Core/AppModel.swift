@@ -50,6 +50,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var pairingError: String?
     @Published private(set) var activeWorkout: WorkoutDetail?
+    @Published private(set) var offlineCapture: OfflineCapture?
+    @Published private(set) var isOffline = false
     @Published private(set) var exerciseCatalogue: [ExerciseOption] = []
     @Published private(set) var isLoadingExerciseCatalogue = false
     @Published private(set) var exerciseCatalogueError: String?
@@ -85,6 +87,7 @@ final class AppModel: ObservableObject {
     private let store: PairedStore
     private let healthKit: any HealthKitReadinessProviding
     private let healthKitDefaults: UserDefaults
+    private let offlineStore: OfflineCaptureStore
     private let pageSize = 50
     private var session: IOSSession?
     private var historyOffset = 0
@@ -102,22 +105,28 @@ final class AppModel: ObservableObject {
         tokens: TokenStoring? = nil,
         store: PairedStore? = nil,
         healthKit: (any HealthKitReadinessProviding)? = nil,
-        healthKitDefaults: UserDefaults = .standard
+        healthKitDefaults: UserDefaults = .standard,
+        offlineStore: OfflineCaptureStore? = nil
     ) {
         let store = store ?? PairedStore()
         let readiness = healthKit ?? HealthKitReadinessService()
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
+        let captureStore = offlineStore ?? OfflineCaptureStore()
+        let initialCapture = try? captureStore.load()
         self.client = client ?? IOSAPIClient(journal: MutationJournal())
         self.tokens = tokens ?? KeychainTokenStore()
         self.store = store
         self.healthKit = readiness
         self.healthKitDefaults = healthKitDefaults
+        self.offlineStore = captureStore
         self.healthKitEnabled = enabled
         self.healthKitState = enabled
             ? (readiness.isAvailable ? .enabled : .unavailable)
             : .featureDisabled
         self.serverURLText = store.serverURL ?? AppConfig.defaultServerURL
         self.pairingLabelText = store.device?.label ?? "iPhone"
+        self.offlineCapture = initialCapture
+        self.activeWorkout = initialCapture?.activeWorkout
     }
 
     var hasMoreHistory: Bool {
@@ -131,6 +140,22 @@ final class AppModel: ObservableObject {
     var canWriteReadiness: Bool {
         bootstrap?.capabilities.readinessWrite == true
     }
+
+    var pendingOfflineOperations: [OfflineOperation] {
+        offlineCapture?.operations ?? []
+    }
+
+    var pendingOfflineCount: Int { pendingOfflineOperations.count }
+
+    var hasPendingOfflineCapture: Bool { !pendingOfflineOperations.isEmpty }
+
+    var offlineFinishPending: Bool {
+        pendingOfflineOperations.contains {
+            $0.kind == .completeWorkout && $0.state == .pending
+        }
+    }
+
+    var offlineCaptureActive: Bool { isOffline || hasPendingOfflineCapture }
 
     var canPrescribe: Bool {
         bootstrap?.capabilities.prescription == true
@@ -169,6 +194,7 @@ final class AppModel: ObservableObject {
         if let device { pairingLabelText = device.label }
         phase = .paired
         let refreshed = await refresh()
+        isOffline = !refreshed.succeeded
         await recoverPendingMutations()
         if refreshed.succeeded, healthKitEnabled {
             await importHealthKit()
@@ -298,7 +324,12 @@ final class AppModel: ObservableObject {
                 }
             }
             let previousActive = activeWorkout
-            if let serverActive = newToday.activeWorkout {
+            if hasPendingOfflineCapture, let cached = offlineCapture?.activeWorkout {
+                // Until Phase 4 replay lands, never let the server read discard local performed
+                // work. The cached snapshot is the authoritative local capture view.
+                activeWorkout = cached
+                workoutRefreshGrace = false
+            } else if let serverActive = newToday.activeWorkout {
                 if previousActive?.workoutId != serverActive.workoutId {
                     recoveryIssue = .serverActiveWorkout(
                         workoutId: serverActive.workoutId,
@@ -325,6 +356,8 @@ final class AppModel: ObservableObject {
                 activeWorkout = nil
                 workoutRefreshGrace = false
             }
+            persistActiveWorkout()
+            isOffline = false
             if !healthKitEnabled {
                 healthKitState = .featureDisabled
             } else if !canUseHealthKit {
@@ -336,8 +369,19 @@ final class AppModel: ObservableObject {
             errorMessage = nil
             return .success
         } catch {
+            isOffline = true
+            if activeWorkout == nil, let cached = offlineCapture?.activeWorkout {
+                activeWorkout = cached
+            }
             handle(error)
             return .failure(message(for: error))
+        }
+    }
+
+    private func persistActiveWorkout() {
+        guard activeWorkout != nil || offlineCapture == nil else { return }
+        if let updated = try? offlineStore.setActiveWorkout(activeWorkout) {
+            offlineCapture = updated
         }
     }
 
@@ -777,6 +821,9 @@ final class AppModel: ObservableObject {
                 session: session,
                 idempotencyKey: idempotencyKey
             )
+            try? offlineStore.clear()
+            offlineCapture = try? offlineStore.load()
+            persistActiveWorkout()
             mutationError = nil
             recoveryIssue = nil
             workoutRefreshGrace = true
@@ -810,6 +857,9 @@ final class AppModel: ObservableObject {
 
     func addSet(_ body: AddSetRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        if offlineCaptureActive {
+            return queueAddSet(body, idempotencyKey: idempotencyKey, workout: workout)
+        }
         guard permitsMutation(kind: .addSet, operationId: idempotencyKey) else {
             return false
         }
@@ -828,8 +878,13 @@ final class AppModel: ObservableObject {
             )
             mutationError = nil
             workoutRefreshGrace = true
+            persistActiveWorkout()
             return true
         } catch {
+            if shouldQueueOffline(error) {
+                client.discardPendingOperation(idempotencyKey)
+                return queueAddSet(body, idempotencyKey: idempotencyKey, workout: workout)
+            }
             if let api = error as? APIError,
                ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
                 await refresh()
@@ -841,6 +896,9 @@ final class AppModel: ObservableObject {
 
     func rateForm(_ body: FormRatingRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        if offlineCaptureActive {
+            return queueForm(body, idempotencyKey: idempotencyKey, workout: workout)
+        }
         guard permitsMutation(kind: .rateForm, operationId: idempotencyKey) else {
             return false
         }
@@ -859,8 +917,13 @@ final class AppModel: ObservableObject {
             )
             mutationError = nil
             workoutRefreshGrace = true
+            persistActiveWorkout()
             return true
         } catch {
+            if shouldQueueOffline(error) {
+                client.discardPendingOperation(idempotencyKey)
+                return queueForm(body, idempotencyKey: idempotencyKey, workout: workout)
+            }
             if let api = error as? APIError,
                ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
                 await refresh()
@@ -970,6 +1033,10 @@ final class AppModel: ObservableObject {
         _ operation: () async throws -> WorkoutDetail
     ) async -> Bool {
         guard !isSaving, session != nil, activeWorkout != nil else { return false }
+        guard !offlineCaptureActive else {
+            mutationError = "Plan editing requires the server."
+            return false
+        }
         guard permitsMutation(kind: .planEdit, operationId: idempotencyKey) else {
             return false
         }
@@ -983,6 +1050,7 @@ final class AppModel: ObservableObject {
             activeWorkout = try await operation()
             mutationError = nil
             workoutRefreshGrace = true
+            persistActiveWorkout()
             return true
         } catch {
             if let api = error as? APIError,
@@ -1001,6 +1069,13 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        guard !offlineFinishPending else {
+            mutationError = "This workout is already queued for finish."
+            return false
+        }
+        if offlineCaptureActive {
+            return queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+        }
         guard permitsMutation(kind: .completeWorkout, operationId: idempotencyKey) else {
             return false
         }
@@ -1020,10 +1095,16 @@ final class AppModel: ObservableObject {
             mutationError = nil
             recoveryIssue = nil
             workoutRefreshGrace = false
+            try? offlineStore.clear()
+            offlineCapture = try? offlineStore.load()
             await refresh()
             await loadHistory(reset: true)
             return true
         } catch {
+            if shouldQueueOffline(error) {
+                client.discardPendingOperation(idempotencyKey)
+                return queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+            }
             if let api = error as? APIError,
                ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
                 await refresh()
@@ -1050,6 +1131,8 @@ final class AppModel: ObservableObject {
                 session: session,
                 idempotencyKey: idempotencyKey
             )
+            try? offlineStore.clear()
+            offlineCapture = try? offlineStore.load()
             mutationError = nil
             recoveryIssue = nil
             workoutRefreshGrace = false
@@ -1189,6 +1272,211 @@ final class AppModel: ObservableObject {
 
     /// A new mutation may proceed only when there is no unresolved operation, or when this is
     /// the exact operation being retried. This keeps the journal bounded and ordered.
+    private func shouldQueueOffline(_ error: Error) -> Bool {
+        guard let api = error as? APIError else { return true }
+        switch api {
+        case .transport, .decoding:
+            return true
+        case .server(let status, _, _, _, _):
+            return status >= 500
+        case .http(let status, _, _):
+            return status >= 500
+        default:
+            return false
+        }
+    }
+
+    private func nowISO() -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: Date())
+    }
+
+    private func queueAddSet(
+        _ body: AddSetRequest,
+        idempotencyKey: String,
+        workout: WorkoutDetail
+    ) -> Bool {
+        guard !offlineFinishPending else {
+            mutationError = "This workout is already queued for finish."
+            return false
+        }
+        let performedAt = body.performedAt ?? nowISO()
+        let request = AddSetRequest(
+            exerciseId: body.exerciseId,
+            loadKg: body.loadKg,
+            reps: body.reps,
+            rir: body.rir,
+            velocityMps: body.velocityMps,
+            setIndex: body.setIndex,
+            planItemIndex: body.planItemIndex,
+            repVelocities: body.repVelocities,
+            performedAt: performedAt
+        )
+        do {
+            let localId = try offlineStore.nextLocalSetId()
+            let localSet = WorkoutSet(
+                setId: localId,
+                exerciseId: request.exerciseId,
+                setIndex: request.setIndex,
+                planItemIndex: request.planItemIndex,
+                loadKg: request.loadKg,
+                reps: request.reps,
+                rir: request.rir,
+                velocity: request.velocityMps,
+                source: "manual",
+                repsDetail: nil,
+                repSummary: nil
+            )
+            let updated = workout.replacing(sets: (workout.sets ?? []) + [localSet])
+            let operation = OfflineOperation(
+                operationId: idempotencyKey,
+                workoutId: workout.workoutId,
+                body: .addSet(request),
+                createdAt: Date(),
+                localSetId: localId
+            )
+            offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
+            activeWorkout = updated
+            isOffline = true
+            mutationError = nil
+            return true
+        } catch {
+            mutationError = message(for: error)
+            return false
+        }
+    }
+
+    private func queueForm(
+        _ body: FormRatingRequest,
+        idempotencyKey: String,
+        workout: WorkoutDetail
+    ) -> Bool {
+        guard !offlineFinishPending else {
+            mutationError = "This workout is already queued for finish."
+            return false
+        }
+        do {
+            let localId = nextLocalFormId(in: workout)
+            let localForm = WorkoutForm(
+                formId: localId,
+                workoutId: workout.workoutId,
+                exerciseId: body.exerciseId,
+                rating: body.rating,
+                note: body.note
+            )
+            var forms = (workout.forms ?? []).filter {
+                $0.exerciseId != body.exerciseId
+            }
+            forms.append(localForm)
+            let updated = workout.replacing(forms: forms)
+            let operation = OfflineOperation(
+                operationId: idempotencyKey,
+                workoutId: workout.workoutId,
+                body: .rateForm(body),
+                createdAt: Date(),
+                localFormId: localId
+            )
+            offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
+            activeWorkout = updated
+            isOffline = true
+            mutationError = nil
+            return true
+        } catch {
+            mutationError = message(for: error)
+            return false
+        }
+    }
+
+    private func queueFinish(
+        _ body: CompleteWorkoutRequest,
+        idempotencyKey: String,
+        workout: WorkoutDetail
+    ) -> Bool {
+        guard !offlineFinishPending else {
+            mutationError = "This workout is already queued for finish."
+            return false
+        }
+        let request = CompleteWorkoutRequest(
+            sessionRpe: body.sessionRpe,
+            notRecorded: body.notRecorded,
+            durationMin: body.durationMin,
+            notes: body.notes,
+            endedAt: body.endedAt ?? nowISO()
+        )
+        do {
+            let operation = OfflineOperation(
+                operationId: idempotencyKey,
+                workoutId: workout.workoutId,
+                body: .completeWorkout(request),
+                createdAt: Date()
+            )
+            offlineCapture = try offlineStore.record(operation, activeWorkout: workout)
+            isOffline = true
+            mutationError = nil
+            return true
+        } catch {
+            mutationError = message(for: error)
+            return false
+        }
+    }
+
+    private func nextLocalFormId(in workout: WorkoutDetail) -> Int {
+        let used = Set((workout.forms ?? []).compactMap(\.formId).filter { $0 < 0 })
+        var candidate = -1
+        while used.contains(candidate) { candidate -= 1 }
+        return candidate
+    }
+
+    func cancelOfflineOperation(_ operationId: String) async -> Bool {
+        guard let operation = pendingOfflineOperations.first(where: {
+            $0.operationId == operationId
+        }), operation.isCancellable else {
+            mutationError = "Only unsent offline work can be cancelled."
+            return false
+        }
+        do {
+            var updated = activeWorkout
+            if let localSetId = operation.localSetId {
+                updated = updated?.replacing(sets: (updated?.sets ?? []).filter {
+                    $0.setId != localSetId
+                })
+            }
+            if let localFormId = operation.localFormId {
+                updated = updated?.replacing(forms: (updated?.forms ?? []).filter {
+                    $0.formId != localFormId
+                })
+            }
+            _ = try offlineStore.cancel(operationId)
+            if let updated {
+                offlineCapture = try offlineStore.setActiveWorkout(updated)
+                activeWorkout = updated
+            } else {
+                offlineCapture = try offlineStore.load()
+            }
+            if !hasPendingOfflineCapture { isOffline = false }
+            mutationError = nil
+            return true
+        } catch {
+            mutationError = message(for: error)
+            return false
+        }
+    }
+
+    func cancelOfflineSet(localSetId: Int) async -> Bool {
+        guard let operation = pendingOfflineOperations.first(where: {
+            $0.localSetId == localSetId
+        }) else { return false }
+        return await cancelOfflineOperation(operation.operationId)
+    }
+
+    func cancelOfflineFinish() async -> Bool {
+        guard let operation = pendingOfflineOperations.first(where: {
+            $0.kind == .completeWorkout
+        }) else { return false }
+        return await cancelOfflineOperation(operation.operationId)
+    }
+
     private func permitsMutation(kind: MutationKind, operationId: String) -> Bool {
         let unresolved = pendingMutations
         guard !unresolved.isEmpty else { return true }
@@ -1222,6 +1510,9 @@ final class AppModel: ObservableObject {
         historyOffset = 0
         hasLoadedHistory = false
         activeWorkout = nil
+        try? offlineStore.clear()
+        offlineCapture = try? offlineStore.load()
+        isOffline = false
         exerciseCatalogue = []
         isLoadingExerciseCatalogue = false
         exerciseCatalogueError = nil

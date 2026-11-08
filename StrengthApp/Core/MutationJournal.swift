@@ -140,6 +140,17 @@ final class MutationJournal {
         }
     }
 
+    func remove(operationId: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        var entries = try load()
+        let before = entries.count
+        entries.removeAll { $0.operationId == operationId }
+        if entries.count != before {
+            try save(entries)
+        }
+    }
+
     func remove(_ entry: PendingMutation) throws {
         lock.lock()
         defer { lock.unlock() }

@@ -1,8 +1,9 @@
 # StrengthApp — iOS client
 
 **Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07; Phase 3A
-closed 2026-11-08** — Phase 3A is unit/simulator/live-server and physical-iPhone verified. R1 durable
-pending-mutation journal, R3 explicit plan-item selection,
+closed 2026-11-08** — Phase 3A is unit/simulator/live-server and physical-iPhone verified. Phase 4
+offline capture is implemented (snapshot/outbox, add set/form/finish, cancellation); replay and
+conflict handling remain. R1 durable pending-mutation journal, R3 explicit plan-item selection,
 R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
 closed.
 
@@ -101,7 +102,7 @@ offline queue, per-rep VBT, review/rubric or Apple Intelligence/PCC UI. Plan edi
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 81 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 82 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
@@ -110,7 +111,8 @@ issue/start/add-set/complete model flow, body-aware retry keys, unique-only plan
 duplicate-tap guarding, ambiguous-failure classification, the durable journal's persistence,
 scoping, cap, conflict/terminal handling and relaunch replay, repeated-exercise plan-item choices
 with nil fallback, exercise catalogue/plan-edit decoding, durable offline snapshot/outbox ordering,
-local set IDs, cancellation and retention, R5 server-active/ended-elsewhere/consumed-prescription recovery states, and
+local set IDs, cancellation and retention, offline add/form/finish capture, cached-workout relaunch
+and pending-operation cancellation, R5 server-active/ended-elsewhere/consumed-prescription recovery states, and
 Phase 3A Apple Watch classification, HRV/RHR/bodyweight selection/freshness, per-metric
 eligible/missing/stale states, coalesced authoritative refresh, import/refresh concurrency,
 HealthKit request encoding and indeterminate no-sample handling, plus optional per-rep velocity

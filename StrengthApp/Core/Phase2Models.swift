@@ -217,6 +217,22 @@ struct WorkoutDetail: Codable, Identifiable {
     func formRating(for exerciseId: String) -> WorkoutForm? {
         forms?.first { $0.exerciseId == exerciseId }
     }
+
+    func replacing(sets: [WorkoutSet]? = nil, forms: [WorkoutForm]? = nil) -> WorkoutDetail {
+        WorkoutDetail(
+            workoutId: workoutId,
+            prescriptionId: prescriptionId,
+            forDate: forDate,
+            sessionType: sessionType,
+            status: status,
+            plan: plan,
+            sets: sets ?? self.sets,
+            forms: forms ?? self.forms,
+            elapsedSeconds: elapsedSeconds,
+            sessionRpe: sessionRpe,
+            startedAt: startedAt
+        )
+    }
 }
 
 struct WorkoutSet: Codable, Identifiable {
@@ -233,6 +249,8 @@ struct WorkoutSet: Codable, Identifiable {
     let repSummary: WorkoutRepSummary?
 
     var id: String { "\(setId ?? 0)-\(exerciseId)-\(setIndex ?? 0)" }
+
+    var isPendingLocal: Bool { (setId ?? 0) < 0 }
 
     var loadLabel: String {
         guard let loadKg, loadKg > 0 else { return "bodyweight" }

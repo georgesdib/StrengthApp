@@ -389,6 +389,10 @@ final class IOSAPIClient {
         )
     }
 
+    func discardPendingOperation(_ operationId: String) {
+        try? journal?.remove(operationId: operationId)
+    }
+
     func exerciseCatalogue(session: IOSSession) async throws -> ExerciseCatalogueResponse {
         try await get(path: "api/ios/v1/exercises", query: [], session: session)
     }

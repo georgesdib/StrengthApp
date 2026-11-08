@@ -135,6 +135,32 @@ struct TodayView: View {
                     }
                 }
 
+                if model.hasPendingOfflineCapture {
+                    Section("Offline capture") {
+                        Label(
+                            model.isOffline ? "Offline — saved on this phone" : "Pending server acknowledgement",
+                            systemImage: model.isOffline ? "wifi.slash" : "clock.arrow.circlepath"
+                        )
+                        .foregroundStyle(.orange)
+                        ForEach(model.pendingOfflineOperations) { operation in
+                            HStack {
+                                Text(operation.kind.label)
+                                Spacer()
+                                if operation.isCancellable {
+                                    Button("Cancel", role: .destructive) {
+                                        Task { _ = await model.cancelOfflineOperation(operation.operationId) }
+                                    }
+                                    .font(.caption)
+                                } else {
+                                    Text(operation.state.rawValue.capitalized)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Section("Training") {
                     trainingContent
                 }
@@ -234,7 +260,20 @@ struct TodayView: View {
     @ViewBuilder
     private var trainingContent: some View {
         if model.canWrite {
-            if let workout = model.activeWorkout ?? model.today?.activeWorkout {
+            if model.offlineFinishPending {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Finished locally — waiting to sync", systemImage: "clock.badge.checkmark")
+                        .foregroundStyle(.orange)
+                    Text("The session is saved on this phone but is not server-confirmed yet.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button("Cancel queued finish", role: .destructive) {
+                        Task { _ = await model.cancelOfflineFinish() }
+                    }
+                    .font(.footnote)
+                }
+                .accessibilityIdentifier("offline-finish-pending")
+            } else if let workout = model.activeWorkout ?? model.today?.activeWorkout {
                 NavigationLink {
                     ActiveWorkoutView(model: model)
                 } label: {
@@ -263,7 +302,12 @@ struct TodayView: View {
                             Label("Request workout", systemImage: "play.circle")
                         }
                         .accessibilityIdentifier("start-workout")
-                        .disabled(model.isSaving)
+                        .disabled(model.isSaving || model.isOffline)
+                        if model.isOffline {
+                            Text("Requesting a workout requires the server.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -317,7 +361,12 @@ struct TodayView: View {
                 }
             }
             .accessibilityIdentifier("start-ready-workout")
-            .disabled(model.isSaving)
+            .disabled(model.isSaving || model.isOffline)
+            if model.isOffline {
+                Text("Starting requires the server.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

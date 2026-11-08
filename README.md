@@ -1,8 +1,8 @@
 # StrengthApp — iOS client
 
 **Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07; Phase 3A
-implemented 2026-11-08** — Phase 3A is unit/simulator/live-server verified; physical HealthKit
-acceptance remains pending. R1 durable pending-mutation journal, R3 explicit plan-item selection,
+closed 2026-11-08** — Phase 3A is unit/simulator/live-server and physical-iPhone verified. R1 durable
+pending-mutation journal, R3 explicit plan-item selection,
 R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
 closed.
 

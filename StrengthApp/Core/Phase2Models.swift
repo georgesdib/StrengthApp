@@ -211,6 +211,12 @@ struct WorkoutDetail: Decodable, Identifiable {
     let startedAt: String?
 
     var id: String { workoutId }
+
+    /// The API returns the latest rating per exercise; use it to distinguish an initial rating
+    /// from a correction without inventing a second local history.
+    func formRating(for exerciseId: String) -> WorkoutForm? {
+        forms?.first { $0.exerciseId == exerciseId }
+    }
 }
 
 struct WorkoutSet: Decodable, Identifiable {

@@ -156,6 +156,8 @@ record of what was exercised.
       to change the prescription.
 - [ ] Add a set with optional per-rep velocities (comma/space separated); the logged row shows the
       rep summary and expandable rep velocities, with the mean derived if omitted.
+- [ ] Rate form for an exercise, then record a correction: the current rating is shown, the button
+      says "Save correction", and the earlier rating remains in the append-only record.
 - [ ] Repeating the same set request (for example after a lost response) does not duplicate it.
 - [ ] Optional 1-5 form ratings save and survive a refresh.
 - [ ] Finish with a session RPE 1-10; the workout completes, appears in History and contributes to

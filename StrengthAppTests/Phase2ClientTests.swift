@@ -652,6 +652,24 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertEqual(detail.sets?.first?.summary, "140.0 kg × 3 · RIR 2")
     }
 
+    func testWorkoutFormRatingLookupDistinguishesCurrentRating() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let workout = try decoder.decode(WorkoutDetail.self, from: Data(#"""
+        {
+          "workout_id": "w1",
+          "status": "in_progress",
+          "forms": [
+            {"form_id": 1, "exercise_id": "competition_squat", "rating": 4},
+            {"form_id": 2, "exercise_id": "competition_bench_press", "rating": 3}
+          ]
+        }
+        """#.utf8))
+        XCTAssertEqual(workout.formRating(for: "competition_squat")?.rating, 4)
+        XCTAssertEqual(workout.formRating(for: "competition_bench_press")?.rating, 3)
+        XCTAssertNil(workout.formRating(for: "competition_deadlift"))
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

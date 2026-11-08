@@ -217,6 +217,17 @@ struct ActiveWorkoutView: View {
                                     Text(Self.label(id)).tag(id)
                                 }
                             }
+                            .onChange(of: ratingExercise) { _, id in
+                                rating = workout.formRating(for: id)?.rating ?? 4
+                            }
+                            if let existing = workout.formRating(for: ratingExercise) {
+                                LabeledContent("Current rating", value: "\(existing.rating) / 5")
+                                    .accessibilityIdentifier("form-current-rating")
+                                Text("Saving again records a correction. The earlier rating is retained in the record; the latest is shown here.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("form-correction-note")
+                            }
                             Picker("Rating", selection: $rating) {
                                 ForEach(1...5, id: \.self) { value in
                                     Text("\(value)").tag(value)
@@ -231,7 +242,11 @@ struct ActiveWorkoutView: View {
                             } label: {
                                 HStack {
                                     Spacer()
-                                    if model.isSaving { ProgressView() } else { Text("Save form rating") }
+                                    if model.isSaving {
+                                        ProgressView()
+                                    } else {
+                                        Text(workout.formRating(for: ratingExercise) == nil ? "Save form rating" : "Save correction")
+                                    }
                                     Spacer()
                                 }
                             }

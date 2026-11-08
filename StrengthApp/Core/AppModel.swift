@@ -97,6 +97,8 @@ final class AppModel: ObservableObject {
     private var healthKitOperation = OperationKey<HealthKitReadinessRequest>()
     private var healthKitFollowUp = false
     private var networkMonitor: NetworkMonitor?
+    private var offlineRetryTask: Task<Void, Never>?
+    private var offlineRetryAttempt = 0
     private var refreshInFlight = false
     private var refreshPending = false
     private var refreshWaiters: [CheckedContinuation<RefreshOutcome, Never>] = []
@@ -1542,11 +1544,14 @@ final class AppModel: ObservableObject {
                     offlineCapture = try? offlineStore.load()
                     isOffline = true
                     offlineSyncError = message(for: error)
+                    scheduleOfflineRetry()
                     break
                 }
             }
             offlineCapture = try? offlineStore.load()
             if !hasPendingOfflineCapture {
+                offlineRetryAttempt = 0
+                offlineRetryTask?.cancel()
                 isOffline = false
                 offlineSyncError = nil
             } else if offlineSyncError == nil {
@@ -1571,6 +1576,18 @@ final class AppModel: ObservableObject {
         } catch {
             mutationError = message(for: error)
             return false
+        }
+    }
+
+    private func scheduleOfflineRetry() {
+        guard hasPendingOfflineCapture, offlineRetryAttempt < 4 else { return }
+        let delay = [2, 5, 10, 30][offlineRetryAttempt]
+        offlineRetryAttempt += 1
+        offlineRetryTask?.cancel()
+        offlineRetryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.syncOfflineCapture()
         }
     }
 

@@ -152,6 +152,8 @@ record of what was exercised.
 - [ ] Add a set with load, reps and RIR; the logged set appears with the same values.
 - [ ] Add a set with an optional mean velocity; the logged row shows the value and it is not used
       to change the prescription.
+- [ ] Add a set with optional per-rep velocities (comma/space separated); the logged row shows the
+      rep summary and expandable rep velocities, with the mean derived if omitted.
 - [ ] Repeating the same set request (for example after a lost response) does not duplicate it.
 - [ ] Optional 1-5 form ratings save and survive a refresh.
 - [ ] Finish with a session RPE 1-10; the workout completes, appears in History and contributes to
@@ -253,7 +255,8 @@ the client-side record to fill in after the physical pass.
 ## HealthKit setup and import
 
 - [ ] Settings -> HealthKit -> enable **Readiness from HealthKit**.
-- [ ] Grant read access to HRV, Resting Heart Rate and Body Mass only. No write access is requested.
+- [ ] Grant read access to HRV, Resting Heart Rate and Body Mass only. The Body Mass prompt appears
+      when the toggle is enabled/refreshed; no write access is requested.
 - [ ] Today shows the HealthKit section with the import action.
 - [ ] Import from HealthKit (or pull to refresh) completes.
 - [ ] HRV is the newest eligible sample within 48 hours; RHR is from the current server-local day;

@@ -159,9 +159,9 @@ final class AppModel: ObservableObject {
         serverURLText = baseURL.absoluteString
         if let device { pairingLabelText = device.label }
         phase = .paired
-        await refresh()
+        let refreshed = await refresh()
         await recoverPendingMutations()
-        if healthKitEnabled {
+        if refreshed.succeeded, healthKitEnabled {
             await importHealthKit()
         }
     }
@@ -215,9 +215,9 @@ final class AppModel: ObservableObject {
                 deviceID: response.device.deviceId
             )
             phase = .paired
-            await refresh()
+            let refreshed = await refresh()
             await recoverPendingMutations()
-            if healthKitEnabled {
+            if refreshed.succeeded, healthKitEnabled {
                 await importHealthKit()
             }
         } catch {
@@ -435,10 +435,9 @@ final class AppModel: ObservableObject {
     }
 
     func refreshWithHealthKit() async {
-        await refresh()
-        if healthKitEnabled {
-            await importHealthKit()
-        }
+        let outcome = await refresh()
+        guard outcome.succeeded, healthKitEnabled else { return }
+        await importHealthKit()
     }
 
     func importHealthKit() async {

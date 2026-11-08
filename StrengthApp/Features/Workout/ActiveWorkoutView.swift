@@ -11,6 +11,8 @@ struct ActiveWorkoutView: View {
     @State private var repsText = ""
     @State private var rirText = ""
     @State private var velocityText = ""
+    @State private var showingRepVelocity = false
+    @State private var repVelocityText = ""
     @State private var addOperation = OperationKey<AddSetRequest>()
     @State private var addError: String?
 
@@ -109,6 +111,20 @@ struct ActiveWorkoutView: View {
                                         }
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                        if let summary = set.repSummary {
+                                            Text("Per-rep \(summary.count) reps · \(String(format: "%.2f", summary.first)) → \(String(format: "%.2f", summary.last)) m/s · loss \(String(format: "%.2f", summary.lossAbs)) m/s")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        if let detail = set.repsDetail, !detail.reps.isEmpty {
+                                            DisclosureGroup("Rep velocities") {
+                                                ForEach(detail.reps) { rep in
+                                                    Text("Rep \(rep.repIndex): \(String(format: "%.2f", rep.velocityMps)) m/s")
+                                                        .font(.caption)
+                                                }
+                                            }
+                                            .font(.caption)
+                                        }
                                     }
                                 }
                             }
@@ -166,6 +182,17 @@ struct ActiveWorkoutView: View {
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .accessibilityIdentifier("set-velocity")
+                            }
+                            DisclosureGroup(
+                                "Per-rep velocity (optional)",
+                                isExpanded: $showingRepVelocity
+                            ) {
+                                TextField("e.g. 0.62, 0.58, 0.55", text: $repVelocityText)
+                                    .keyboardType(.decimalPad)
+                                    .accessibilityIdentifier("set-rep-velocities")
+                                Text("Comma or space separated m/s for reps 1..n. Leave the mean empty and the server derives it.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                             if let error = addError {
                                 Text(error).foregroundStyle(.red)
@@ -347,6 +374,13 @@ struct ActiveWorkoutView: View {
             addError = "Velocity must be a positive number."
             return
         }
+        let repVelocities: [RepVelocity]?
+        do {
+            repVelocities = try RepVelocityParser.parse(repVelocityText, reps: reps)
+        } catch {
+            addError = error.localizedDescription
+            return
+        }
         let index = nextSetIndex(for: exerciseId, in: workout)
         // Unique exercises keep automatic attribution. A repeated exercise is only attributed
         // when the owner selects the exact plan item; otherwise the safe nil fallback is kept.
@@ -361,7 +395,8 @@ struct ActiveWorkoutView: View {
             rir: rir,
             velocityMps: velocity,
             setIndex: index,
-            planItemIndex: planIndex
+            planItemIndex: planIndex,
+            repVelocities: repVelocities
         )
         let key = addOperation.use(request)
         if await model.addSet(request, idempotencyKey: key) {
@@ -369,6 +404,7 @@ struct ActiveWorkoutView: View {
             repsText = ""
             rirText = ""
             velocityText = ""
+            repVelocityText = ""
             addOperation.acknowledged()
             addError = nil
         } else {

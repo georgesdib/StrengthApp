@@ -567,12 +567,56 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertNil(model.healthKitRefreshError)
     }
 
+    func testRepVelocityParserAcceptsOptionalDetailAndRejectsBadInput() throws {
+        let parsed = try RepVelocityParser.parse("0.62, 0.58 0.54", reps: 3)
+        XCTAssertEqual(parsed?.map(\.repIndex), [1, 2, 3])
+        XCTAssertEqual(parsed?.map(\.velocityMps), [0.62, 0.58, 0.54])
+        XCTAssertNil(try RepVelocityParser.parse("  ", reps: 3))
+        XCTAssertThrowsError(try RepVelocityParser.parse("0.62, 0.58, 0.54, 0.50", reps: 3))
+        XCTAssertThrowsError(try RepVelocityParser.parse("0.62, nope", reps: 3))
+    }
+
+    func testRefreshWithHealthKitDoesNotImportAfterFailedRefresh() async {
+        var failToday = false
+        let fake = FakeHealthKitReadinessProvider()
+        fake.selection = healthKitSelection()
+        let transport = AsyncStubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                if failToday {
+                    return (500, Data(#"{"error":"temporary","code":"server_error"}"#.utf8))
+                }
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/healthkit/readiness":
+                return (200, Data(Fixtures.readinessWrite.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(
+            transport: transport, healthKit: fake, healthKitEnabled: true
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        XCTAssertEqual(fake.selectionCalls, 1)
+
+        failToday = true
+        await model.refreshWithHealthKit()
+        XCTAssertEqual(fake.selectionCalls, 1)
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,
-        healthKit: (any HealthKitReadinessProviding)? = nil
+        healthKit: (any HealthKitReadinessProviding)? = nil,
+        healthKitEnabled: Bool = false
     ) -> (AppModel, UserDefaults, String, InMemoryTokenStore) {
         let (defaults, suite) = makeDefaults()
+        if healthKitEnabled {
+            defaults.set(true, forKey: "healthKitReadinessEnabled")
+        }
         let store = PairedStore(defaults: defaults)
         store.serverURL = "http://127.0.0.1:8000"
         store.device = PairingDevice(deviceID: "device-1", label: "iPhone")

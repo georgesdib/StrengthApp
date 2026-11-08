@@ -145,6 +145,8 @@ struct WorkoutSet: Decodable, Identifiable {
     let rir: Int?
     let velocity: Double?
     let source: String?
+    let repsDetail: WorkoutRepDetail?
+    let repSummary: WorkoutRepSummary?
 
     var id: String { "\(setId ?? 0)-\(exerciseId)-\(setIndex ?? 0)" }
 
@@ -157,6 +159,30 @@ struct WorkoutSet: Decodable, Identifiable {
         guard let velocity, velocity > 0 else { return nil }
         return String(format: "%.2f m/s", velocity)
     }
+}
+
+struct WorkoutRep: Decodable, Identifiable {
+    let repIndex: Int
+    let velocityMps: Double
+
+    var id: Int { repIndex }
+}
+
+struct WorkoutRepDetail: Decodable {
+    let reps: [WorkoutRep]
+    let source: String?
+    let batchId: String?
+}
+
+struct WorkoutRepSummary: Decodable {
+    let count: Int
+    let first: Double
+    let last: Double
+    let mean: Double
+    let min: Double
+    let max: Double
+    let lossAbs: Double
+    let lossPct: Double?
 }
 
 struct WorkoutForm: Decodable, Identifiable {
@@ -227,6 +253,44 @@ struct ProgressAttendance: Decodable {
     let note: String?
 }
 
+
+enum RepVelocityParseError: LocalizedError, Equatable {
+    case invalidNumber(String)
+    case tooMany(reps: Int, provided: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidNumber(let token):
+            return "Per-rep velocity '\(token)' must be a positive number."
+        case .tooMany(let reps, let provided):
+            return "Enter at most \(reps) per-rep velocities (\(provided) provided)."
+        }
+    }
+}
+
+enum RepVelocityParser {
+    /// Parse comma/space-separated m/s values for reps 1..n. Blank input means no detail.
+    static func parse(_ text: String, reps: Int) throws -> [RepVelocity]? {
+        let tokens = text
+            .split { $0 == "," || $0.isWhitespace }
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return nil }
+        guard reps > 0 else {
+            throw RepVelocityParseError.tooMany(reps: reps, provided: tokens.count)
+        }
+        guard tokens.count <= reps else {
+            throw RepVelocityParseError.tooMany(reps: reps, provided: tokens.count)
+        }
+        return try tokens.enumerated().map { offset, token in
+            guard let value = Double(token), value.isFinite, value > 0 else {
+                throw RepVelocityParseError.invalidNumber(token)
+            }
+            return RepVelocity(repIndex: offset + 1, velocityMps: value)
+        }
+    }
+}
+
 // MARK: - Requests
 
 struct ReadinessWriteRequest: Encodable, Equatable {
@@ -243,6 +307,13 @@ struct StartWorkoutRequest: Encodable {
     let issuedPlanId: String
 }
 
+struct RepVelocity: Encodable, Equatable, Identifiable {
+    let repIndex: Int
+    let velocityMps: Double
+
+    var id: Int { repIndex }
+}
+
 struct AddSetRequest: Encodable, Equatable {
     let exerciseId: String
     let loadKg: Double?
@@ -251,6 +322,27 @@ struct AddSetRequest: Encodable, Equatable {
     let velocityMps: Double?
     let setIndex: Int?
     let planItemIndex: Int?
+    let repVelocities: [RepVelocity]?
+
+    init(
+        exerciseId: String,
+        loadKg: Double?,
+        reps: Int,
+        rir: Int?,
+        velocityMps: Double?,
+        setIndex: Int?,
+        planItemIndex: Int?,
+        repVelocities: [RepVelocity]? = nil
+    ) {
+        self.exerciseId = exerciseId
+        self.loadKg = loadKg
+        self.reps = reps
+        self.rir = rir
+        self.velocityMps = velocityMps
+        self.setIndex = setIndex
+        self.planItemIndex = planItemIndex
+        self.repVelocities = repVelocities
+    }
 }
 
 struct FormRatingRequest: Encodable, Equatable {

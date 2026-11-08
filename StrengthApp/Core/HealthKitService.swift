@@ -20,11 +20,13 @@ final class HealthKitReadinessService: HealthKitReadinessProviding {
             forIdentifier: .heartRateVariabilitySDNN
         ), let rhr = HKObjectType.quantityType(
             forIdentifier: .restingHeartRate
+        ), let bodyMass = HKObjectType.quantityType(
+            forIdentifier: .bodyMass
         ) else {
             throw HealthKitReadinessError.unavailable
         }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            store.requestAuthorization(toShare: [], read: [hrv, rhr]) { _, error in
+            store.requestAuthorization(toShare: [], read: [hrv, rhr, bodyMass]) { _, error in
                 if let error {
                     continuation.resume(throwing: HealthKitReadinessError.query(error.localizedDescription))
                 } else {

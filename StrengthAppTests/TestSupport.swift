@@ -107,6 +107,7 @@ final class TestCounter: @unchecked Sendable {
 final class FakeHealthKitReadinessProvider: HealthKitReadinessProviding {
     var isAvailable = true
     var authorizationRequests = 0
+    var selectionCalls = 0
     var selection = HealthKitReadinessSelection(hrv: nil, rhr: nil, staleFields: [])
     var error: Error?
 
@@ -116,6 +117,7 @@ final class FakeHealthKitReadinessProvider: HealthKitReadinessProviding {
     }
 
     func selectSamples(serverDate: String, now: Date) async throws -> HealthKitReadinessSelection {
+        selectionCalls += 1
         if let error { throw error }
         return selection
     }

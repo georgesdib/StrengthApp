@@ -263,6 +263,46 @@ enum Fixtures {
     }
     """#
 
+    static let planAck = #"""
+    {
+      "issued_plan_id": "plan-1",
+      "status": "queued",
+      "for_date": "2026-11-07",
+      "request_expires_at": "2026-11-07T16:15:00+00:00",
+      "plan_expires_at": null,
+      "retry_after_ms": 1000,
+      "settings": {"session_type": "auto", "minimum_session": false}
+    }
+    """#
+
+    /// The authoritative ready read, reusing the legacy fixture's plan body.
+    static let plansReady: String = {
+        guard let data = issuedPlan.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let plan = object["plan"],
+              let planData = try? JSONSerialization.data(withJSONObject: plan),
+              let planText = String(data: planData, encoding: .utf8) else {
+            return #"{"status":"none"}"#
+        }
+        return #"""
+        {
+          "status": "ready",
+          "issued_plan_id": "plan-1",
+          "for_date": "2026-11-07",
+          "elapsed_seconds": 3,
+          "request_expires_at": "2026-11-07T16:15:00+00:00",
+          "plan_expires_at": "2026-11-07T17:00:00+00:00",
+          "retry_after_ms": 0,
+          "settings": {"session_type": "auto", "minimum_session": false},
+          "session_type": "squat",
+          "plan": #(planText),
+          "readiness": null,
+          "warnings": [],
+          "error": null
+        }
+        """#
+    }()
+
     static let issuedPlan = #"""
     {
       "issued_plan_id": "plan-1",

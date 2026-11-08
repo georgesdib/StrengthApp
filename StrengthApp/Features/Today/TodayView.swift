@@ -6,6 +6,9 @@ struct TodayView: View {
     @State private var lastIssueKey: String?
     @State private var lastIssueAck = false
     @State private var lastIssueConfirmations: [String: Bool]?
+    @State private var lastIssueSettings = PlanSettings()
+    @State private var draftSettings = PlanSettings()
+    @State private var showingPlanSettings = false
 
     var body: some View {
         NavigationStack {
@@ -195,6 +198,12 @@ struct TodayView: View {
             .sheet(isPresented: showingIssuedPlan) {
                 PrescriptionPreviewView(model: model)
             }
+            .sheet(isPresented: $showingPlanSettings) {
+                PlanSettingsView(settings: $draftSettings) {
+                    showingPlanSettings = false
+                    beginPrescription(with: draftSettings)
+                }
+            }
             .alert("Readiness is not score-ready", isPresented: showingReadinessPrompt) {
                 Button("Start anyway") { issuePrescription(acknowledge: true) }
                 Button("Cancel", role: .cancel) { model.clearPrescription() }
@@ -236,13 +245,17 @@ struct TodayView: View {
                     .accessibilityIdentifier("log-readiness")
                 }
                 if model.canPrescribe {
-                    Button {
-                        startPrescription()
-                    } label: {
-                        Label("Start workout", systemImage: "play.circle")
+                    if case .generating(let progress) = model.prescriptionState {
+                        generatingCard(progress)
+                    } else {
+                        Button {
+                            startPrescription()
+                        } label: {
+                            Label("Request workout", systemImage: "play.circle")
+                        }
+                        .accessibilityIdentifier("start-workout")
+                        .disabled(model.isSaving)
                     }
-                    .accessibilityIdentifier("start-workout")
-                    .disabled(model.isSaving)
                 }
             }
         } else if model.bootstrap != nil {
@@ -296,23 +309,57 @@ struct TodayView: View {
         return "The server reports \(status) readiness. \(basis) Start without a score?"
     }
 
+    private static func progressLabel(_ progress: PlanProgress) -> String {
+        let stage = progress.status == "queued" ? "Queued" : "Building"
+        return stage + " · " + String(progress.elapsedSeconds) + "s"
+    }
+
+    @ViewBuilder
+    private func generatingCard(_ progress: PlanProgress) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                ProgressView()
+                Text("Generating your workout…")
+            }
+            Text(Self.progressLabel(progress))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if progress.elapsedSeconds >= 60 {
+                Text("Still generating. You can leave this screen; the server keeps building and the plan will be here when you return.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Button("Stop waiting") { model.clearPrescription() }
+                .font(.footnote)
+        }
+        .accessibilityIdentifier("plan-generating")
+    }
+
     private func startPrescription() {
-        // If the last issue response was lost, Start is not a new plan request: retry the exact
-        // operation and body rather than creating a different plan.
+        // If the last request's response was lost, Start is not a new plan request: retry the
+        // exact operation and body rather than creating a different plan.
         if case .failed = model.prescriptionState,
            model.mutationFailureAmbiguous,
            lastIssueKey != nil {
             retryIssue()
             return
         }
+        draftSettings = model.planSettings
+        showingPlanSettings = true
+    }
+
+    private func beginPrescription(with settings: PlanSettings) {
         pendingReadinessAck = false
         lastIssueAck = false
         lastIssueConfirmations = nil
+        lastIssueSettings = settings
         lastIssueKey = UUID().uuidString.lowercased()
         guard let key = lastIssueKey else { return }
         Task {
             await model.issuePrescription(
-                readinessAck: false, idempotencyKey: key
+                readinessAck: false, settings: settings, idempotencyKey: key
             )
         }
     }
@@ -325,7 +372,9 @@ struct TodayView: View {
         guard let key = lastIssueKey else { return }
         Task {
             await model.issuePrescription(
-                readinessAck: acknowledge, idempotencyKey: key
+                readinessAck: acknowledge,
+                settings: lastIssueSettings,
+                idempotencyKey: key
             )
         }
     }
@@ -346,6 +395,7 @@ struct TodayView: View {
             await model.issuePrescription(
                 readinessAck: pendingReadinessAck,
                 confirmations: confirmations,
+                settings: lastIssueSettings,
                 idempotencyKey: key
             )
         }
@@ -357,6 +407,7 @@ struct TodayView: View {
             await model.issuePrescription(
                 readinessAck: lastIssueAck,
                 confirmations: lastIssueConfirmations,
+                settings: lastIssueSettings,
                 idempotencyKey: key
             )
         }
@@ -535,5 +586,72 @@ struct TodayView: View {
             return "Category: " + String(scope.dropFirst("category:".count)).capitalized
         }
         return scope.capitalized
+    }
+}
+
+// MARK: - Plan settings (R7)
+
+/// The workout settings the phone may choose. Loads, exercises and every training number stay
+/// with the server; this only picks which session and whether a minimum session is acceptable.
+struct PlanSettingsView: View {
+    @Binding var settings: PlanSettings
+    var onRequest: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private struct SessionOption: Identifiable {
+        let id: String
+        let label: String
+    }
+
+    private let sessionTypes: [SessionOption] = [
+        SessionOption(id: "auto", label: "Auto (server decides)"),
+        SessionOption(id: "squat", label: "Squat"),
+        SessionOption(id: "hinge", label: "Hinge"),
+        SessionOption(id: "bench_squat", label: "Bench + squat"),
+        SessionOption(id: "bench_hinge", label: "Bench + hinge"),
+        SessionOption(id: "accessory", label: "Accessory"),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Session") {
+                    Picker("Session type", selection: $settings.sessionType) {
+                        ForEach(sessionTypes) { option in
+                            Text(option.label).tag(option.id)
+                        }
+                    }
+                }
+                Section("Length") {
+                    Toggle("Allow a minimum session", isOn: $settings.minimumSession)
+                    if settings.minimumSession {
+                        Stepper(
+                            "Target: \(settings.minimumTargetMinutes ?? 30) min",
+                            value: Binding(
+                                get: { settings.minimumTargetMinutes ?? 30 },
+                                set: { settings.minimumTargetMinutes = $0 }
+                            ),
+                            in: 10...120,
+                            step: 5
+                        )
+                    }
+                }
+                Section {
+                    Text("The server builds the prescription. This only chooses the session type and whether a shortened session is acceptable.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Request workout")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Request") { onRequest() }
+                        .accessibilityIdentifier("request-workout")
+                }
+            }
+        }
     }
 }

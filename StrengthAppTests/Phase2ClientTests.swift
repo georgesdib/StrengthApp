@@ -158,31 +158,48 @@ final class Phase2ClientTests: XCTestCase {
         XCTAssertEqual(json["note"] as? String, "felt good")
     }
 
-    func testIssuePrescriptionSendsAcknowledgementAndConfirmations() async throws {
-        let transport = StubTransport { _ in
-            (200, Data(Fixtures.issuedPlan.utf8))
+    func testIssuePrescriptionSendsAcknowledgementAndSettings() async throws {
+        let transport = StubTransport { request in
+            if request.url?.path == "/api/ios/v1/plans/current" {
+                return (200, Data(Fixtures.plansReady.utf8))
+            }
+            return (202, Data(Fixtures.planAck.utf8))
         }
         let client = IOSAPIClient(transport: transport)
-        let result = try await client.issuePrescription(
+        let ack = try await client.issuePrescription(
             IssuePrescriptionRequest(
                 readinessAck: true,
-                confirmations: ["deload": false]
+                confirmations: ["deload": false],
+                settings: PlanSettings(sessionType: "squat", minimumSession: true)
             ),
             session: session,
             idempotencyKey: "key-issue"
         )
-        XCTAssertEqual(result.issuedPlanId, "plan-1")
-        XCTAssertEqual(result.plan.items.first?.exerciseId, "competition_squat")
-        XCTAssertEqual(result.plan.items.first?.loadKg, 140)
+        XCTAssertEqual(ack.issuedPlanId, "plan-1")
+        XCTAssertEqual(ack.status, "queued")
 
-        let request = try XCTUnwrap(transport.requests.first)
-        XCTAssertEqual(request.url?.path, "/api/ios/v1/prescriptions")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "key-issue")
-        let json = body(request)
+        let issueRequest = try XCTUnwrap(
+            transport.requests.first { $0.url?.path == "/api/ios/v1/prescriptions" }
+        )
+        XCTAssertEqual(issueRequest.value(forHTTPHeaderField: "Idempotency-Key"), "key-issue")
+        let json = body(issueRequest)
         XCTAssertEqual(json["readiness_ack"] as? Bool, true)
         let confirmations = json["confirmations"] as? [String: Bool]
         XCTAssertEqual(confirmations?["deload"], false)
+        let settings = json["settings"] as? [String: Any]
+        XCTAssertEqual(settings?["session_type"] as? String, "squat")
+        XCTAssertEqual(settings?["minimum_session"] as? Bool, true)
         XCTAssertNil(json["plan"])
+
+        // The plan itself comes from the authoritative read, never from the POST response.
+        let state = try await client.planState(session: session)
+        XCTAssertEqual(state.status, "ready")
+        XCTAssertEqual(state.issuedPlan?.plan.items.first?.exerciseId, "competition_squat")
+        XCTAssertEqual(state.issuedPlan?.plan.items.first?.loadKg, 140)
+        let readRequest = try XCTUnwrap(
+            transport.requests.first { $0.url?.path == "/api/ios/v1/plans/current" }
+        )
+        XCTAssertNil(readRequest.value(forHTTPHeaderField: "Idempotency-Key"))
     }
 
     func testStartAndAddSetSendSnakeCaseBodies() async throws {
@@ -298,7 +315,9 @@ final class Phase2ClientTests: XCTestCase {
         let client = IOSAPIClient(transport: transport)
         do {
             _ = try await client.issuePrescription(
-                IssuePrescriptionRequest(readinessAck: false, confirmations: nil),
+                IssuePrescriptionRequest(
+                    readinessAck: false, confirmations: nil, settings: nil
+                ),
                 session: session,
                 idempotencyKey: "key-conflict"
             )
@@ -665,7 +684,9 @@ final class Phase2AppModelTests: XCTestCase {
             case "/api/ios/v1/today":
                 return (200, Data(Fixtures.today.utf8))
             case "/api/ios/v1/prescriptions":
-                return (200, Data(Fixtures.issuedPlan.utf8))
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
             case "/api/ios/v1/workouts":
                 return (200, Data(Fixtures.workoutInProgress.utf8))
             case "/api/ios/v1/workouts/workout-1/sets":
@@ -732,7 +753,9 @@ final class Phase2AppModelTests: XCTestCase {
             case "/api/ios/v1/today":
                 return (200, Data(Fixtures.today.utf8))
             case "/api/ios/v1/prescriptions":
-                return (200, Data(Fixtures.issuedPlan.utf8))
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
             case "/api/ios/v1/workouts":
                 return (200, Data(Fixtures.workoutInProgress.utf8))
             case "/api/ios/v1/workouts/workout-1/sets":
@@ -775,7 +798,9 @@ final class Phase2AppModelTests: XCTestCase {
             case "/api/ios/v1/today":
                 return (200, Data(Fixtures.today.utf8))
             case "/api/ios/v1/prescriptions":
-                return (200, Data(Fixtures.issuedPlan.utf8))
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
             case "/api/ios/v1/workouts":
                 return (200, Data(Fixtures.workoutInProgress.utf8))
             case "/api/ios/v1/workouts/workout-1/sets":
@@ -943,7 +968,9 @@ final class Phase2AppModelTests: XCTestCase {
             case "/api/ios/v1/today":
                 return (200, Data(Fixtures.today.utf8))
             case "/api/ios/v1/prescriptions":
-                return (200, Data(Fixtures.issuedPlan.utf8))
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
             case "/api/ios/v1/workouts":
                 return (200, Data(Fixtures.workoutInProgress.utf8))
             default:
@@ -977,7 +1004,9 @@ final class Phase2AppModelTests: XCTestCase {
             case "/api/ios/v1/today":
                 return (200, Data(Fixtures.today.utf8))
             case "/api/ios/v1/prescriptions":
-                return (200, Data(Fixtures.issuedPlan.utf8))
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
             case "/api/ios/v1/workouts":
                 return (410, Data(#"{"error":"issued plan has already been used","code":"plan_consumed"}"#.utf8))
             default:

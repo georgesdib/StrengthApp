@@ -65,7 +65,7 @@ struct PrescriptionPreviewView: View {
                             }
                         }
 
-                        let warnings = (issued.warnings ?? []) + (issued.plan.warnings ?? [])
+                        let warnings = issued.warnings + (issued.plan.warnings ?? [])
                         if !warnings.isEmpty {
                             Section("Warnings") {
                                 ForEach(Array(Set(warnings)).sorted(), id: \.self) { warning in

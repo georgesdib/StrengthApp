@@ -13,6 +13,7 @@ final class AppModel: ObservableObject {
         case idle
         case readinessRequired([String: JSONValue])
         case confirmationRequired([String: JSONValue])
+        case generating(PlanProgress)
         case issued(IssuedPlanResponse)
         case failed(String)
     }
@@ -53,6 +54,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var progressError: String?
     @Published private(set) var hasLoadedProgress = false
     @Published private(set) var prescriptionState: PrescriptionState = .idle
+    /// Settings the owner chose for the current request, kept for retry after a lost response.
+    @Published private(set) var planSettings = PlanSettings()
+    private var planPollTask: Task<Void, Never>?
     @Published private(set) var isSaving = false
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
@@ -273,6 +277,18 @@ final class AppModel: ObservableObject {
             let (newBootstrap, newToday) = try await (bootstrapTask, todayTask)
             bootstrap = newBootstrap
             today = newToday
+            // R7: the plan area is rendered from the authoritative read, never from a cached
+            // Today payload (contract section 6). An active workout wins over a plan preview.
+            let planStateResponse = try? await client.planState(session: session)
+            if let planStateResponse {
+                if newToday.activeWorkout == nil {
+                    applyPlanState(planStateResponse)
+                    resumePlanPollingIfNeeded()
+                } else {
+                    stopPlanPolling()
+                    prescriptionState = .idle
+                }
+            }
             let previousActive = activeWorkout
             if let serverActive = newToday.activeWorkout {
                 if previousActive?.workoutId != serverActive.workoutId {
@@ -537,6 +553,7 @@ final class AppModel: ObservableObject {
     func issuePrescription(
         readinessAck: Bool,
         confirmations: [String: Bool]? = nil,
+        settings: PlanSettings = PlanSettings(),
         idempotencyKey: String
     ) async {
         guard !isSaving, let session else { return }
@@ -551,15 +568,28 @@ final class AppModel: ObservableObject {
         }
         mutationError = nil
         do {
-            let issued = try await client.issuePrescription(
+            let ack = try await client.issuePrescription(
                 IssuePrescriptionRequest(
                     readinessAck: readinessAck,
-                    confirmations: confirmations
+                    confirmations: confirmations,
+                    settings: settings
                 ),
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            prescriptionState = .issued(issued)
+            planSettings = ack.settings ?? settings
+            prescriptionState = .generating(
+                PlanProgress(
+                    issuedPlanId: ack.issuedPlanId,
+                    status: ack.status,
+                    elapsedSeconds: 0,
+                    settings: planSettings
+                )
+            )
+            startPlanPolling()
+            // Wait for the request to settle. The UI is not blocked — the model publishes the
+            // generating card while this awaits — and "Stop waiting"/expiry cancels the poll.
+            await planPollTask?.value
             await refresh()
         } catch let error as APIError {
             if error.isAuthenticationFailure {
@@ -582,9 +612,130 @@ final class AppModel: ObservableObject {
     }
 
     func clearPrescription() {
+        stopPlanPolling()
         prescriptionState = .idle
         mutationError = nil
         mutationFailureAmbiguous = false
+    }
+
+    // MARK: Plan request (R7)
+
+    /// Poll cadence for a request in flight. 60 s is a copy threshold, not a timeout, so a slow
+    /// build keeps polling until the server reports a terminal state (contract section 5).
+    static func planPollIntervalMs(elapsedSeconds: Int) -> Int {
+        if elapsedSeconds < 10 { return 1_000 }
+        if elapsedSeconds < 60 { return 2_000 }
+        if elapsedSeconds < 300 { return 5_000 }
+        return 10_000
+    }
+
+    private func startPlanPolling() {
+        planPollTask?.cancel()
+        planPollTask = Task { [weak self] in
+            guard let self else { return }
+            await self.pollPlanUntilSettled()
+        }
+    }
+
+    private func stopPlanPolling() {
+        planPollTask?.cancel()
+        planPollTask = nil
+    }
+
+    private var planElapsedSeconds: Int {
+        if case .generating(let progress) = prescriptionState {
+            return progress.elapsedSeconds
+        }
+        return 0
+    }
+
+    private func pollPlanUntilSettled() async {
+        while !Task.isCancelled {
+            let interval = Self.planPollIntervalMs(elapsedSeconds: planElapsedSeconds)
+            try? await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000)
+            if Task.isCancelled { return }
+            if await pollPlanOnce() { return }
+        }
+    }
+
+    /// One authoritative read. Returns true when the request reached a terminal state.
+    private func pollPlanOnce() async -> Bool {
+        guard let session else { return true }
+        do {
+            let state = try await client.planState(session: session)
+            applyPlanState(state)
+            switch state.status {
+            case "queued", "building":
+                return false
+            default:
+                return true
+            }
+        } catch let error as APIError where error.isAuthenticationFailure {
+            handle(error)
+            return true
+        } catch {
+            // A failed read is not a failed request: keep waiting, the plan may already exist.
+            return false
+        }
+    }
+
+    /// Apply the authoritative plan state. The server, not a local copy, decides what is shown.
+    func applyPlanState(_ state: PlansStateResponse) {
+        switch state.status {
+        case "ready":
+            if let issued = state.issuedPlan {
+                stopPlanPolling()
+                prescriptionState = .issued(issued)
+            } else {
+                stopPlanPolling()
+                prescriptionState = .failed("The server reported a ready plan without a plan body.")
+            }
+        case "queued", "building":
+            prescriptionState = .generating(
+                PlanProgress(
+                    issuedPlanId: state.issuedPlanId ?? planElapsedSettingsID,
+                    status: state.status,
+                    elapsedSeconds: state.elapsedSeconds ?? 0,
+                    settings: state.settings ?? planSettings
+                )
+            )
+        case "error":
+            stopPlanPolling()
+            prescriptionState = .failed(
+                state.error?.message ?? "The plan could not be generated."
+            )
+        default:
+            // "none": no live request. Drop a stale preview instead of offering Start on it.
+            stopPlanPolling()
+            if case .issued = prescriptionState {
+                prescriptionState = .idle
+            }
+            if case .generating = prescriptionState {
+                prescriptionState = .idle
+            }
+        }
+    }
+
+    private var planElapsedSettingsID: String {
+        if case .generating(let progress) = prescriptionState {
+            return progress.issuedPlanId
+        }
+        return ""
+    }
+
+    /// Reconcile against the server after launch or foreground. Never overrides a live request
+    /// with local state (contract section 6).
+    func reconcilePlanState() async {
+        guard let session else { return }
+        guard let state = try? await client.planState(session: session) else { return }
+        applyPlanState(state)
+        resumePlanPollingIfNeeded()
+    }
+
+    private func resumePlanPollingIfNeeded() {
+        if case .generating = prescriptionState {
+            startPlanPolling()
+        }
     }
 
     func startWorkout(idempotencyKey: String) async -> Bool {
@@ -815,8 +966,12 @@ final class AppModel: ObservableObject {
                 case .readiness, .healthkitReadiness:
                     let _: ReadinessPayload = try await client.replay(entry, session: session)
                 case .prescription:
-                    let issued: IssuedPlanResponse = try await client.replay(entry, session: session)
-                    prescriptionState = .issued(issued)
+                    // The journal only proves the request was accepted. A Phase 2 receipt may
+                    // still return the old synchronous body, so decode the shared field only
+                    // and let the authoritative read decide what to show.
+                    let ack: PlanAckEnvelope = try await client.replay(entry, session: session)
+                    _ = ack
+                    await reconcilePlanState()
                 case .startWorkout, .addSet, .rateForm:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = true

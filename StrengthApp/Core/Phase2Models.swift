@@ -105,17 +105,94 @@ struct PrescriptionItem: Decodable, Identifiable {
     }
 }
 
-struct IssuedPlanResponse: Decodable, Identifiable {
+// MARK: - Plan request (R7)
+
+/// Workout settings sent with a request. The phone chooses an input; the server owns the plan.
+struct PlanSettings: Codable, Equatable {
+    var sessionType: String = "auto"
+    var minimumSession: Bool = false
+    var minimumTargetMinutes: Int?
+}
+
+/// The 202 acknowledgement: the request exists, the plan does not yet.
+struct PlanRequestAck: Decodable {
     let issuedPlanId: String
-    let prescriptionId: String
+    let status: String
+    let forDate: String
+    let requestExpiresAt: String
+    let planExpiresAt: String?
+    let retryAfterMs: Int?
+    let settings: PlanSettings?
+}
+
+struct PlanErrorBody: Decodable, Equatable {
+    let code: String
+    let message: String
+}
+
+/// The authoritative read: status is queued, building, ready, error or none.
+struct PlansStateResponse: Decodable {
+    let status: String
+    let issuedPlanId: String?
+    let forDate: String?
+    let elapsedSeconds: Int?
+    let requestExpiresAt: String?
+    let planExpiresAt: String?
+    let retryAfterMs: Int?
+    let settings: PlanSettings?
+    let sessionType: String?
+    let plan: PrescriptionPlan?
+    let readiness: ReadinessScore?
+    let warnings: [String]?
+    let error: PlanErrorBody?
+
+    static let none = PlansStateResponse(
+        status: "none", issuedPlanId: nil, forDate: nil, elapsedSeconds: nil,
+        requestExpiresAt: nil, planExpiresAt: nil, retryAfterMs: nil, settings: nil,
+        sessionType: nil, plan: nil, readiness: nil, warnings: nil, error: nil
+    )
+
+    /// A ready state is the only one that can be previewed and started.
+    var issuedPlan: IssuedPlanResponse? {
+        guard status == "ready", let plan else { return nil }
+        return IssuedPlanResponse(
+            issuedPlanId: issuedPlanId ?? "",
+            forDate: forDate ?? "",
+            sessionType: sessionType ?? plan.sessionType ?? "",
+            expiresAt: planExpiresAt ?? "",
+            plan: plan,
+            readiness: readiness,
+            warnings: warnings ?? []
+        )
+    }
+}
+
+/// The preview the owner starts. R7: an unstarted plan is a preview, not a prescription.
+struct IssuedPlanResponse: Identifiable {
+    let issuedPlanId: String
     let forDate: String
     let sessionType: String
     let expiresAt: String
     let plan: PrescriptionPlan
     let readiness: ReadinessScore?
-    let warnings: [String]?
+    let warnings: [String]
 
     var id: String { issuedPlanId }
+}
+
+/// Permissive envelope for a journalled prescription response: a Phase 2 receipt may return the
+/// old synchronous body, so only the shared identifier is read here.
+struct PlanAckEnvelope: Decodable {
+    let issuedPlanId: String?
+    let status: String?
+}
+
+/// Progress of an in-flight request, shown while the dispatcher builds.
+struct PlanProgress: Equatable {
+    var issuedPlanId: String
+    var status: String
+    var elapsedSeconds: Int
+    var settings: PlanSettings
 }
 
 // MARK: - Workout
@@ -301,6 +378,7 @@ struct ReadinessWriteRequest: Encodable, Equatable {
 struct IssuePrescriptionRequest: Encodable {
     let readinessAck: Bool
     let confirmations: [String: Bool]?
+    let settings: PlanSettings?
 }
 
 struct StartWorkoutRequest: Encodable {

@@ -336,11 +336,12 @@ final class IOSAPIClient {
         )
     }
 
+    /// R7: the request is accepted (202) and the plan is built in the background.
     func issuePrescription(
         _ body: IssuePrescriptionRequest,
         session: IOSSession,
         idempotencyKey: String
-    ) async throws -> IssuedPlanResponse {
+    ) async throws -> PlanRequestAck {
         try await post(
             path: "api/ios/v1/prescriptions",
             body: body,
@@ -349,6 +350,12 @@ final class IOSAPIClient {
             session: session,
             idempotencyKey: idempotencyKey
         )
+    }
+
+    /// The authoritative plan-request state. Read-only: no idempotency key, no retries beyond
+    /// the bounded GET policy.
+    func planState(session: IOSSession) async throws -> PlansStateResponse {
+        try await get(path: "api/ios/v1/plans/current", query: [], session: session)
     }
 
     func startWorkout(

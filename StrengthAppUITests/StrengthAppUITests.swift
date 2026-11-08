@@ -16,10 +16,11 @@ final class StrengthAppUITests: XCTestCase {
 
         let server = app.textFields["server-url"]
         XCTAssertTrue(server.waitForExistence(timeout: 15))
-        // The Debug default already points at the local server. Rewriting a prefilled field
-        // in XCUITest is fragile, so only type when it is not already the target address.
+        // The Debug default points at the local server on the default port. Rewriting a
+        // prefilled field in XCUITest is fragile, so only type when it differs from the
+        // configured address; an exact match means a different port is a different server.
         let currentServer = server.value as? String ?? ""
-        if !currentServer.contains("127.0.0.1:8000") {
+        if currentServer != LiveConfig.serverURL {
             clearAndType(server, text: LiveConfig.serverURL)
         }
 
@@ -83,7 +84,7 @@ final class StrengthAppUITests: XCTestCase {
         let server = app.textFields["server-url"]
         XCTAssertTrue(server.waitForExistence(timeout: 15))
         let currentServer = server.value as? String ?? ""
-        if !currentServer.contains("127.0.0.1:8000") {
+        if currentServer != LiveConfig.serverURL {
             clearAndType(server, text: LiveConfig.serverURL)
         }
         let code = app.textFields["pairing-code"]
@@ -125,7 +126,12 @@ final class StrengthAppUITests: XCTestCase {
         let start = app.buttons["start-workout"]
         XCTAssertTrue(start.waitForExistence(timeout: 10))
         start.tap()
-        XCTAssertTrue(app.navigationBars["Review prescription"].waitForExistence(timeout: 25))
+        // R7: the request opens the workout-settings sheet first; the preview appears once the
+        // server has built the plan, which is fast here because the resolver is off.
+        if app.navigationBars["Request workout"].waitForExistence(timeout: 10) {
+            app.buttons["request-workout"].tap()
+        }
+        XCTAssertTrue(app.navigationBars["Review prescription"].waitForExistence(timeout: 60))
         attachScreenshot(app, name: "10-prescription")
         let previewStart = app.buttons["preview-start"]
         scrollTo(previewStart, in: app)

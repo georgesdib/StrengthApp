@@ -112,36 +112,120 @@ eligible/missing/stale states, coalesced authoritative refresh, import/refresh c
 HealthKit request encoding and indeterminate no-sample handling, plus optional per-rep velocity
 parsing and the refresh gate before import.
 
+### Building and testing from the command line
+
+Prerequisites: Xcode 27.x, an iOS 27.x simulator runtime, and the Xcode developer directory
+selected. If `xcode-select -p` prints `/Library/Developer/CommandLineTools`, every `xcodebuild`
+call fails with "requires Xcode"; either select it once
+(`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`) or prefix each command with
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+
+The repository tracks `project.xcproj` rather than a `project.pbxproj`; Xcode 27 opens it and
+`xcodebuild` reads it directly, so there is nothing to generate first.
+
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+# What exists: three targets and one shared scheme.
+xcodebuild -list -project StrengthApp.xcodeproj
+
+# Build the app for a simulator.
+xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \
+  -destination 'platform=iOS Simulator,name=iPhone 17' build
+
+# Run every unit test.
 xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
-  -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
+  -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:StrengthAppTests
+
+# Run one test while iterating.
+xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -only-testing:StrengthAppTests/Phase2AppModelTests/testIssueStartSetAndCompleteFlow
 ```
+
+Install and launch the built app by hand (the UI test does this itself when it is enabled):
+
+```bash
+xcrun simctl boot 'iPhone 17'
+xcrun simctl install 'iPhone 17' <DerivedData>/Build/Products/Debug-iphonesimulator/StrengthApp.app
+xcrun simctl launch 'iPhone 17' com.georgesdibpersonalteam.StrengthApp
+```
+
+Two failure modes that are environmental rather than code:
+
+- **"Test crashed with signal kill before establishing connection"** means the simulator session
+  is wedged, usually after a test run was killed. `xcrun simctl shutdown all` then boot the device
+  again, or run on a different simulator. A clean device always works.
+- **A non-interactive shell has no pseudo-terminal**, which `xcodebuild test` needs. Wrap the
+  command: `script -q /dev/null xcodebuild test …` (macOS). The build alone does not need it.
 
 The physical-device Phase 3A checklist and rollback steps are in
 [`DEVICE-ACCEPTANCE.md`](DEVICE-ACCEPTANCE.md); the server-side backup, migration and
 pairing-code runbook is `docs/IOS-CLIENT-PLAN.md` §13.3.
 
-The optional UI smoke tests (`StrengthAppUITests`) verify pairing, Today, History, Settings,
-relaunch persistence and Forget, plus the Phase 2 flow (readiness → prescription → start → add a
-manual-VBT set → force-quit/relaunch recovery → finish → Progress) against a real local server. They are skipped unless
-`StrengthAppUITests/LiveConfig.swift` is generated with `enabled = true` and a fresh pairing code;
-the committed copy is disabled so the normal gate does not need a server. The shared scheme
-includes both test targets. The simulator test run needs normal (ad-hoc) simulator signing so the
-Keychain is available; a plain app build may pass `CODE_SIGNING_ALLOWED=NO`.
+### Running the live UI tests
 
-### Headless/agent build note
+The optional UI smoke tests (`StrengthAppUITests`) drive the app against a real server: pairing,
+Today, History, Settings, relaunch persistence and Forget, plus the full session flow (readiness →
+request workout → settings sheet → preview → start → add a manual-VBT set → force-quit/relaunch
+recovery → finish → Progress). They are skipped unless `StrengthAppUITests/LiveConfig.swift` is
+generated with `enabled = true` and a fresh pairing code; the committed copy is disabled so the
+normal gate needs no server. The shared scheme includes both test targets. The simulator test run
+needs normal (ad-hoc) simulator signing so the Keychain is available; a plain app build may pass
+`CODE_SIGNING_ALLOWED=NO`.
 
-In a sandboxed agent shell the Swift compiler's nested plugin sandbox and `$TMPDIR` Clang module
-cache may be denied. Add these command-line overrides for that environment only (they are not in
-the project file, so normal Xcode builds are unchanged):
+**Never point a live run at a server holding real training data.** Stand up a throwaway one on
+another port:
 
 ```bash
-OTHER_SWIFT_FLAGS='-disable-sandbox -Xcc -fmodules-cache-path=$PWD/clang-module-cache'
+# Throwaway server, separate database, non-default port (8000 may be the real one).
+strength-coach --db /tmp/live/coach.db web --host 127.0.0.1 --port 8001
+
+# A single-use code; it expires after five minutes, so mint it just before the run.
+strength-coach --db /tmp/live/coach.db ios pair --label UITest
 ```
 
-Simulator `xcodebuild test` also needs a pseudo-terminal and simulator services, which a
-workspace-only sandbox may deny.
+Write `LiveConfig.swift` with `enabled = true`, `serverURL = "http://127.0.0.1:8001"`,
+`pairingCode` from the command above, and `expectedSessionDate` set to a date the History screen
+will show — seed one by completing a workout through the API, or skip the History assertion by
+using the pairing test instead.
+
+**Point the app at the port with UserDefaults, not by typing.** XCUITest typing into the server
+field is flaky, and more importantly the app's Debug default is `http://127.0.0.1:8000`, so a test
+that only types when the field "looks wrong" will happily pair against the real server. Set the
+value before launching instead:
+
+```bash
+xcrun simctl spawn 'iPhone 17' defaults write com.georgesdibpersonalteam.StrengthApp \
+  ios.serverURL "http://127.0.0.1:8001"
+```
+
+The app keeps that value across launches (Forget clears the token, not the URL), so the run is
+deterministic. The UI test also compares the field against `LiveConfig.serverURL` and types only
+when they differ.
+
+Restore `LiveConfig.swift` afterwards (`git checkout -- StrengthAppUITests/LiveConfig.swift`); a
+filled copy carries a server address and a pairing code and must never be committed.
+
+### Sandboxed or headless shells
+
+### Sandboxed or headless shells
+
+Nothing here is needed when the build runs in an ordinary terminal or in Xcode; these are
+workarounds for shells whose sandbox denies what the toolchain expects.
+
+- **SwiftUI macros fail** with "external macro implementation type … could not be found" and
+  `sandbox-exec: sandbox_apply: Operation not permitted`: the compiler sandboxes its macro plugin.
+  Disable that nesting for the invocation:
+
+  ```bash
+  OTHER_SWIFT_FLAGS='-Xfrontend -disable-sandbox' \
+  xcodebuild build -project StrengthApp.xcodeproj -scheme StrengthApp -destination '…'
+  ```
+
+  If the Clang module cache is also unwritable, point it inside the workspace as well:
+  `-Xcc -fmodules-cache-path=$PWD/clang-module-cache`.
+- **Tests need a pseudo-terminal** (`script -q /dev/null`), as noted above, and simulator access
+  from the harness itself; a workspace-only file sandbox may block `simctl`, launching the test
+  runner, or taking screenshots.
 
 ## Real-device acceptance
 

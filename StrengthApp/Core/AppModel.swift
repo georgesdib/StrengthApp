@@ -287,8 +287,11 @@ final class AppModel: ObservableObject {
                     applyPlanState(planStateResponse)
                     resumePlanPollingIfNeeded()
                 } else {
+                    // A workout is running, so the preview sheet is showing the workout view.
+                    // Starting consumes the plan, which makes plans/current report none; clearing
+                    // the state here would dismiss the sheet mid-session. The workout owns the
+                    // screen until it ends.
                     stopPlanPolling()
-                    prescriptionState = .idle
                 }
             }
             let previousActive = activeWorkout

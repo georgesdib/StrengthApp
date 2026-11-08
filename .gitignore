@@ -27,3 +27,6 @@ build/
 # Do not commit a filled-in copy: it carries the server address and a pairing
 # code. Check "git diff StrengthAppUITests/LiveConfig.swift" before committing
 # after an acceptance run.
+# Local, machine-specific operational notes (build/test environment, run logs). Never commit:
+# the generic build and test recipe lives in README.md instead.
+private/

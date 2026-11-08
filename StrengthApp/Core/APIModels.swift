@@ -33,6 +33,7 @@ struct Capabilities: Decodable, Equatable {
     let prescription: Bool
     let workoutWrite: Bool
     let healthkit: Bool
+    let healthkitReadiness: Bool?
     let offline: Bool
     let readinessWrite: Bool?
 
@@ -42,12 +43,14 @@ struct Capabilities: Decodable, Equatable {
         workoutWrite: Bool,
         healthkit: Bool,
         offline: Bool,
-        readinessWrite: Bool? = nil
+        readinessWrite: Bool? = nil,
+        healthkitReadiness: Bool? = nil
     ) {
         self.readiness = readiness
         self.prescription = prescription
         self.workoutWrite = workoutWrite
         self.healthkit = healthkit
+        self.healthkitReadiness = healthkitReadiness
         self.offline = offline
         self.readinessWrite = readinessWrite
     }
@@ -69,6 +72,22 @@ struct ReadinessPayload: Decodable {
     let known: Bool?
     let score: ReadinessScore?
     let contextFlags: [String]?
+    let hrvMs: Double?
+    let rhrBpm: Double?
+    let sources: [String: String]?
+    let healthkit: [String: HealthKitReadinessProvenance]?
+}
+
+struct HealthKitReadinessProvenance: Decodable, Equatable {
+    let value: Double
+    let sampleId: String
+    let sampleAt: String
+    let sourceName: String
+    let sourceBundleId: String?
+    let sourceClass: String
+    let sourceModel: String?
+    let sourceManufacturer: String?
+    let importedAt: String
 }
 
 struct ReadinessScore: Decodable {

@@ -65,6 +65,24 @@ final class InMemoryTokenStore: TokenStoring {
     }
 }
 
+
+final class FakeHealthKitReadinessProvider: HealthKitReadinessProviding {
+    var isAvailable = true
+    var authorizationRequests = 0
+    var selection = HealthKitReadinessSelection(hrv: nil, rhr: nil, staleFields: [])
+    var error: Error?
+
+    func requestAuthorization() async throws {
+        authorizationRequests += 1
+        if let error { throw error }
+    }
+
+    func selectSamples(serverDate: String, now: Date) async throws -> HealthKitReadinessSelection {
+        if let error { throw error }
+        return selection
+    }
+}
+
 enum Fixtures {
     static let bootstrap = #"""
     {
@@ -184,6 +202,7 @@ enum Fixtures {
         "prescription": true,
         "workout_write": true,
         "healthkit": false,
+        "healthkit_readiness": true,
         "offline": false
       }
     }

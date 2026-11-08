@@ -27,6 +27,7 @@ struct PendingMutation: Codable, Equatable, Identifiable {
 
 enum MutationKind: String, Codable, CaseIterable {
     case readiness
+    case healthkitReadiness
     case prescription
     case startWorkout
     case addSet
@@ -37,6 +38,7 @@ enum MutationKind: String, Codable, CaseIterable {
     var label: String {
         switch self {
         case .readiness: return "Readiness"
+        case .healthkitReadiness: return "HealthKit readiness"
         case .prescription: return "Prescription"
         case .startWorkout: return "Start workout"
         case .addSet: return "Add set"

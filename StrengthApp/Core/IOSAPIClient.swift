@@ -313,6 +313,21 @@ final class IOSAPIClient {
         )
     }
 
+    func importHealthKitReadiness(
+        _ body: HealthKitReadinessRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> ReadinessPayload {
+        try await post(
+            path: "api/ios/v1/healthkit/readiness",
+            body: body,
+            kind: .healthkitReadiness,
+            targetId: nil,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func issuePrescription(
         _ body: IssuePrescriptionRequest,
         session: IOSSession,

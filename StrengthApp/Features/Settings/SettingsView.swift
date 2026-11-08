@@ -15,6 +15,28 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("HealthKit") {
+                    Toggle(
+                        "Readiness from HealthKit",
+                        isOn: Binding(
+                            get: { model.healthKitEnabled },
+                            set: { value in
+                                Task { await model.setHealthKitEnabled(value) }
+                            }
+                        )
+                    )
+                    .disabled(!model.canUseHealthKit && !model.healthKitEnabled)
+                    .accessibilityIdentifier("healthkit-toggle")
+                    if let message = model.healthKitState.message {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Reads only HRV and resting heart rate. No sleep, workouts or write access.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("This device") {
                     if let device = model.device {
                         LabeledContent("Label", value: device.label)

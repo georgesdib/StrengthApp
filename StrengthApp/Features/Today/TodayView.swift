@@ -147,6 +147,12 @@ struct TodayView: View {
                     readinessContent
                 }
 
+                if model.bootstrap?.capabilities.healthkitReadiness == true {
+                    Section("HealthKit") {
+                        healthKitContent
+                    }
+                }
+
                 Section("Active workout") {
                     if let workout = model.activeWorkout ?? model.today?.activeWorkout {
                         LabeledContent("Session", value: workout.sessionType ?? "Workout")
@@ -167,15 +173,15 @@ struct TodayView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await model.refresh() }
+                        Task { await model.refreshWithHealthKit() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .disabled(model.isRefreshing)
+                    .disabled(model.isRefreshing || model.isImportingHealthKit)
                     .accessibilityLabel("Refresh today")
                 }
             }
-            .refreshable { await model.refresh() }
+            .refreshable { await model.refreshWithHealthKit() }
             .task {
                 if model.today == nil {
                     await model.refresh()
@@ -354,6 +360,88 @@ struct TodayView: View {
                 idempotencyKey: key
             )
         }
+    }
+
+    @ViewBuilder
+    private var healthKitContent: some View {
+        if !model.healthKitEnabled {
+            Text("HealthKit readiness is off. Enable it in Settings to import HRV and resting HR.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } else {
+            if let message = model.healthKitState.message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if let payload = model.today?.readiness {
+                healthKitValueRow(
+                    "HRV", field: "hrv_ms", value: payload.hrvMs,
+                    unit: "ms", payload: payload
+                )
+                healthKitValueRow(
+                    "Resting HR", field: "rhr_bpm", value: payload.rhrBpm,
+                    unit: "bpm", payload: payload
+                )
+            }
+            Button {
+                Task { await model.importHealthKit() }
+            } label: {
+                HStack {
+                    Spacer()
+                    if model.isImportingHealthKit {
+                        ProgressView()
+                    } else {
+                        Text("Import from HealthKit")
+                    }
+                    Spacer()
+                }
+            }
+            .accessibilityIdentifier("healthkit-import")
+            .disabled(model.isImportingHealthKit || !model.canUseHealthKit)
+        }
+    }
+
+    @ViewBuilder
+    private func healthKitValueRow(
+        _ label: String,
+        field: String,
+        value: Double?,
+        unit: String,
+        payload: ReadinessPayload
+    ) -> some View {
+        let provenance = payload.healthkit?[field]
+        let source = payload.sources?[field]
+        if let value {
+            LabeledContent(label, value: "\(value.formatted(.number.precision(.fractionLength(0...1)))) \(unit)")
+            if source == "manual", let provenance {
+                Text("Manual selected; HealthKit \(provenance.value.formatted(.number.precision(.fractionLength(0...1)))) \(unit) from \(provenance.sourceName) \(sampleAgeLabel(provenance.sampleAt))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if let provenance {
+                Text("\(provenance.sourceName) \(sampleAgeLabel(provenance.sampleAt))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text("\(label): no sample")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func sampleAgeLabel(_ iso: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = formatter.date(from: iso)
+        if date == nil {
+            formatter.formatOptions = [.withInternetDateTime]
+            date = formatter.date(from: iso)
+        }
+        guard let date else { return "sample time unknown" }
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .short
+        return relative.localizedString(for: date, relativeTo: Date())
     }
 
     @ViewBuilder

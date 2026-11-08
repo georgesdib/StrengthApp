@@ -344,9 +344,102 @@ final class Phase2AppModelTests: XCTestCase {
         return (defaults, suite)
     }
 
+    func testHealthKitImportUsesAJournaledRequestAndRefreshesToday() async {
+        let now = Date()
+        let hrv = HealthKitReadinessObservation(
+            field: .hrvMs,
+            value: 55,
+            sampleID: "sample-hrv",
+            sampleAt: now,
+            sourceName: "Apple Watch",
+            sourceBundleID: "com.apple.health",
+            sourceClass: .appleWatch,
+            sourceModel: "Watch6,18",
+            sourceManufacturer: "Apple Inc."
+        )
+        let rhr = HealthKitReadinessObservation(
+            field: .rhrBpm,
+            value: 52,
+            sampleID: "sample-rhr",
+            sampleAt: now,
+            sourceName: "Apple Watch",
+            sourceBundleID: "com.apple.health",
+            sourceClass: .appleWatch,
+            sourceModel: "Watch6,18",
+            sourceManufacturer: "Apple Inc."
+        )
+        let fake = FakeHealthKitReadinessProvider()
+        fake.selection = HealthKitReadinessSelection(hrv: hrv, rhr: rhr, staleFields: [])
+        var healthKitBodies: [[String: Any]] = []
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/healthkit/readiness":
+                if let data = request.httpBody,
+                   let object = try? JSONSerialization.jsonObject(with: data),
+                   let body = object as? [String: Any] {
+                    healthKitBodies.append(body)
+                }
+                return (200, Data(Fixtures.readinessWrite.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport, healthKit: fake)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+        await model.setHealthKitEnabled(true)
+
+        XCTAssertTrue(model.healthKitEnabled)
+        XCTAssertEqual(fake.authorizationRequests, 1)
+        XCTAssertEqual(model.healthKitState, .eligibleSample)
+        XCTAssertEqual(healthKitBodies.count, 1)
+        let samples = healthKitBodies[0]["samples"] as? [[String: Any]] ?? []
+        XCTAssertEqual(samples.count, 2)
+        XCTAssertEqual(samples[0]["field"] as? String, "hrv_ms")
+        XCTAssertEqual(samples[0]["source_class"] as? String, "apple_watch")
+        XCTAssertEqual(healthKitBodies[0]["date"] as? String, "2026-11-07")
+        XCTAssertTrue(model.pendingMutations.isEmpty)
+    }
+
+    func testHealthKitNoSampleIsIndeterminateAndDoesNotPost() async {
+        let fake = FakeHealthKitReadinessProvider()
+        fake.selection = HealthKitReadinessSelection(
+            hrv: nil, rhr: nil, staleFields: []
+        )
+        var posted = false
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/healthkit/readiness":
+                posted = true
+                return (200, Data(Fixtures.readinessWrite.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport, healthKit: fake)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+        await model.setHealthKitEnabled(true)
+
+        XCTAssertEqual(model.healthKitState, .noEligibleSample)
+        XCTAssertFalse(posted)
+        XCTAssertTrue(model.pendingMutations.isEmpty)
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
-        journal: MutationJournal? = nil
+        journal: MutationJournal? = nil,
+        healthKit: (any HealthKitReadinessProviding)? = nil
     ) -> (AppModel, UserDefaults, String, InMemoryTokenStore) {
         let (defaults, suite) = makeDefaults()
         let store = PairedStore(defaults: defaults)
@@ -356,7 +449,9 @@ final class Phase2AppModelTests: XCTestCase {
         let model = AppModel(
             client: IOSAPIClient(transport: transport, journal: journal),
             tokens: tokens,
-            store: store
+            store: store,
+            healthKit: healthKit,
+            healthKitDefaults: defaults
         )
         return (model, defaults, suite, tokens)
     }

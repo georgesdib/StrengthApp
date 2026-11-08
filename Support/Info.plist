@@ -4,6 +4,8 @@
 <dict>
     <key>NSLocalNetworkUsageDescription</key>
     <string>StrengthApp connects to your own strength-coach server on your local network.</string>
+    <key>NSHealthShareUsageDescription</key>
+    <string>StrengthApp reads your heart-rate variability and resting heart rate to show readiness. These values stay on your own strength-coach server.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>

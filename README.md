@@ -1,20 +1,20 @@
 # StrengthApp — iOS client
 
-**Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07** — both
-simulator-verified and owner-confirmed on the physical iPhone. Phase 3 is not started.
-
-R1 durable pending-mutation journal, R3 explicit plan-item selection and R5 workout recovery/
-reconciliation UX are closed.
+**Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07; Phase 3A
+implemented 2026-11-08** — Phase 3A is unit/simulator/live-server verified; physical HealthKit
+acceptance remains pending. R1 durable pending-mutation journal, R3 explicit plan-item selection
+and R5 workout recovery/reconciliation UX are closed.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
 workout set logging (including optional manual mean velocity), form ratings, completion/abandon
-and the Progress screen. Python remains the sole authority for readiness scores, prescriptions,
-loads, sets and training decisions; the phone never supplies plan content.
+and the Progress screen. Phase 3A adds opt-in, read-only HealthKit HRV and resting heart rate;
+manual readiness wins, Python remains the sole authority for readiness scores, prescriptions,
+loads, sets and training decisions, and the phone never supplies plan content.
 
-The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md` and
-`docs/design/IOS-PHASE-2-CONTRACT.md` in the `strength-training-app` repository. The client is
-this separate repository.
+The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
+`docs/design/IOS-PHASE-2-CONTRACT.md` and `docs/design/IOS-PHASE-3A-CONTRACT.md` in the
+`strength-training-app` repository. The client is this separate repository.
 
 ## Requirements
 
@@ -49,7 +49,8 @@ this separate repository.
 - **Today** — server date/time/time zone, readiness status/score/basis/overrides/context, active
   workout or "no active workout"; Log readiness, Start workout and Resume workout; a Recovery
   section when the server has a workout not represented locally, a local workout ended elsewhere,
-  or a prescription is no longer usable; pull to refresh.
+  or a prescription is no longer usable; an opt-in HealthKit section showing HRV/RHR effective
+  values, source, sample age and Import from HealthKit; pull to refresh.
 - **Readiness** — manual sleep/energy/mood/soreness/stress (1–5), optional HRV/RHR/bodyweight/
   wearable and legacy labels, optional note; missing fields stay missing; errors stay visible.
 - **Prescription preview** — server-issued plan, readiness summary, warnings and expiry; Start
@@ -62,11 +63,11 @@ this separate repository.
   empty and error states.
 - **Progress** — the server dashboard: sRPE coverage, performance points, weekly volume, attendance
   and back-symptom summary over a 4/8/12/26/52-week window.
-- **Settings** — server URL, device id/label, app version, Forget this device (local token only),
-  re-pair instructions.
+- **Settings** — server URL, device id/label, app version, opt-in HealthKit readiness, Forget
+  this device (local token only), re-pair instructions.
 
-There is no HealthKit, offline queue, plan editing, per-rep VBT, review/rubric or Apple
-Intelligence/PCC UI in Phase 2.
+HealthKit is read-only, off by default and limited to HRV and resting heart rate. There is no
+offline queue, plan editing, per-rep VBT, review/rubric or Apple Intelligence/PCC UI.
 
 ## Storage and networking
 
@@ -94,7 +95,7 @@ Intelligence/PCC UI in Phase 2.
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 55 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 63 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
@@ -102,7 +103,9 @@ idempotency headers, server conflict code/details decoding, progress decoding, t
 issue/start/add-set/complete model flow, body-aware retry keys, unique-only plan-item attribution,
 duplicate-tap guarding, ambiguous-failure classification, the durable journal's persistence,
 scoping, cap, conflict/terminal handling and relaunch replay, repeated-exercise plan-item choices
-with nil fallback, and R5 server-active/ended-elsewhere/consumed-prescription recovery states.
+with nil fallback, R5 server-active/ended-elsewhere/consumed-prescription recovery states, and
+Phase 3A Apple Watch classification, sample selection/freshness, HealthKit request encoding and
+indeterminate no-sample handling.
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \

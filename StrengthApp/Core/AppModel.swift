@@ -49,28 +49,47 @@ final class AppModel: ObservableObject {
     @Published private(set) var recoveryMessage: String?
     @Published private(set) var recoveryIssue: RecoveryIssue?
     @Published private(set) var isRecovering = false
+    @Published private(set) var healthKitEnabled: Bool
+    @Published private(set) var healthKitState: HealthKitReadinessState
+    @Published private(set) var isImportingHealthKit = false
+    @Published private(set) var healthKitSelection: HealthKitReadinessSelection?
 
     @Published var serverURLText: String
     @Published var pairingCodeText: String = ""
     @Published var pairingLabelText: String
 
+    private static let healthKitDefaultsKey = "healthKitReadinessEnabled"
     private let client: IOSAPIClient
     private let tokens: TokenStoring
     private let store: PairedStore
+    private let healthKit: any HealthKitReadinessProviding
+    private let healthKitDefaults: UserDefaults
     private let pageSize = 50
     private var session: IOSSession?
     private var historyOffset = 0
     private var workoutRefreshGrace = false
+    private var healthKitOperation = OperationKey<HealthKitReadinessRequest>()
+    private var healthKitFollowUp = false
 
     init(
         client: IOSAPIClient? = nil,
         tokens: TokenStoring? = nil,
-        store: PairedStore? = nil
+        store: PairedStore? = nil,
+        healthKit: (any HealthKitReadinessProviding)? = nil,
+        healthKitDefaults: UserDefaults = .standard
     ) {
         let store = store ?? PairedStore()
+        let readiness = healthKit ?? HealthKitReadinessService()
+        let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         self.client = client ?? IOSAPIClient(journal: MutationJournal())
         self.tokens = tokens ?? KeychainTokenStore()
         self.store = store
+        self.healthKit = readiness
+        self.healthKitDefaults = healthKitDefaults
+        self.healthKitEnabled = enabled
+        self.healthKitState = enabled
+            ? (readiness.isAvailable ? .enabled : .unavailable)
+            : .featureDisabled
         self.serverURLText = store.serverURL ?? AppConfig.defaultServerURL
         self.pairingLabelText = store.device?.label ?? "iPhone"
     }
@@ -99,6 +118,10 @@ final class AppModel: ObservableObject {
         canWriteReadiness && canPrescribe && canWriteWorkout
     }
 
+    var canUseHealthKit: Bool {
+        healthKit.isAvailable && bootstrap?.capabilities.healthkitReadiness == true
+    }
+
     // MARK: Lifecycle
 
     func onLaunch() async {
@@ -121,6 +144,9 @@ final class AppModel: ObservableObject {
         phase = .paired
         await refresh()
         await recoverPendingMutations()
+        if healthKitEnabled {
+            await importHealthKit()
+        }
     }
 
     // MARK: Pairing
@@ -174,6 +200,9 @@ final class AppModel: ObservableObject {
             phase = .paired
             await refresh()
             await recoverPendingMutations()
+            if healthKitEnabled {
+                await importHealthKit()
+            }
         } catch {
             pairingError = message(for: error)
         }
@@ -218,6 +247,13 @@ final class AppModel: ObservableObject {
             } else {
                 activeWorkout = nil
                 workoutRefreshGrace = false
+            }
+            if !healthKitEnabled {
+                healthKitState = .featureDisabled
+            } else if !canUseHealthKit {
+                healthKitState = .unavailable
+            } else if healthKitState == .featureDisabled || healthKitState == .unavailable {
+                healthKitState = .enabled
             }
             errorMessage = nil
         } catch {
@@ -290,6 +326,112 @@ final class AppModel: ObservableObject {
         } catch {
             handleMutation(error)
             return false
+        }
+    }
+
+    // MARK: HealthKit readiness (Phase 3A)
+
+    func setHealthKitEnabled(_ enabled: Bool) async {
+        guard enabled != healthKitEnabled else { return }
+        if !enabled {
+            healthKitDefaults.set(false, forKey: Self.healthKitDefaultsKey)
+            healthKitEnabled = false
+            healthKitSelection = nil
+            healthKitState = .featureDisabled
+            healthKitOperation = OperationKey<HealthKitReadinessRequest>()
+            healthKitFollowUp = false
+            return
+        }
+        guard canUseHealthKit else {
+            healthKitState = .unavailable
+            return
+        }
+        healthKitDefaults.set(true, forKey: Self.healthKitDefaultsKey)
+        healthKitEnabled = true
+        healthKitState = .enabled
+        healthKitOperation = OperationKey<HealthKitReadinessRequest>()
+        do {
+            try await healthKit.requestAuthorization()
+        } catch {
+            healthKitState = .importError(message(for: error))
+            return
+        }
+        await importHealthKit()
+    }
+
+    func refreshWithHealthKit() async {
+        await refresh()
+        if healthKitEnabled {
+            await importHealthKit()
+        }
+    }
+
+    func importHealthKit() async {
+        guard healthKitEnabled else {
+            healthKitState = .featureDisabled
+            return
+        }
+        guard canUseHealthKit else {
+            healthKitState = .unavailable
+            return
+        }
+        guard let session, let date = today?.date else {
+            healthKitState = .importError("Refresh Today before importing HealthKit readiness.")
+            return
+        }
+        if isImportingHealthKit {
+            healthKitFollowUp = true
+            return
+        }
+        await runHealthKitImport(session: session, date: date)
+        while healthKitFollowUp {
+            healthKitFollowUp = false
+            guard healthKitEnabled, canUseHealthKit,
+                  let currentSession = self.session,
+                  let currentDate = today?.date else { break }
+            await runHealthKitImport(session: currentSession, date: currentDate)
+        }
+    }
+
+    private func runHealthKitImport(session: IOSSession, date: String) async {
+        isImportingHealthKit = true
+        defer {
+            isImportingHealthKit = false
+            refreshPendingMutations()
+        }
+        do {
+            let selection = try await healthKit.selectSamples(
+                serverDate: date,
+                now: Date()
+            )
+            healthKitSelection = selection
+            if selection.isEmpty {
+                healthKitState = selection.hasStaleSample ? .staleSample : .noEligibleSample
+                return
+            }
+            healthKitState = .eligibleSample
+            let request = HealthKitReadinessRequest(
+                date: date,
+                samples: selection.observations.map(\.payload)
+            )
+            let key = healthKitOperation.use(request)
+            guard permitsMutation(kind: .healthkitReadiness, operationId: key) else {
+                healthKitState = .importError(
+                    mutationError ?? "Another operation is awaiting confirmation."
+                )
+                return
+            }
+            _ = try await client.importHealthKitReadiness(
+                request,
+                session: session,
+                idempotencyKey: key
+            )
+            healthKitOperation.acknowledged()
+            mutationError = nil
+            await refresh()
+        } catch {
+            healthKitState = .importError(message(for: error))
+            handleMutation(error)
         }
     }
 
@@ -571,7 +713,7 @@ final class AppModel: ObservableObject {
             }
             do {
                 switch entry.kind {
-                case .readiness:
+                case .readiness, .healthkitReadiness:
                     let _: ReadinessPayload = try await client.replay(entry, session: session)
                 case .prescription:
                     let issued: IssuedPlanResponse = try await client.replay(entry, session: session)
@@ -692,6 +834,12 @@ final class AppModel: ObservableObject {
         recoveryIssue = nil
         isRecovering = false
         workoutRefreshGrace = false
+        healthKitDefaults.set(false, forKey: Self.healthKitDefaultsKey)
+        healthKitEnabled = false
+        healthKitState = .featureDisabled
+        healthKitSelection = nil
+        healthKitOperation = OperationKey<HealthKitReadinessRequest>()
+        healthKitFollowUp = false
         pairedServerURL = store.serverURL
         phase = .pairing
         errorMessage = nil

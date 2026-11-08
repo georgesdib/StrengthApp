@@ -37,19 +37,28 @@ final class HealthKitReadinessService: HealthKitReadinessProviding {
     func selectSamples(serverDate: String, now: Date) async throws -> HealthKitReadinessSelection {
         guard isAvailable else { throw HealthKitReadinessError.unavailable }
         let end = now.addingTimeInterval(5 * 60)
-        let start = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let start = now.addingTimeInterval(-30 * 24 * 60 * 60)
         async let hrvSamples = samples(
             identifier: .heartRateVariabilitySDNN, start: start, end: end
         )
         async let rhrSamples = samples(
             identifier: .restingHeartRate, start: start, end: end
         )
-        let (hrvRaw, rhrRaw) = try await (hrvSamples, rhrSamples)
+        async let bodyweightSamples = samples(
+            identifier: .bodyMass, start: start, end: end
+        )
+        let (hrvRaw, rhrRaw, bodyweightRaw) = try await (
+            hrvSamples, rhrSamples, bodyweightSamples
+        )
         let hrv = hrvRaw.compactMap { observation($0, field: .hrvMs, serverDate: serverDate) }
         let rhr = rhrRaw.compactMap { observation($0, field: .rhrBpm, serverDate: serverDate) }
+        let bodyweight = bodyweightRaw.compactMap {
+            observation($0, field: .bodyweightKg, serverDate: serverDate)
+        }
         return HealthKitReadinessSelection.make(
             hrvCandidates: hrv,
             rhrCandidates: rhr,
+            bodyweightCandidates: bodyweight,
             serverDate: serverDate,
             now: now
         )
@@ -95,6 +104,8 @@ final class HealthKitReadinessService: HealthKitReadinessProviding {
             unit = HKUnit.secondUnit(with: .milli)
         case .rhrBpm:
             unit = HKUnit.count().unitDivided(by: HKUnit.minute())
+        case .bodyweightKg:
+            unit = HKUnit.gramUnit(with: .kilo)
         }
         let value = sample.quantity.doubleValue(for: unit)
         guard value.isFinite, value > 0 else { return nil }
@@ -118,6 +129,8 @@ final class HealthKitReadinessService: HealthKitReadinessProviding {
             } else {
                 sampleAt = sample.endDate
             }
+        case .bodyweightKg:
+            sampleAt = sample.endDate
         }
         return HealthKitReadinessObservation(
             field: field,

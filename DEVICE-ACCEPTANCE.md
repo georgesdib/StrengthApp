@@ -253,11 +253,13 @@ the client-side record to fill in after the physical pass.
 ## HealthKit setup and import
 
 - [ ] Settings -> HealthKit -> enable **Readiness from HealthKit**.
-- [ ] Grant read access to HRV and Resting Heart Rate only. No write access is requested.
+- [ ] Grant read access to HRV, Resting Heart Rate and Body Mass only. No write access is requested.
 - [ ] Today shows the HealthKit section with the import action.
 - [ ] Import from HealthKit (or pull to refresh) completes.
-- [ ] HRV is the newest eligible sample within 48 hours; RHR is from the current server-local day.
-- [ ] Today shows effective HRV/RHR values, effective source, sample age, score/status and basis.
+- [ ] HRV is the newest eligible sample within 48 hours; RHR is from the current server-local day;
+      bodyweight is the newest sample within 30 days.
+- [ ] Today shows effective HRV/RHR/bodyweight values, effective source, sample age, score/status
+      and basis.
 - [ ] Stored `healthkit` provenance is distinct from the effective values.
 - [ ] If no eligible sample exists, the copy says it can mean no data or access not granted; it
       does not claim denial and does not show zero.
@@ -265,7 +267,7 @@ the client-side record to fill in after the physical pass.
 
 ## Precedence, identity and persistence
 
-- [ ] Record a manual HRV and/or RHR, then import again: the manual values remain effective and the
+- [ ] Record a manual HRV, RHR and/or bodyweight, then import again: the manual values remain effective and the
       HealthKit observation remains visible as provenance.
 - [ ] Import the same sample twice: no duplicate observation is created.
 - [ ] Force-quit/relaunch: the HealthKit toggle and server data are still present.
@@ -289,7 +291,7 @@ the client-side record to fill in after the physical pass.
 | Backup and migration verification | pending | |
 | Pairing and code rejection paths | pending | |
 | HealthKit opt-in and read-only permission | pending | |
-| HRV/RHR source, freshness and effective display | pending | |
+| HRV/RHR/bodyweight source, freshness and effective display | pending | |
 | No-sample/stale indeterminate states | pending | |
 | Manual precedence and sample identity | pending | |
 | Existing Phase 2 workflow unchanged | pending | |

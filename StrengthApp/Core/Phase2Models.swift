@@ -206,7 +206,8 @@ struct ProgressVolume: Decodable, Identifiable {
     let pattern: String
     let average: Double
     let status: String
-    let mrv: Double
+    // Untargeted patterns have no MRV landmark; the server sends null.
+    let mrv: Double?
 
     var id: String { pattern }
 }

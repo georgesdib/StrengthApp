@@ -5,11 +5,13 @@ import Foundation
 enum HealthKitReadinessField: String, CaseIterable, Codable, Equatable {
     case hrvMs = "hrv_ms"
     case rhrBpm = "rhr_bpm"
+    case bodyweightKg = "bodyweight_kg"
 
     var label: String {
         switch self {
         case .hrvMs: return "HRV"
         case .rhrBpm: return "Resting HR"
+        case .bodyweightKg: return "Bodyweight"
         }
     }
 
@@ -17,6 +19,7 @@ enum HealthKitReadinessField: String, CaseIterable, Codable, Equatable {
         switch self {
         case .hrvMs: return "ms"
         case .rhrBpm: return "bpm"
+        case .bodyweightKg: return "kg"
         }
     }
 }
@@ -87,13 +90,26 @@ struct HealthKitReadinessObservation: Equatable {
 struct HealthKitReadinessSelection: Equatable {
     let hrv: HealthKitReadinessObservation?
     let rhr: HealthKitReadinessObservation?
+    let bodyweight: HealthKitReadinessObservation?
     let staleFields: Set<HealthKitReadinessField>
 
-    var isEmpty: Bool { hrv == nil && rhr == nil }
+    init(
+        hrv: HealthKitReadinessObservation?,
+        rhr: HealthKitReadinessObservation?,
+        bodyweight: HealthKitReadinessObservation? = nil,
+        staleFields: Set<HealthKitReadinessField>
+    ) {
+        self.hrv = hrv
+        self.rhr = rhr
+        self.bodyweight = bodyweight
+        self.staleFields = staleFields
+    }
+
+    var isEmpty: Bool { hrv == nil && rhr == nil && bodyweight == nil }
     var hasStaleSample: Bool { !staleFields.isEmpty }
 
     var observations: [HealthKitReadinessObservation] {
-        [hrv, rhr].compactMap { $0 }
+        [hrv, rhr, bodyweight].compactMap { $0 }
     }
 
     /// Pick at most one eligible sample per field. Apple Watch wins only when positively
@@ -101,17 +117,25 @@ struct HealthKitReadinessSelection: Equatable {
     static func make(
         hrvCandidates: [HealthKitReadinessObservation],
         rhrCandidates: [HealthKitReadinessObservation],
+        bodyweightCandidates: [HealthKitReadinessObservation] = [],
         serverDate: String,
         now: Date
     ) -> HealthKitReadinessSelection {
         let hrvEligible = hrvCandidates.filter { isEligible($0, serverDate: serverDate, now: now) }
         let rhrEligible = rhrCandidates.filter { isEligible($0, serverDate: serverDate, now: now) }
+        let bodyweightEligible = bodyweightCandidates.filter {
+            isEligible($0, serverDate: serverDate, now: now)
+        }
         var stale: Set<HealthKitReadinessField> = []
         if !hrvCandidates.isEmpty && hrvEligible.isEmpty { stale.insert(.hrvMs) }
         if !rhrCandidates.isEmpty && rhrEligible.isEmpty { stale.insert(.rhrBpm) }
+        if !bodyweightCandidates.isEmpty && bodyweightEligible.isEmpty {
+            stale.insert(.bodyweightKg)
+        }
         return HealthKitReadinessSelection(
             hrv: choose(hrvEligible),
             rhr: choose(rhrEligible),
+            bodyweight: choose(bodyweightEligible),
             staleFields: stale
         )
     }
@@ -128,6 +152,8 @@ struct HealthKitReadinessSelection: Equatable {
             return now.timeIntervalSince(observation.sampleAt) <= 48 * 60 * 60
         case .rhrBpm:
             return localDateString(observation.sampleAt) == serverDate
+        case .bodyweightKg:
+            return now.timeIntervalSince(observation.sampleAt) <= 30 * 24 * 60 * 60
         }
     }
 

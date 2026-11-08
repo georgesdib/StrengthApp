@@ -365,7 +365,7 @@ struct TodayView: View {
     @ViewBuilder
     private var healthKitContent: some View {
         if !model.healthKitEnabled {
-            Text("HealthKit readiness is off. Enable it in Settings to import HRV and resting HR.")
+            Text("HealthKit readiness is off. Enable it in Settings to import HRV, resting HR and bodyweight.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } else {
@@ -382,6 +382,10 @@ struct TodayView: View {
                 healthKitValueRow(
                     "Resting HR", field: "rhr_bpm", value: payload.rhrBpm,
                     unit: "bpm", payload: payload
+                )
+                healthKitValueRow(
+                    "Bodyweight", field: "bodyweight_kg", value: payload.bodyweightKg,
+                    unit: "kg", payload: payload
                 )
             }
             Button {

@@ -32,7 +32,7 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                    Text("Reads only HRV and resting heart rate. No sleep, workouts or write access.")
+                    Text("Reads only HRV, resting heart rate and bodyweight. No sleep, workouts or write access.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

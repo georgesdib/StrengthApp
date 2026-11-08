@@ -74,6 +74,7 @@ struct ReadinessPayload: Decodable {
     let contextFlags: [String]?
     let hrvMs: Double?
     let rhrBpm: Double?
+    let bodyweightKg: Double?
     let sources: [String: String]?
     let healthkit: [String: HealthKitReadinessProvenance]?
 }

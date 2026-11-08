@@ -8,7 +8,8 @@ and R5 workout recovery/reconciliation UX are closed.
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
 workout set logging (including optional manual mean velocity), form ratings, completion/abandon
-and the Progress screen. Phase 3A adds opt-in, read-only HealthKit HRV and resting heart rate;
+and the Progress screen. Phase 3A adds opt-in, read-only HealthKit HRV, resting heart rate and
+bodyweight;
 manual readiness wins, Python remains the sole authority for readiness scores, prescriptions,
 loads, sets and training decisions, and the phone never supplies plan content.
 
@@ -49,8 +50,8 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
 - **Today** — server date/time/time zone, readiness status/score/basis/overrides/context, active
   workout or "no active workout"; Log readiness, Start workout and Resume workout; a Recovery
   section when the server has a workout not represented locally, a local workout ended elsewhere,
-  or a prescription is no longer usable; an opt-in HealthKit section showing HRV/RHR effective
-  values, source, sample age and Import from HealthKit; pull to refresh.
+  or a prescription is no longer usable; an opt-in HealthKit section showing HRV/RHR/bodyweight
+  effective values, source, sample age and Import from HealthKit; pull to refresh.
 - **Readiness** — manual sleep/energy/mood/soreness/stress (1–5), optional HRV/RHR/bodyweight/
   wearable and legacy labels, optional note; missing fields stay missing; errors stay visible.
 - **Prescription preview** — server-issued plan, readiness summary, warnings and expiry; Start
@@ -66,7 +67,7 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
 - **Settings** — server URL, device id/label, app version, opt-in HealthKit readiness, Forget
   this device (local token only), re-pair instructions.
 
-HealthKit is read-only, off by default and limited to HRV and resting heart rate. There is no
+HealthKit is read-only, off by default and limited to HRV, resting heart rate and bodyweight. There is no
 offline queue, plan editing, per-rep VBT, review/rubric or Apple Intelligence/PCC UI.
 
 ## Storage and networking
@@ -95,7 +96,7 @@ offline queue, plan editing, per-rep VBT, review/rubric or Apple Intelligence/PC
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 63 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 64 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
@@ -104,8 +105,8 @@ issue/start/add-set/complete model flow, body-aware retry keys, unique-only plan
 duplicate-tap guarding, ambiguous-failure classification, the durable journal's persistence,
 scoping, cap, conflict/terminal handling and relaunch replay, repeated-exercise plan-item choices
 with nil fallback, R5 server-active/ended-elsewhere/consumed-prescription recovery states, and
-Phase 3A Apple Watch classification, sample selection/freshness, HealthKit request encoding and
-indeterminate no-sample handling.
+Phase 3A Apple Watch classification, HRV/RHR/bodyweight selection/freshness, HealthKit request
+encoding and indeterminate no-sample handling.
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \

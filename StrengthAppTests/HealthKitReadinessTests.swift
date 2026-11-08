@@ -138,6 +138,27 @@ final class HealthKitReadinessTests: XCTestCase {
         XCTAssertEqual(selection.hrv?.sourceClass, .unknown)
     }
 
+    func testBodyweightSelectionUsesTheNewestSampleWithinThirtyDays() {
+        let now = Date()
+        let recent = observation(
+            .bodyweightKg, 80.0, id: "weight-new", at: now.addingTimeInterval(-24 * 60 * 60),
+            sourceClass: .appleWatch
+        )
+        let old = observation(
+            .bodyweightKg, 82.0, id: "weight-old", at: now.addingTimeInterval(-10 * 24 * 60 * 60),
+            sourceClass: .appleWatch
+        )
+        let selection = HealthKitReadinessSelection.make(
+            hrvCandidates: [], rhrCandidates: [],
+            bodyweightCandidates: [old, recent],
+            serverDate: serverDate(now), now: now
+        )
+        XCTAssertEqual(selection.bodyweight?.sampleID, "weight-new")
+        XCTAssertNil(selection.hrv)
+        XCTAssertNil(selection.rhr)
+        XCTAssertTrue(selection.staleFields.isEmpty)
+    }
+
     func testStaleSamplesRemainStaleAndAreNotImported() {
         let now = Date()
         let staleHrv = observation(

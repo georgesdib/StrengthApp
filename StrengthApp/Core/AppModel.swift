@@ -80,6 +80,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var healthKitSelection: HealthKitReadinessSelection?
 
     @Published var serverURLText: String
+    @Published var homeServerText: String
+    @Published var awayServerText: String
+    @Published var homeWiFiText: String
+    @Published private(set) var activeServerRoute: ServerRoute?
+    @Published private(set) var detectedWiFiSSID: String?
+    @Published private(set) var serverSettingsError: String?
     @Published var pairingCodeText: String = ""
     @Published var pairingLabelText: String
 
@@ -90,6 +96,7 @@ final class AppModel: ObservableObject {
     private let healthKit: any HealthKitReadinessProviding
     private let healthKitDefaults: UserDefaults
     private let offlineStore: OfflineCaptureStore
+    private let wifi: WiFiSSIDProviding
     private let pageSize = 50
     private var session: IOSSession?
     private var historyOffset = 0
@@ -111,9 +118,11 @@ final class AppModel: ObservableObject {
         store: PairedStore? = nil,
         healthKit: (any HealthKitReadinessProviding)? = nil,
         healthKitDefaults: UserDefaults = .standard,
-        offlineStore: OfflineCaptureStore? = nil
+        offlineStore: OfflineCaptureStore? = nil,
+        wifi: WiFiSSIDProviding? = nil
     ) {
         let store = store ?? PairedStore()
+        store.migrateServerConfigurationIfNeeded()
         let readiness = healthKit ?? HealthKitReadinessService()
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
@@ -124,11 +133,15 @@ final class AppModel: ObservableObject {
         self.healthKit = readiness
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
+        self.wifi = wifi ?? WiFiSSIDProvider()
         self.healthKitEnabled = enabled
         self.healthKitState = enabled
             ? (readiness.isAvailable ? .enabled : .unavailable)
             : .featureDisabled
         self.serverURLText = store.serverURL ?? AppConfig.defaultServerURL
+        self.homeServerText = store.homeServerURL ?? ""
+        self.awayServerText = store.awayServerURL ?? ""
+        self.homeWiFiText = store.homeWiFi ?? ""
         self.pairingLabelText = store.device?.label ?? "iPhone"
         self.offlineCapture = initialCapture
         self.activeWorkout = initialCapture?.activeWorkout
@@ -184,28 +197,45 @@ final class AppModel: ObservableObject {
         guard networkMonitor == nil else { return }
         networkMonitor = NetworkMonitor { [weak self] in
             Task { @MainActor in
-                await self?.syncOfflineCapture()
+                await self?.appBecameActive()
             }
         }
     }
 
     func onLaunch() async {
         guard phase == .loading else { return }
-        guard let savedURL = store.serverURL,
-              let token = tokens.load(),
+        homeServerText = store.homeServerURL ?? ""
+        awayServerText = store.awayServerURL ?? ""
+        homeWiFiText = store.homeWiFi ?? ""
+        let configuration = store.serverConfiguration
+        let ssid = await detectedSSIDIfConfigured(configuration)
+        let selection = ServerConfiguration.select(
+            homeURL: configuration.homeURL,
+            awayURL: configuration.awayURL,
+            homeWiFi: configuration.homeWiFi,
+            currentSSID: ssid
+        )
+        let savedURL = selection?.url ?? store.serverURL
+        guard let savedURL,
               let baseURL = try? IOSAPIClient.validatedBaseURL(savedURL) else {
+            phase = .pairing
+            return
+        }
+        serverURLText = baseURL.absoluteString
+        activeServerRoute = selection?.route ?? .home
+        guard let token = tokens.load(), let pairedDevice = store.device else {
             phase = .pairing
             return
         }
         session = IOSSession(
             baseURL: baseURL,
             token: token,
-            deviceID: store.device?.deviceID
+            deviceID: pairedDevice.deviceID
         )
-        device = store.device
+        device = pairedDevice
+        store.serverURL = baseURL.absoluteString
         pairedServerURL = baseURL.absoluteString
-        serverURLText = baseURL.absoluteString
-        if let device { pairingLabelText = device.label }
+        pairingLabelText = pairedDevice.label
         phase = .paired
         let refreshed = await refresh()
         isOffline = !refreshed.succeeded
@@ -214,6 +244,16 @@ final class AppModel: ObservableObject {
         if refreshed.succeeded, healthKitEnabled {
             await importHealthKit()
         }
+    }
+
+    private func detectedSSIDIfConfigured(_ configuration: ServerConfiguration) async -> String? {
+        guard !configuration.homeWiFi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            detectedWiFiSSID = nil
+            return nil
+        }
+        let ssid = await wifi.currentSSID()
+        detectedWiFiSSID = ssid
+        return ssid
     }
 
     // MARK: Pairing
@@ -252,6 +292,25 @@ final class AppModel: ObservableObject {
                 deviceID: response.device.deviceId,
                 label: response.device.label
             )
+            let prior = store.serverConfiguration
+            if prior.homeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                store.homeServerURL = baseURL.absoluteString
+            } else if prior.awayURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                store.awayServerURL = baseURL.absoluteString
+            } else if activeServerRoute == .away {
+                store.awayServerURL = baseURL.absoluteString
+            } else {
+                store.homeServerURL = baseURL.absoluteString
+            }
+            homeServerText = store.homeServerURL ?? ""
+            awayServerText = store.awayServerURL ?? ""
+            homeWiFiText = store.homeWiFi ?? ""
+            activeServerRoute = ServerConfiguration.select(
+                homeURL: store.homeServerURL ?? "",
+                awayURL: store.awayServerURL ?? "",
+                homeWiFi: store.homeWiFi ?? "",
+                currentSSID: detectedWiFiSSID
+            )?.route ?? .home
             store.serverURL = baseURL.absoluteString
             store.device = paired
             device = paired
@@ -273,6 +332,134 @@ final class AppModel: ObservableObject {
         } catch {
             pairingError = message(for: error)
         }
+    }
+
+    var serverSelectionSummary: String {
+        switch activeServerRoute {
+        case .home:
+            return "Using Home Server"
+        case .away:
+            return "Using Away Server"
+        case nil:
+            return "No server selected"
+        }
+    }
+
+    var homeWiFiStatus: String {
+        let configured = (store.homeWiFi ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !configured.isEmpty else {
+            return "No Home Wi-Fi configured; Away Server is the fallback."
+        }
+        guard let detectedWiFiSSID else {
+            return "Wi-Fi name unavailable. Allow Precise Location to detect Home Wi-Fi."
+        }
+        return detectedWiFiSSID == configured
+            ? "Connected to Home Wi-Fi: \(detectedWiFiSSID)"
+            : "Current Wi-Fi: \(detectedWiFiSSID)"
+    }
+
+    func saveServerSettings() async -> Bool {
+        serverSettingsError = nil
+        var home = homeServerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var away = awayServerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let wifiName = homeWiFiText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !home.isEmpty || !away.isEmpty else {
+            serverSettingsError = "Enter at least a Home Server or an Away Server."
+            return false
+        }
+        if !home.isEmpty {
+            do { home = try IOSAPIClient.validatedBaseURL(home).absoluteString } catch {
+                serverSettingsError = message(for: error)
+                return false
+            }
+        }
+        if !away.isEmpty {
+            do { away = try IOSAPIClient.validatedBaseURL(away).absoluteString } catch {
+                serverSettingsError = message(for: error)
+                return false
+            }
+        }
+        if !wifiName.isEmpty, home.isEmpty {
+            serverSettingsError = "Set a Home Server before naming a Home Wi-Fi."
+            return false
+        }
+        let ssid: String?
+        if wifiName.isEmpty {
+            detectedWiFiSSID = nil
+            ssid = nil
+        } else {
+            ssid = await wifi.currentSSID()
+            detectedWiFiSSID = ssid
+        }
+        guard let selected = ServerConfiguration.select(
+            homeURL: home, awayURL: away, homeWiFi: wifiName, currentSSID: ssid
+        ) else {
+            serverSettingsError = "Configure at least one valid server address."
+            return false
+        }
+        if phase == .paired, let currentSession = session,
+           currentSession.baseURL.absoluteString != selected.url,
+           hasPendingOfflineCapture || !pendingMutations.isEmpty {
+            serverSettingsError = "Sync or discard pending offline work before switching server addresses."
+            return false
+        }
+        store.homeServerURL = home
+        store.awayServerURL = away
+        store.homeWiFi = wifiName
+        homeServerText = home
+        awayServerText = away
+        homeWiFiText = wifiName
+        if phase == .pairing {
+            serverURLText = selected.url
+            activeServerRoute = selected.route
+            return true
+        }
+        await recheckServerSelection(forceRefresh: true)
+        return serverSettingsError == nil
+    }
+
+    func recheckServerSelection(forceRefresh: Bool = false) async {
+        guard phase == .paired else { return }
+        let configuration = store.serverConfiguration
+        let ssid = await detectedSSIDIfConfigured(configuration)
+        guard let selected = ServerConfiguration.select(
+            homeURL: configuration.homeURL,
+            awayURL: configuration.awayURL,
+            homeWiFi: configuration.homeWiFi,
+            currentSSID: ssid
+        ), let baseURL = try? IOSAPIClient.validatedBaseURL(selected.url) else {
+            serverSettingsError = "Configure at least one valid server address."
+            return
+        }
+        guard let currentSession = session,
+              let token = tokens.load(),
+              let pairedDevice = store.device else { return }
+        let changed = currentSession.baseURL.absoluteString != baseURL.absoluteString
+        if changed, hasPendingOfflineCapture || !pendingMutations.isEmpty {
+            serverSettingsError = "Sync or discard pending offline work before switching server addresses."
+            return
+        }
+        serverSettingsError = nil
+        activeServerRoute = selected.route
+        if changed {
+            session = IOSSession(
+                baseURL: baseURL,
+                token: token,
+                deviceID: pairedDevice.deviceID
+            )
+            store.serverURL = baseURL.absoluteString
+            serverURLText = baseURL.absoluteString
+            pairedServerURL = baseURL.absoluteString
+        }
+        if changed || forceRefresh {
+            let outcome = await refresh()
+            isOffline = !outcome.succeeded
+        }
+    }
+
+    func appBecameActive() async {
+        await recheckServerSelection()
+        await syncOfflineCapture()
     }
 
     // MARK: Reads

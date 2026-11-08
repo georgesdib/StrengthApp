@@ -85,9 +85,12 @@ struct PairingView: View {
                 }
 
                 Section {
-                    Text("The app talks only to the server address you enter. It uses the "
-                         + "iPhone's local-network permission on the first connection; if you deny "
-                         + "it, pairing will fail until you allow it in Settings.")
+                    Text("The app talks only to the server address you enter. After pairing, "
+                         + "configure Home Server, Away Server and Home Wi-Fi in Settings.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text("The app uses the iPhone's local-network permission on the first "
+                         + "connection; if you deny it, pairing will fail until you allow it in Settings.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

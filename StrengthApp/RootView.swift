@@ -25,7 +25,7 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
-            Task { await model.syncOfflineCapture() }
+            Task { await model.appBecameActive() }
         }
     }
 }

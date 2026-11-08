@@ -25,15 +25,52 @@ struct PairingDevice: Codable, Equatable {
 final class PairedStore {
     private let defaults: UserDefaults
     private let serverURLKey = "ios.serverURL"
+    private let homeServerURLKey = "ios.server.homeURL"
+    private let awayServerURLKey = "ios.server.awayURL"
+    private let homeWiFiKey = "ios.server.homeWiFi"
     private let deviceKey = "ios.paired.device"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
 
+    /// The address currently in use. Kept for compatibility with builds before the Home/Away
+    /// split, and refreshed whenever the selected route changes.
     var serverURL: String? {
         get { defaults.string(forKey: serverURLKey) }
         set { defaults.setValue(newValue, forKey: serverURLKey) }
+    }
+
+    var homeServerURL: String? {
+        get { defaults.string(forKey: homeServerURLKey) }
+        set { defaults.setValue(newValue, forKey: homeServerURLKey) }
+    }
+
+    var awayServerURL: String? {
+        get { defaults.string(forKey: awayServerURLKey) }
+        set { defaults.setValue(newValue, forKey: awayServerURLKey) }
+    }
+
+    var homeWiFi: String? {
+        get { defaults.string(forKey: homeWiFiKey) }
+        set { defaults.setValue(newValue, forKey: homeWiFiKey) }
+    }
+
+    /// Existing installations used one server URL. Treat it as Home; Away stays empty so the
+    /// old single-address behaviour is preserved until the owner adds an Away address.
+    func migrateServerConfigurationIfNeeded() {
+        guard defaults.object(forKey: homeServerURLKey) == nil else { return }
+        if let legacy = serverURL, !legacy.isEmpty {
+            homeServerURL = legacy
+        }
+    }
+
+    var serverConfiguration: ServerConfiguration {
+        ServerConfiguration(
+            homeURL: homeServerURL ?? "",
+            awayURL: awayServerURL ?? "",
+            homeWiFi: homeWiFi ?? ""
+        )
     }
 
     var device: PairingDevice? {

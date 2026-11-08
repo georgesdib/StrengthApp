@@ -7,10 +7,51 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Server") {
+                Section {
+                    LabeledContent("Home Server") {
+                        TextField("http://192.168.1.10:8000", text: $model.homeServerText)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Away Server") {
+                        TextField("http://away.example:8000", text: $model.awayServerText)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Home Wi-Fi") {
+                        TextField("Home network name", text: $model.homeWiFiText)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Active") {
+                        Text(model.serverSelectionSummary)
+                            .foregroundStyle(.secondary)
+                    }
                     Text(model.pairedServerURL ?? model.serverURLText)
                         .textSelection(.enabled)
-                    Text("Plain HTTP on your trusted home network.")
+                    Text(model.homeWiFiStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if let error = model.serverSettingsError {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                    Button("Save server settings") {
+                        Task { _ = await model.saveServerSettings() }
+                    }
+                    .disabled(model.isSaving)
+                } header: {
+                    Text("Server")
+                } footer: {
+                    Text("Home Server is used when the phone is on the named Home Wi-Fi; "
+                         + "Away Server is used otherwise. Wi-Fi name detection uses Precise "
+                         + "Location. Both addresses should reach the same paired strength-coach server.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

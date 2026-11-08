@@ -561,13 +561,14 @@ final class AppModel: ObservableObject {
     func issuePrescription(
         readinessAck: Bool,
         confirmations: [String: Bool]? = nil,
-        settings: PlanSettings = PlanSettings(),
+        settings: PlanSettings? = nil,
         idempotencyKey: String
     ) async {
         guard !isSaving, let session else { return }
         guard permitsMutation(kind: .prescription, operationId: idempotencyKey) else {
             return
         }
+        let settings = settings ?? PlanSettings()
         isSaving = true
         mutationFailureAmbiguous = false
         defer {

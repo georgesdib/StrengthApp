@@ -1,0 +1,56 @@
+name: iOS CI
+
+# Main only. This is a post-merge check, not a PR check: a required status check only works if
+# the workflow also runs on pull requests. Adding that trigger is a deliberate decision (see
+# AGENTS.md), not a drive-by edit.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build and unit tests
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      # The image's default Xcode is 27.1; the project uses the Xcode 27 project format.
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Choose an available iPhone simulator
+        id: simulator
+        run: |
+          udid=$(xcrun simctl list devices available --json | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for r in sorted(d, reverse=True) for x in d[r] if x.get('isAvailable') and x['name'].startswith('iPhone')))")
+          echo "Using simulator $udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test
+        env:
+          DESTINATION: id=${{ steps.simulator.outputs.udid }}
+          DERIVED_DATA: ${{ runner.temp }}/DerivedData
+          RESULT_BUNDLE: ${{ runner.temp }}/TestResults.xcresult
+        run: ./scripts/ci.sh
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: ${{ runner.temp }}/TestResults.xcresult
+          if-no-files-found: ignore
+          retention-days: 7

@@ -30,6 +30,22 @@ After any live run, restore it (`git checkout -- StrengthAppUITests/LiveConfig.s
 `git status`. A filled copy carries a server address and a one-use pairing code, and a live run
 pairs a device and writes readiness, a prescription and a workout.
 
+## CI
+
+[`.github/workflows/ios-ci.yml`](.github/workflows/ios-ci.yml) runs on pushes to `main` only
+(plus manual dispatch). It uses the hosted `xcode-27` runner, selects Xcode 27.2, then runs
+`scripts/ci.sh`: build plus the `StrengthAppTests` unit-test target on a simulator. UI tests are
+excluded because they need a live server, a pairing code and seeded data.
+
+- `scripts/ci.sh` is the single entry point. Change the script, not the workflow, and run it
+  locally before pushing.
+- The script refuses to run if `LiveConfig.swift` is filled in.
+- The workflow deliberately has no `pull_request` trigger. Adding one is a decision: it is what
+  makes the check available to pull requests, and it is required before `main` could require it.
+  Today the check reports after a merge.
+- `IPHONEOS_DEPLOYMENT_TARGET` is 27.0 because the hosted image ships iOS 27.0/27.1 simulator
+  runtimes. Raising it without a matching runtime breaks the test step.
+
 ## Toolchain on this machine
 
 `xcode-select` points at `/Library/Developer/CommandLineTools`, so every `xcodebuild` call

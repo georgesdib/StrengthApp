@@ -21,7 +21,7 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
 
 ## Requirements
 
-- Xcode 27.2 and an iOS 27.2 simulator or device.
+- Xcode 27.2 and an iOS 27.0 or newer simulator or device.
 - The server repository running `strength-coach web` on the same trusted home network.
 - For a device build: the owner's personal team (7-day signing) and the owner's iPhone.
 - The Access Wi-Fi Information entitlement and Precise Location permission for Home Wi-Fi
@@ -159,6 +159,8 @@ xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
   -only-testing:StrengthAppTests/Phase2AppModelTests/testIssueStartSetAndCompleteFlow
 ```
 
+`./scripts/ci.sh` wraps the build and unit-test commands above and is what CI runs.
+
 Install and launch the built app by hand (the UI test does this itself when it is enabled):
 
 ```bash
@@ -225,8 +227,6 @@ filled copy carries a server address and a pairing code and must never be commit
 
 ### Sandboxed or headless shells
 
-### Sandboxed or headless shells
-
 Nothing here is needed when the build runs in an ordinary terminal or in Xcode; these are
 workarounds for shells whose sandbox denies what the toolchain expects.
 
@@ -244,6 +244,28 @@ workarounds for shells whose sandbox denies what the toolchain expects.
 - **Tests need a pseudo-terminal** (`script -q /dev/null`), as noted above, and simulator access
   from the harness itself; a workspace-only file sandbox may block `simctl`, launching the test
   runner, or taking screenshots.
+
+## Continuous integration
+
+[`.github/workflows/ios-ci.yml`](.github/workflows/ios-ci.yml) runs after every push to `main`
+(and on manual dispatch). A GitHub-hosted `xcode-27` runner selects Xcode 27.2, then builds the
+app and runs the `StrengthAppTests` unit-test target on a simulator. UI tests are excluded: they
+need a live server, a one-use pairing code and seeded data, none of which belong in CI.
+
+The same work is one local command:
+
+```bash
+./scripts/ci.sh
+```
+
+It builds and runs the unit tests, and refuses to run if `StrengthAppUITests/LiveConfig.swift` is
+filled in. Override the destination, test filter or derived-data path with
+`DESTINATION=… ONLY_TESTING=… DERIVED_DATA=…`.
+
+The workflow has no `pull_request` trigger, so it reports after a merge rather than gating the
+pull request; [`AGENTS.md`](AGENTS.md) records that as a decision. The app targets iOS 27.0
+(`IPHONEOS_DEPLOYMENT_TARGET`), matching the oldest simulator runtime on the hosted image — a
+higher floor with no matching runtime makes the test step impossible to run there.
 
 ## Real-device acceptance
 

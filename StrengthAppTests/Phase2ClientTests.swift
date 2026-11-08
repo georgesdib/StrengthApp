@@ -1058,6 +1058,10 @@ final class Phase2AppModelTests: XCTestCase {
         )
         let completeText = try XCTUnwrap(String(data: complete, encoding: .utf8))
         XCTAssertTrue(completeText.contains("\"productivity\":4"))
+
+        let removal = try encoder.encode(RemoveSetRequest(setId: 42))
+        let removalText = try XCTUnwrap(String(data: removal, encoding: .utf8))
+        XCTAssertTrue(removalText.contains("\"set_id\":42"))
     }
 
     private func pairedModel(

@@ -31,6 +31,7 @@ enum MutationKind: String, Codable, CaseIterable {
     case prescription
     case startWorkout
     case addSet
+    case removeSet
     case rateForm
     case planEdit
     case completeWorkout
@@ -43,6 +44,7 @@ enum MutationKind: String, Codable, CaseIterable {
         case .prescription: return "Prescription"
         case .startWorkout: return "Start workout"
         case .addSet: return "Add set"
+        case .removeSet: return "Remove set"
         case .rateForm: return "Form rating"
         case .planEdit: return "Plan edit"
         case .completeWorkout: return "Complete workout"

@@ -63,13 +63,14 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
   session type, date, exercise count and warnings. Start workout starts by issued-plan id and
   opens the active workout screen directly; no preview sheet opens automatically. Request workout
   can ask for server-decided, top-set/back-off or straight-set main-lift structure.
-- **Workout** — plan and logged sets, add set with load/reps/RIR, optional mean velocity, an optional
-  per-rep velocity disclosure with a rep summary and comma/space-separated input, an explicit
-  prescription-item picker when the exercise appears more than once (default Not attributed), and
-  form ratings that show the current value and label a later save as a correction, additive plan
-  editing (add/swap/remove and set count) through the authenticated online exercise catalogue,
-  finish with one sRPE picker (Not recorded or 1–10), optional productivity (Not recorded or 1–5),
-  abandon with confirmation.
+- **Workout** — exercise-first list with an exercise detail screen, prepopulated planned sets,
+  performed-set logging with load/reps/RIR, optional mean velocity, optional per-rep velocity with
+  comma/space-separated input, performed-set add/remove, outside-plan exercise logging through the
+  authenticated catalogue, a working-set rest timer using the plan’s `rest_s`, an explicit
+  prescription-item picker when the exercise appears more than once, and form ratings that show
+  the current value and label a later save as a correction, additive plan editing
+  (add/swap/remove and set count), finish with one sRPE picker (Not recorded or 1–10), optional
+  productivity (Not recorded or 1–5), abandon with confirmation.
 - **History** — paginated sessions with sets, tonnage, duration, main lifts and review state;
   tap a session for a read-only outline, duration and set summary; load more, empty and error states.
 - **Progress** — the server dashboard: sRPE coverage, performance points, weekly volume, attendance
@@ -118,7 +119,8 @@ scoping, cap, conflict/terminal handling and relaunch replay, repeated-exercise 
 with nil fallback, exercise catalogue/plan-edit decoding, durable offline snapshot/outbox ordering,
 local set IDs, cancellation and retention, offline add/form/finish capture, cached-workout relaunch
 pending-operation cancellation, unresolved retention, explicit 28-day expiry, ordered replay,
-active-workout conflict blocking and
+exercise-first workout navigation, working-set rest timer, performed-set add/remove, outside-plan
+exercise logging, active-workout conflict blocking and
 non-blocking form-rating failure, R5 server-active/ended-elsewhere/consumed-prescription recovery states, and
 Phase 3A Apple Watch classification, HRV/RHR/bodyweight selection/freshness, per-metric
 eligible/missing/stale states, coalesced authoritative refresh, import/refresh concurrency,

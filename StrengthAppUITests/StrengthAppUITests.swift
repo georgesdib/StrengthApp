@@ -157,31 +157,41 @@ final class StrengthAppUITests: XCTestCase {
         XCTAssertTrue(latLabel.waitForExistence(timeout: 10))
         attachScreenshot(app, name: "11b-plan-exercise-added")
 
+        // Exercise-centric logging: open the first planned exercise and complete planned set 1.
+        let openExercise = app.descendants(matching: .any)["open-exercise-0"]
+        for _ in 0..<8 {
+            if openExercise.exists && openExercise.isHittable { break }
+            app.swipeDown()
+        }
+        XCTAssertTrue(openExercise.waitForExistence(timeout: 10))
+        openExercise.tap()
+        let plannedDone = app.buttons["log-planned-set-1"]
+        XCTAssertTrue(plannedDone.waitForExistence(timeout: 10))
+        plannedDone.tap()
+
         let reps = app.textFields["set-reps"]
         scrollTo(reps, in: app)
         XCTAssertTrue(reps.waitForExistence(timeout: 10))
-        reps.tap()
-        reps.typeText("3")
-        let load = app.textFields["set-load"]
-        load.tap()
-        load.typeText("100")
-        let rir = app.textFields["set-rir"]
-        rir.tap()
-        rir.typeText("2")
+        // The sheet is prepopulated from the plan. Keep those values; this test only adds
+        // the optional velocity and verifies that the completed set reaches the log.
         let velocity = app.textFields["set-velocity"]
-        velocity.tap()
-        velocity.typeText("0.62")
-        if app.buttons["Done"].waitForExistence(timeout: 2) {
-            app.buttons["Done"].tap()
+        clearAndType(velocity, text: "0.62")
+        if app.keyboards.buttons["Done"].waitForExistence(timeout: 2) {
+            app.keyboards.buttons["Done"].tap()
+        } else if app.toolbars.buttons["Done"].waitForExistence(timeout: 2) {
+            app.toolbars.buttons["Done"].tap()
         }
         let saveSet = app.buttons["save-set"]
         scrollTo(saveSet, in: app)
         saveSet.tap()
+        let loggedVelocity = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@", "0.62 m/s")
+        ).firstMatch
         for _ in 0..<5 {
-            if app.staticTexts["0.62 m/s"].exists { break }
+            if loggedVelocity.exists { break }
             app.swipeDown()
         }
-        XCTAssertTrue(app.staticTexts["0.62 m/s"].waitForExistence(timeout: 5))
+        XCTAssertTrue(loggedVelocity.waitForExistence(timeout: 5))
         attachScreenshot(app, name: "12-set-logged")
 
         // Force-quit after the acknowledged set and recover the active workout through Today.
@@ -191,11 +201,14 @@ final class StrengthAppUITests: XCTestCase {
         XCTAssertTrue(resume.waitForExistence(timeout: 25))
         resume.tap()
         XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 15))
+        let recoveredVelocity = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@", "0.62 m/s")
+        ).firstMatch
         for _ in 0..<4 {
-            if app.staticTexts["0.62 m/s"].exists { break }
+            if recoveredVelocity.exists { break }
             app.swipeUp()
         }
-        XCTAssertTrue(app.staticTexts["0.62 m/s"].waitForExistence(timeout: 10))
+        XCTAssertTrue(recoveredVelocity.waitForExistence(timeout: 10))
         attachScreenshot(app, name: "12b-workout-recovered")
 
         let finish = app.buttons["finish-workout"]

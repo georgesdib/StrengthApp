@@ -391,6 +391,22 @@ final class IOSAPIClient {
         )
     }
 
+    func removeSet(
+        workoutId: String,
+        body: RemoveSetRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/remove-set",
+            body: body,
+            kind: .removeSet,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func discardPendingOperation(_ operationId: String) {
         try? journal?.remove(operationId: operationId)
     }

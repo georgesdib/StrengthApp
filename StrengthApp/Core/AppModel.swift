@@ -1105,6 +1105,46 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func removeSet(
+        workoutId: String,
+        setId: Int,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard !isSaving, let session else { return false }
+        guard !offlineCaptureActive else {
+            mutationError = "Removing a server-confirmed set requires a connection. Pending local sets can still be removed."
+            return false
+        }
+        guard permitsMutation(kind: .removeSet, operationId: idempotencyKey) else {
+            return false
+        }
+        isSaving = true
+        mutationFailureAmbiguous = false
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
+        do {
+            activeWorkout = try await client.removeSet(
+                workoutId: workoutId,
+                body: RemoveSetRequest(setId: setId),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            mutationError = nil
+            workoutRefreshGrace = true
+            persistActiveWorkout()
+            return true
+        } catch {
+            if let api = error as? APIError,
+               ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
+                await refresh()
+            }
+            handleMutation(error)
+            return false
+        }
+    }
+
     func rateForm(_ body: FormRatingRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
         if offlineCaptureActive {
@@ -1413,7 +1453,7 @@ final class AppModel: ObservableObject {
                     let ack: PlanAckEnvelope = try await client.replay(entry, session: session)
                     _ = ack
                     await reconcilePlanState()
-                case .startWorkout, .addSet, .rateForm, .planEdit:
+                case .startWorkout, .addSet, .removeSet, .rateForm, .planEdit:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = true
                 case .completeWorkout, .abandonWorkout:

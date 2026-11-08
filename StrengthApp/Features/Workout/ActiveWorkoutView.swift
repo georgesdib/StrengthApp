@@ -35,6 +35,10 @@ struct ActiveWorkoutView: View {
     @State private var planPicker: PlanPickerMode?
     @State private var pendingRemoval: PlanRemoval?
     @State private var planEditError: String?
+    @StateObject private var restTimer = RestTimerModel()
+    @StateObject private var drafts = WorkoutDraftStore()
+    @State private var otherExerciseId: String?
+    @State private var showingOtherExercisePicker = false
 
     private var workout: WorkoutDetail? { model.activeWorkout }
 
@@ -158,6 +162,19 @@ struct ActiveWorkoutView: View {
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
+                                    NavigationLink {
+                                        ExerciseWorkoutView(
+                                            model: model,
+                                            exerciseId: exercise,
+                                            planIndex: index,
+                                            restTimer: restTimer,
+                                            drafts: drafts
+                                        )
+                                    } label: {
+                                        Label("Open sets", systemImage: "list.bullet")
+                                            .font(.caption)
+                                    }
+                                    .accessibilityIdentifier("open-exercise-\(index)")
                                 }
                                 .padding(.vertical, 2)
                             }
@@ -178,6 +195,19 @@ struct ActiveWorkoutView: View {
                                 .accessibilityIdentifier("add-plan-exercise")
                                 .disabled(model.isSaving)
                             }
+                        }
+
+                        Section("Outside the plan") {
+                            Button {
+                                showingOtherExercisePicker = true
+                            } label: {
+                                Label("Log an exercise not in the plan", systemImage: "plus.circle")
+                            }
+                            .disabled(model.isSaving)
+                            .accessibilityIdentifier("log-outside-exercise")
+                            Text("The set is recorded as performed work without changing the prescription.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
 
                         Section("Logged sets") {
@@ -242,81 +272,6 @@ struct ActiveWorkoutView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                        }
-
-                        Section("Add set") {
-                            Picker("Exercise", selection: $exerciseId) {
-                                Text("Choose").tag("")
-                                ForEach(exerciseOptions, id: \.self) { id in
-                                    Text(Self.label(id)).tag(id)
-                                }
-                            }
-                            .onChange(of: exerciseId) { _, _ in
-                                selectedPlanItemIndex = nil
-                            }
-                            if planChoices.count > 1 {
-                                Picker("Prescription item", selection: $selectedPlanItemIndex) {
-                                    Text("Not attributed").tag(Int?.none)
-                                    ForEach(planChoices) { choice in
-                                        Text(choice.label).tag(Optional(choice.index))
-                                    }
-                                }
-                                .accessibilityIdentifier("set-plan-item")
-                                Text("This exercise appears more than once. Choose the exact prescription item, or leave it unattributed.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            LabeledContent("Load (kg)") {
-                                TextField("optional", text: $loadText)
-                                    .keyboardType(.decimalPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .accessibilityIdentifier("set-load")
-                            }
-                            LabeledContent("Reps") {
-                                TextField("required", text: $repsText)
-                                    .keyboardType(.numberPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .accessibilityIdentifier("set-reps")
-                            }
-                            LabeledContent("RIR") {
-                                TextField("0-6", text: $rirText)
-                                    .keyboardType(.numberPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .accessibilityIdentifier("set-rir")
-                            }
-                            LabeledContent("Mean velocity (m/s)") {
-                                TextField("optional", text: $velocityText)
-                                    .keyboardType(.decimalPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .accessibilityIdentifier("set-velocity")
-                            }
-                            DisclosureGroup(
-                                "Per-rep velocity (optional)",
-                                isExpanded: $showingRepVelocity
-                            ) {
-                                TextField("e.g. 0.62, 0.58, 0.55", text: $repVelocityText)
-                                    .keyboardType(.numbersAndPunctuation)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .accessibilityIdentifier("set-rep-velocities")
-                                Text("Comma or space separated m/s for reps 1..n. Leave the mean empty and the server derives it.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let error = addError {
-                                Text(error).foregroundStyle(.red)
-                            }
-                            Button {
-                                Task { await addSet(to: workout) }
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    if model.isSaving { ProgressView() } else { Text("Save set") }
-                                    Spacer()
-                                }
-                            }
-                            .accessibilityIdentifier("save-set")
-                            .disabled(model.isSaving || exerciseId.isEmpty)
                         }
 
                         Section("Form rating") {
@@ -439,6 +394,24 @@ struct ActiveWorkoutView: View {
                 }
             }
             .navigationTitle("Workout")
+            .safeAreaInset(edge: .bottom) {
+                RestTimerBar(timer: restTimer)
+            }
+            .navigationDestination(item: $otherExerciseId) { id in
+                ExerciseWorkoutView(
+                    model: model,
+                    exerciseId: id,
+                    planIndex: nil,
+                    restTimer: restTimer,
+                    drafts: drafts
+                )
+            }
+            .sheet(isPresented: $showingOtherExercisePicker) {
+                ExercisePickerSheet(model: model, title: "Exercise outside plan") { id in
+                    showingOtherExercisePicker = false
+                    otherExerciseId = id
+                }
+            }
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()

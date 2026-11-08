@@ -264,6 +264,13 @@ struct WorkoutSet: Codable, Identifiable {
         guard let velocity, velocity > 0 else { return nil }
         return String(format: "%.2f m/s", velocity)
     }
+
+    var summary: String {
+        var parts = ["\(loadLabel) × \(reps ?? 0)"]
+        if let rir { parts.append("RIR \(rir)") }
+        if let velocityLabel { parts.append(velocityLabel) }
+        return parts.joined(separator: " · ")
+    }
 }
 
 struct WorkoutRep: Codable, Identifiable {
@@ -458,6 +465,10 @@ struct FormRatingRequest: Codable, Equatable {
     let exerciseId: String
     let rating: Int
     let note: String?
+}
+
+struct RemoveSetRequest: Encodable, Equatable {
+    let setId: Int
 }
 
 struct CompleteWorkoutRequest: Codable, Equatable {

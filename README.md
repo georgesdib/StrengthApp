@@ -49,15 +49,16 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
 
 - **Pairing** — server URL, one-use code, optional device label, inline error, progress.
 - **Today** — server date/time/time zone, readiness status/score/basis/overrides/context, active
-  workout or "no active workout"; Log readiness, Start workout and Resume workout; a Recovery
+  workout or "no active workout"; Log readiness, Request workout and Resume workout; a Recovery
   section when the server has a workout not represented locally, a local workout ended elsewhere,
   or a prescription is no longer usable; an opt-in HealthKit section showing HRV/RHR/bodyweight
   effective values, source, sample age and Import from HealthKit; pull to refresh.
 - **Readiness** — manual sleep/energy/mood/soreness/stress (1–5), optional HRV/RHR/bodyweight/
   wearable and legacy labels, optional note; HealthKit HRV/RHR/bodyweight values/source/age are
   shown on the same form with manual override; missing fields stay missing; errors stay visible.
-- **Prescription preview** — server-issued plan, readiness summary, warnings and expiry; Start
-  workout starts by issued-plan id only and transitions directly into the active workout.
+- **Workout ready** — once the server finishes building, Today shows a ready card with the
+  session type, date, exercise count and warnings. Start workout starts by issued-plan id and
+  opens the active workout screen directly; no preview sheet opens automatically.
 - **Workout** — plan and logged sets, add set with load/reps/RIR, optional mean velocity, an optional
   per-rep velocity disclosure with a rep summary, an explicit prescription-item picker when the
   exercise appears more than once (default Not attributed), and form ratings that show the current
@@ -167,7 +168,7 @@ pairing-code runbook is `docs/IOS-CLIENT-PLAN.md` §13.3.
 
 The optional UI smoke tests (`StrengthAppUITests`) drive the app against a real server: pairing,
 Today, History, Settings, relaunch persistence and Forget, plus the full session flow (readiness →
-request workout → settings sheet → preview → start → add a manual-VBT set → force-quit/relaunch
+request workout → settings sheet → Workout ready card → start → add a manual-VBT set → force-quit/relaunch
 recovery → finish → Progress). They are skipped unless `StrengthAppUITests/LiveConfig.swift` is
 generated with `enabled = true` and a fresh pairing code; the committed copy is disabled so the
 normal gate needs no server. The shared scheme includes both test targets. The simulator test run

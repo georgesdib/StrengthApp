@@ -776,12 +776,13 @@ final class AppModel: ObservableObject {
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            // Keep the issued state so the preview sheet stays presented and can switch to
-            // the active workout. The sheet binding clears it when the sheet is dismissed.
             mutationError = nil
             recoveryIssue = nil
             workoutRefreshGrace = true
             await refresh()
+            // The plan is consumed by the start. Clear the ready state after reconciliation so a
+            // stale fake/current plan read cannot put the start affordance back on Today.
+            prescriptionState = .idle
             return true
         } catch {
             if let api = error as? APIError, api.isAuthenticationFailure {

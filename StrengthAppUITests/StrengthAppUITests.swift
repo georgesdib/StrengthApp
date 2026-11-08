@@ -131,12 +131,11 @@ final class StrengthAppUITests: XCTestCase {
         if app.navigationBars["Request workout"].waitForExistence(timeout: 10) {
             app.buttons["request-workout"].tap()
         }
-        XCTAssertTrue(app.navigationBars["Review prescription"].waitForExistence(timeout: 60))
-        attachScreenshot(app, name: "10-prescription")
-        let previewStart = app.buttons["preview-start"]
-        scrollTo(previewStart, in: app)
-        XCTAssertTrue(previewStart.waitForExistence(timeout: 5))
-        previewStart.tap()
+        XCTAssertTrue(app.staticTexts["Workout ready"].waitForExistence(timeout: 60))
+        attachScreenshot(app, name: "10-workout-ready")
+        let readyStart = app.buttons["start-ready-workout"]
+        XCTAssertTrue(readyStart.waitForExistence(timeout: 10))
+        readyStart.tap()
         XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 25))
         attachScreenshot(app, name: "11-workout")
 
@@ -153,7 +152,9 @@ final class StrengthAppUITests: XCTestCase {
         let latPulldown = app.buttons["exercise-option-lat_pulldown"]
         XCTAssertTrue(latPulldown.waitForExistence(timeout: 10))
         latPulldown.tap()
-        XCTAssertTrue(app.staticTexts["Lat Pulldown"].waitForExistence(timeout: 10))
+        let latLabel = app.staticTexts["Lat Pulldown"]
+        scrollTo(latLabel, in: app)
+        XCTAssertTrue(latLabel.waitForExistence(timeout: 10))
         attachScreenshot(app, name: "11b-plan-exercise-added")
 
         let reps = app.textFields["set-reps"]

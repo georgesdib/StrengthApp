@@ -141,9 +141,10 @@ record of what was exercised.
       Cancel creates no plan; Start anyway creates one with the acknowledgement recorded.
 - [ ] When the server asks for a scheduled deload or drop confirmation, the app shows the choice;
       Accept and Proceed without both produce a plan, and Cancel creates none.
-- [ ] The preview shows the session type, date, expiry, readiness summary, plan items (sets, reps,
-      load, RIR/quality) and warnings.
-- [ ] The plan is server-issued: the phone shows no editable load/set/RIR controls in the preview.
+- [ ] When the server finishes building, Today shows **Workout ready** with the session type,
+      date, exercise count and any warnings; no preview sheet opens automatically.
+- [ ] The plan is server-issued: the ready card and active workout show no editable load/set/RIR
+      controls before logging.
 - [ ] Issuing a second plan supersedes the first; starting the older plan is rejected.
 
 ## Start, workout and finish
@@ -209,7 +210,7 @@ record of what was exercised.
 | Check | Result | Notes |
 |---|---|---|
 | Readiness entry and validation | pass | owner-confirmed 2026-11-07 |
-| Prescription gate/confirmation/preview | pass | owner-confirmed 2026-11-07 |
+| Prescription gate/confirmation/Workout ready | pending | revised 2026-11-08 |
 | Start, resume and single-use plan | pass | owner-confirmed 2026-11-07 |
 | Add set incl. manual velocity | pass | owner-confirmed 2026-11-07 |
 | Form rating | pass | owner-confirmed 2026-11-07 |

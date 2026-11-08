@@ -781,8 +781,8 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertTrue(started)
         XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
         XCTAssertEqual(model.activeWorkout?.status, "in_progress")
-        guard case .issued = model.prescriptionState else {
-            return XCTFail("the preview must stay presented while the workout is active")
+        if case .issued = model.prescriptionState {
+            XCTFail("a started plan must not remain on the ready card")
         }
 
         let added = await model.addSet(

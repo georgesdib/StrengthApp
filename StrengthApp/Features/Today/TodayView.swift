@@ -9,6 +9,9 @@ struct TodayView: View {
     @State private var lastIssueSettings = PlanSettings()
     @State private var draftSettings = PlanSettings()
     @State private var showingPlanSettings = false
+    @State private var showingWorkout = false
+    @State private var startKey = UUID().uuidString.lowercased()
+    @State private var startError: String?
 
     var body: some View {
         NavigationStack {
@@ -195,8 +198,12 @@ struct TodayView: View {
                     ProgressView("Loading today…")
                 }
             }
-            .sheet(isPresented: showingIssuedPlan) {
-                PrescriptionPreviewView(model: model)
+            .navigationDestination(isPresented: $showingWorkout) {
+                ActiveWorkoutView(model: model)
+            }
+            .onChange(of: currentIssuedPlanId) { _, _ in
+                startKey = UUID().uuidString.lowercased()
+                startError = nil
             }
             .sheet(isPresented: $showingPlanSettings) {
                 PlanSettingsView(settings: $draftSettings) {
@@ -247,6 +254,8 @@ struct TodayView: View {
                 if model.canPrescribe {
                     if case .generating(let progress) = model.prescriptionState {
                         generatingCard(progress)
+                    } else if case .issued(let issued) = model.prescriptionState {
+                        readyCard(issued)
                     } else {
                         Button {
                             startPrescription()
@@ -264,16 +273,65 @@ struct TodayView: View {
         }
     }
 
-    private var showingIssuedPlan: Binding<Bool> {
-        Binding(
-            get: {
-                if case .issued = model.prescriptionState { return true }
-                return false
-            },
-            set: { presented in
-                if !presented { model.clearPrescription() }
+    private var currentIssuedPlanId: String? {
+        if case .issued(let issued) = model.prescriptionState {
+            return issued.issuedPlanId
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private func readyCard(_ issued: IssuedPlanResponse) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Workout ready", systemImage: "checkmark.circle.fill")
+                .font(.headline)
+                .foregroundStyle(.green)
+                .accessibilityIdentifier("workout-ready")
+            Text("\(Self.label(issued.sessionType)) · \(issued.forDate)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("\(issued.plan.items.count) exercise\(issued.plan.items.count == 1 ? "" : "s")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !issued.warnings.isEmpty {
+                Text(issued.warnings.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
-        )
+            if let startError {
+                Text(startError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            Button {
+                startReadyWorkout()
+            } label: {
+                HStack {
+                    Spacer()
+                    if model.isSaving {
+                        ProgressView()
+                    } else {
+                        Text("Start workout")
+                    }
+                    Spacer()
+                }
+            }
+            .accessibilityIdentifier("start-ready-workout")
+            .disabled(model.isSaving)
+        }
+    }
+
+    private func startReadyWorkout() {
+        guard case .issued = model.prescriptionState else { return }
+        startError = nil
+        Task {
+            if await model.startWorkout(idempotencyKey: startKey) {
+                startKey = UUID().uuidString.lowercased()
+                showingWorkout = true
+            } else {
+                startError = model.mutationError
+            }
+        }
     }
 
     private var showingReadinessPrompt: Binding<Bool> {
@@ -307,6 +365,10 @@ struct TodayView: View {
         let status = details["status"]?.stringValue ?? "unknown"
         let basis = details["basis"]?.stringValue ?? ""
         return "The server reports \(status) readiness. \(basis) Start without a score?"
+    }
+
+    nonisolated private static func label(_ value: String) -> String {
+        value.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
     private static func progressLabel(_ progress: PlanProgress) -> String {

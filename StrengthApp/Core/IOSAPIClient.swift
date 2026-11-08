@@ -415,6 +415,33 @@ final class IOSAPIClient {
         try await get(path: "api/ios/v1/exercises", query: [], session: session)
     }
 
+    func exerciseDetail(
+        exerciseId: String,
+        session: IOSSession
+    ) async throws -> ExerciseDetailResponse {
+        try await get(
+            path: "api/ios/v1/exercises/\(exerciseId)",
+            query: [],
+            session: session
+        )
+    }
+
+    func exerciseHistory(
+        exerciseId: String,
+        limit: Int,
+        offset: Int,
+        session: IOSSession
+    ) async throws -> ExerciseHistoryResponse {
+        try await get(
+            path: "api/ios/v1/exercises/\(exerciseId)/history",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "offset", value: String(offset)),
+            ],
+            session: session
+        )
+    }
+
     func swapPlanExercise(
         workoutId: String,
         itemIndex: Int,

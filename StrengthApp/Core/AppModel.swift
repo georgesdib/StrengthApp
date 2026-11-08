@@ -57,6 +57,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var exerciseCatalogue: [ExerciseOption] = []
     @Published private(set) var isLoadingExerciseCatalogue = false
     @Published private(set) var exerciseCatalogueError: String?
+    @Published private(set) var exerciseDetail: ExerciseDetailResponse?
+    @Published private(set) var isLoadingExerciseDetail = false
+    @Published private(set) var exerciseDetailError: String?
+    @Published private(set) var exerciseHistorySessions: [ExerciseHistorySession] = []
+    @Published private(set) var exerciseHistoryIncluded: [ExerciseHistoryIncluded] = []
+    @Published private(set) var exerciseHistoryTotal = 0
+    @Published private(set) var exerciseHistoryHasMore = false
+    @Published private(set) var isLoadingExerciseHistory = false
+    @Published private(set) var exerciseHistoryError: String?
     @Published private(set) var progress: ProgressResponse?
     @Published private(set) var progressError: String?
     @Published private(set) var hasLoadedProgress = false
@@ -106,6 +115,8 @@ final class AppModel: ObservableObject {
     private var networkMonitor: NetworkMonitor?
     private var offlineRetryTask: Task<Void, Never>?
     private var offlineRetryAttempt = 0
+    private var exerciseDetailCache: [String: ExerciseDetailResponse] = [:]
+    private var exerciseHistoryExerciseId: String?
     private var refreshInFlight = false
     private var refreshPending = false
     private var refreshWaiters: [CheckedContinuation<RefreshOutcome, Never>] = []
@@ -1188,6 +1199,11 @@ final class AppModel: ObservableObject {
         guard let session else { return }
         if !force && !exerciseCatalogue.isEmpty { return }
         guard !isLoadingExerciseCatalogue else { return }
+        if force {
+            // Configuration is cached in memory for the session; an explicit catalogue
+            // refresh invalidates it so detail screens do not keep showing old taxonomy.
+            exerciseDetailCache.removeAll()
+        }
         isLoadingExerciseCatalogue = true
         exerciseCatalogueError = nil
         defer { isLoadingExerciseCatalogue = false }
@@ -1195,6 +1211,70 @@ final class AppModel: ObservableObject {
             exerciseCatalogue = try await client.exerciseCatalogue(session: session).exercises
         } catch {
             exerciseCatalogueError = message(for: error)
+            if let api = error as? APIError, api.isAuthenticationFailure {
+                forgetLocally(message: api.errorDescription)
+            }
+        }
+    }
+
+    func loadExerciseDetail(exerciseId: String) async {
+        guard let session else { return }
+        exerciseDetail = exerciseDetailCache[exerciseId]
+        guard !isLoadingExerciseDetail else { return }
+        isLoadingExerciseDetail = true
+        exerciseDetailError = nil
+        defer { isLoadingExerciseDetail = false }
+        do {
+            let detail = try await client.exerciseDetail(
+                exerciseId: exerciseId, session: session
+            )
+            exerciseDetailCache[exerciseId] = detail
+            exerciseDetail = detail
+        } catch {
+            exerciseDetailError = message(for: error)
+            if let api = error as? APIError, api.isAuthenticationFailure {
+                forgetLocally(message: api.errorDescription)
+            }
+        }
+    }
+
+    func loadExerciseHistory(exerciseId: String, reset: Bool = false) async {
+        guard let session else { return }
+        if reset || exerciseHistoryExerciseId != exerciseId {
+            exerciseHistoryExerciseId = exerciseId
+            exerciseHistorySessions = []
+            exerciseHistoryIncluded = []
+            exerciseHistoryTotal = 0
+            exerciseHistoryHasMore = false
+            exerciseHistoryError = nil
+        }
+        guard !isLoadingExerciseHistory else { return }
+        isLoadingExerciseHistory = true
+        if reset {
+            exerciseHistoryError = nil
+        }
+        defer { isLoadingExerciseHistory = false }
+        do {
+            let offset = reset ? 0 : exerciseHistorySessions.count
+            let response = try await client.exerciseHistory(
+                exerciseId: exerciseId,
+                limit: 20,
+                offset: offset,
+                session: session
+            )
+            if reset {
+                exerciseHistorySessions = response.sessions
+            } else {
+                let existing = Set(exerciseHistorySessions.map(\.sessionId))
+                exerciseHistorySessions += response.sessions.filter {
+                    !existing.contains($0.sessionId)
+                }
+            }
+            exerciseHistoryIncluded = response.includedExercises
+            exerciseHistoryTotal = response.total
+            exerciseHistoryHasMore = response.hasMore
+        } catch {
+            exerciseHistoryError = message(for: error)
             if let api = error as? APIError, api.isAuthenticationFailure {
                 forgetLocally(message: api.errorDescription)
             }
@@ -1979,6 +2059,17 @@ final class AppModel: ObservableObject {
         exerciseCatalogue = []
         isLoadingExerciseCatalogue = false
         exerciseCatalogueError = nil
+        exerciseDetail = nil
+        isLoadingExerciseDetail = false
+        exerciseDetailError = nil
+        exerciseHistorySessions = []
+        exerciseHistoryIncluded = []
+        exerciseHistoryTotal = 0
+        exerciseHistoryHasMore = false
+        isLoadingExerciseHistory = false
+        exerciseHistoryError = nil
+        exerciseHistoryExerciseId = nil
+        exerciseDetailCache = [:]
         progress = nil
         progressError = nil
         hasLoadedProgress = false

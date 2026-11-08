@@ -56,6 +56,18 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Exercise library") {
+                    NavigationLink {
+                        ExerciseLibraryView(model: model)
+                    } label: {
+                        Label("Exercises", systemImage: "list.bullet.rectangle")
+                    }
+                    .accessibilityIdentifier("exercise-library-link")
+                    Text("Configurations, e1RM and completed working-set history.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("HealthKit") {
                     Toggle(
                         "Readiness from HealthKit",

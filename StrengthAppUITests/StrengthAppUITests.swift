@@ -216,6 +216,32 @@ final class StrengthAppUITests: XCTestCase {
         finish.tap()
         XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 20))
 
+        app.tabBars.buttons["Settings"].tap()
+        let exerciseLibrary = app.descendants(matching: .any)["exercise-library-link"]
+        XCTAssertTrue(exerciseLibrary.waitForExistence(timeout: 10))
+        exerciseLibrary.tap()
+        XCTAssertTrue(app.navigationBars["Exercise Library"].waitForExistence(timeout: 10))
+        let squatRow = app.descendants(matching: .any)["exercise-library-competition_squat"]
+        scrollTo(squatRow, in: app)
+        XCTAssertTrue(squatRow.waitForExistence(timeout: 10))
+        squatRow.tap()
+        XCTAssertTrue(app.navigationBars["Competition Squat"].waitForExistence(timeout: 10))
+        let latestE1RM = app.descendants(matching: .any)["exercise-e1rm-latest"]
+        for _ in 0..<8 {
+            if latestE1RM.exists { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(latestE1RM.waitForExistence(timeout: 10))
+        for _ in 0..<5 {
+            if app.descendants(matching: .any)["exercise-history-header"].exists { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(
+            app.descendants(matching: .any)["exercise-history-header"]
+                .waitForExistence(timeout: 10)
+        )
+        app.navigationBars.buttons["Exercise Library"].tap()
+
         app.tabBars.buttons["Progress"].tap()
         XCTAssertTrue(app.navigationBars["Progress"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Coverage"].waitForExistence(timeout: 15))

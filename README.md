@@ -75,9 +75,12 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
   tap a session for a read-only outline, duration and set summary; load more, empty and error states.
 - **Progress** — the server dashboard: sRPE coverage, performance points, weekly volume, attendance
   and back-symptom summary over a 4/8/12/26/52-week window.
-- **Settings** — Home Server, Away Server and Home Wi-Fi name, active route, device id/label,
-  app version, opt-in HealthKit readiness, Forget
-  this device (local token only), re-pair instructions.
+- **Settings** — Home Server, Away Server and Home Wi-Fi name, active route, Exercise Library,
+  device id/label, app version, opt-in HealthKit readiness, Forget this device (local token only),
+  re-pair instructions.
+- **Exercise Library** — searchable catalogue, read-only configuration, server-computed e1RM and
+  paginated working-set history; catalogue/config cached for the app session, e1RM/history fetched
+  on entry, explicit refresh.
 
 HealthKit is read-only, off by default and limited to HRV, resting heart rate and bodyweight. There is no
 offline queue, per-rep VBT, review/rubric or Apple Intelligence/PCC UI. Plan edits are online-only.
@@ -108,7 +111,7 @@ offline queue, per-rep VBT, review/rubric or Apple Intelligence/PCC UI. Plan edi
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 94 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 96 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
@@ -120,7 +123,7 @@ with nil fallback, exercise catalogue/plan-edit decoding, durable offline snapsh
 local set IDs, cancellation and retention, offline add/form/finish capture, cached-workout relaunch
 pending-operation cancellation, unresolved retention, explicit 28-day expiry, ordered replay,
 exercise-first workout navigation, working-set rest timer, performed-set add/remove, outside-plan
-exercise logging, active-workout conflict blocking and
+exercise logging, exercise-library detail/e1RM/history decoding, active-workout conflict blocking and
 non-blocking form-rating failure, R5 server-active/ended-elsewhere/consumed-prescription recovery states, and
 Phase 3A Apple Watch classification, HRV/RHR/bodyweight selection/freshness, per-metric
 eligible/missing/stale states, coalesced authoritative refresh, import/refresh concurrency,

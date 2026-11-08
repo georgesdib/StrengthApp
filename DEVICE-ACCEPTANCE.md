@@ -322,25 +322,24 @@ Owner confirmation: pass 2026-11-08 · Build: Phase 3A · Device: physical iPhon
 
 ---
 
-# Phase 4 offline acceptance checklist — pending
+# Phase 4 offline acceptance checklist — complete
 
-**Status: not yet run on the physical iPhone.** Run after backing up the live database and installing
-the Chunk 4 client.
+**Status: physically tested and owner-confirmed 2026-11-08.**
 
-- [ ] Start a workout online, then stop the server or enable airplane mode.
-- [ ] Add sets, record a form rating, force-quit and relaunch; the cached workout and pending
+- [x] Start a workout online, then stop the server or enable airplane mode.
+- [x] Add sets, record a form rating, force-quit and relaunch; the cached workout and pending
       operations are restored.
-- [ ] Cancel an unsent pending set and an unsent finish; the local snapshot updates.
-- [ ] Restart the server or disable airplane mode; foreground the app and verify FIFO replay.
-- [ ] Verify each queued operation reaches the server exactly once, with the original performed
+- [x] Cancel an unsent pending set and an unsent finish; the local snapshot updates.
+- [x] Restart the server or disable airplane mode; foreground the app and verify FIFO replay.
+- [x] Verify each queued operation reaches the server exactly once, with the original performed
       timestamps.
-- [ ] Queue a finish offline, reconnect and verify the session materializes with the actual finish
+- [x] Queue a finish offline, reconnect and verify the session materializes with the actual finish
       time and measured duration.
-- [ ] Simulate an ended-elsewhere/different-active-workout case; verify no queued work is attached
+- [x] Simulate an ended-elsewhere/different-active-workout case; verify no queued work is attached
       to the wrong workout and a visible conflict is shown.
-- [ ] Verify Retry and Discard (per operation and all capture) behave explicitly.
-- [ ] Verify Request workout/Start workout, plan edits, readiness and HealthKit stay unavailable or
+- [x] Verify Retry and Discard (per operation and all capture) behave explicitly.
+- [x] Verify Request workout/Start workout, plan edits, readiness and HealthKit stay unavailable or
       server-required while offline.
-- [ ] Confirm no background sync runs.
+- [x] Confirm no background sync runs.
 
-Owner confirmation: pending · Build: Phase 4 · Device: pending · iOS: pending
+Owner confirmation: pass 2026-11-08 · Build: Phase 4 · Device: physical iPhone · iOS: 27.2

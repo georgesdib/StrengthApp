@@ -2,8 +2,8 @@
 
 **Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07; Phase 3A
 closed 2026-11-08** — Phase 3A is unit/simulator/live-server and physical-iPhone verified. Phase 4
-offline capture and replay are implemented (snapshot/outbox, add set/form/finish, ordered sync,
-conflict handling and cancellation); physical offline acceptance remains. R1 durable pending-mutation journal, R3 explicit plan-item selection,
+offline capture and replay are closed 2026-11-08 (snapshot/outbox, add set/form/finish, ordered
+sync, conflict handling and cancellation); physical offline acceptance was owner-confirmed. R1 durable pending-mutation journal, R3 explicit plan-item selection,
 R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
 closed.
 

@@ -4,6 +4,7 @@ import XCTest
 @testable import StrengthApp
 import StrengthCore
 
+@MainActor
 final class StubTransport: HTTPTransport {
     var handler: (URLRequest) throws -> (Int, Data)
     private(set) var requests: [URLRequest] = []
@@ -25,6 +26,7 @@ final class StubTransport: HTTPTransport {
     }
 }
 
+@MainActor
 final class AsyncStubTransport: HTTPTransport {
     var handler: (URLRequest) async throws -> (Int, Data)
     private(set) var requests: [URLRequest] = []

@@ -2,6 +2,7 @@ import XCTest
 @testable import StrengthApp
 import StrengthCore
 
+@MainActor
 final class ServerConfigurationTests: XCTestCase {
     func testPreferredReachableHomeSelectsHomeServer() {
         let selection = ServerConfiguration.select(

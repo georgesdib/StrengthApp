@@ -275,19 +275,3 @@ protocol HealthKitReadinessProviding {
     func selectSamples(serverDate: String, now: Date) async throws -> HealthKitReadinessSelection
 }
 
-struct HealthKitReadinessRequest: Encodable, Equatable {
-    let date: String
-    let samples: [HealthKitReadinessSample]
-}
-
-struct HealthKitReadinessSample: Encodable, Equatable {
-    let field: String
-    let value: Double
-    let sampleId: String
-    let sampleAt: String
-    let sourceName: String
-    let sourceBundleId: String?
-    let sourceClass: String
-    let sourceModel: String?
-    let sourceManufacturer: String?
-}

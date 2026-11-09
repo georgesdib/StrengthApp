@@ -2,6 +2,7 @@ import XCTest
 @testable import StrengthApp
 import StrengthCore
 
+@MainActor
 final class ExecutionTelemetryTests: XCTestCase {
     func testExecutionEventPayloadEncodingIsClosedAndTimestamped() throws {
         let event = ExecutionEvent(

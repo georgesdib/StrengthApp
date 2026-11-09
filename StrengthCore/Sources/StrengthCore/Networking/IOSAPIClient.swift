@@ -1,20 +1,19 @@
 import Foundation
-import StrengthCore
 
 /// One paired server session: the base URL the owner entered and the Keychain-held token.
-struct IOSSession: Equatable {
-    let baseURL: URL
-    let token: String
-    let deviceID: String?
+public struct IOSSession: Equatable {
+    public let baseURL: URL
+    public let token: String
+    public let deviceID: String?
 
-    init(baseURL: URL, token: String, deviceID: String? = nil) {
+    public init(baseURL: URL, token: String, deviceID: String? = nil) {
         self.baseURL = baseURL
         self.token = token
         self.deviceID = deviceID
     }
 }
 
-enum APIError: LocalizedError, Equatable {
+public enum APIError: LocalizedError, Equatable {
     case invalidBaseURL(String)
     case invalidPairingCode
     case invalidLabel(String)
@@ -26,7 +25,7 @@ enum APIError: LocalizedError, Equatable {
     case forbidden
     case decoding
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .invalidBaseURL(let message):
             return message
@@ -49,7 +48,7 @@ enum APIError: LocalizedError, Equatable {
         }
     }
 
-    static func httpDescription(status: Int, message: String,
+    public static func httpDescription(status: Int, message: String,
                                 fields: [String: String]) -> String {
         if (500...599).contains(status) {
             return "The server could not complete the request (HTTP \(status))."
@@ -60,19 +59,19 @@ enum APIError: LocalizedError, Equatable {
         return message
     }
 
-    var isAuthenticationFailure: Bool {
+    public var isAuthenticationFailure: Bool {
         switch self {
         case .unauthorized, .forbidden: return true
         default: return false
         }
     }
 
-    var code: String? {
+    public var code: String? {
         if case .server(_, let code, _, _, _) = self { return code }
         return nil
     }
 
-    var details: [String: JSONValue]? {
+    public var details: [String: JSONValue]? {
         if case .server(_, _, _, _, let details) = self { return details }
         return nil
     }
@@ -80,17 +79,18 @@ enum APIError: LocalizedError, Equatable {
 
 // MARK: - Transport
 
-protocol HTTPTransport {
+@MainActor
+public protocol HTTPTransport {
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse)
 }
 
 /// A GET-only transport with no cookies or shared cache. Redirects are allowed only within the
 /// original origin (scheme, host and port) so the bearer token can never follow a redirect to
 /// another server, port or HTTP/HTTPS scheme.
-final class URLSessionTransport: HTTPTransport {
+public final class URLSessionTransport: HTTPTransport {
     private let session: URLSession
 
-    init(timeout: TimeInterval = 10) {
+    public init(timeout: TimeInterval = 10) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = timeout
         configuration.timeoutIntervalForResource = timeout
@@ -107,7 +107,8 @@ final class URLSessionTransport: HTTPTransport {
         )
     }
 
-    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    @MainActor
+    public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw APIError.transport("The server returned a non-HTTP response.")
@@ -122,14 +123,14 @@ final class URLSessionTransport: HTTPTransport {
 /// https://host, forwarding the bearer token to a different server or scheme. The guard compares
 /// the original request's origin with the redirect target's origin: same scheme
 /// (case-insensitive), same host (case-insensitive) and same effective port.
-nonisolated enum RedirectPolicy {
-    struct Origin: Equatable {
+public nonisolated enum RedirectPolicy {
+    public struct Origin: Equatable {
         let scheme: String
         let host: String
         let port: Int
     }
 
-    static func origin(of url: URL?) -> Origin? {
+    public static func origin(of url: URL?) -> Origin? {
         guard let url,
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
@@ -143,7 +144,7 @@ nonisolated enum RedirectPolicy {
         return Origin(scheme: scheme, host: host, port: port)
     }
 
-    static func allowsRedirect(from original: URL?, to target: URL?) -> Bool {
+    public static func allowsRedirect(from original: URL?, to target: URL?) -> Bool {
         guard let originalOrigin = origin(of: original),
               let targetOrigin = origin(of: target) else {
             return false
@@ -155,8 +156,8 @@ nonisolated enum RedirectPolicy {
 /// Kept as SameHostRedirectGuard because that is the transport-level name, but the policy is
 /// same-origin: a cross-port or scheme-changing redirect is rejected and never receives the
 /// Authorization header.
-final class SameHostRedirectGuard: NSObject, URLSessionTaskDelegate {
-    nonisolated func urlSession(
+public final class SameHostRedirectGuard: NSObject, URLSessionTaskDelegate {
+    public nonisolated func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
         willPerformHTTPRedirection response: HTTPURLResponse,
@@ -191,15 +192,16 @@ private struct TransportFailure: Error {
 
 /// The single Phase 1 API client. All training decisions stay on the server; this type only
 /// validates the owner's input, attaches the bearer token and decodes the read payloads.
-final class IOSAPIClient {
+@MainActor
+public final class IOSAPIClient {
     private let transport: HTTPTransport
     private let decoder: JSONDecoder
     private let encoder = JSONEncoder()
     private let journal: MutationJournal?
     private let maxGETRetries = 2
 
-    init(
-        transport: HTTPTransport = URLSessionTransport(),
+    public init(
+        transport: HTTPTransport,
         journal: MutationJournal? = nil
     ) {
         self.transport = transport
@@ -210,9 +212,13 @@ final class IOSAPIClient {
         encoder.keyEncodingStrategy = .convertToSnakeCase
     }
 
+    public convenience init(journal: MutationJournal? = nil) {
+        self.init(transport: URLSessionTransport(), journal: journal)
+    }
+
     // MARK: Input validation
 
-    static func validatedBaseURL(_ raw: String) throws -> URL {
+    public static func validatedBaseURL(_ raw: String) throws -> URL {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw APIError.invalidBaseURL("Enter the server address, for example http://192.168.1.10:8000.")
@@ -243,7 +249,7 @@ final class IOSAPIClient {
         return url
     }
 
-    static func normalizeCode(_ raw: String) throws -> String {
+    public static func normalizeCode(_ raw: String) throws -> String {
         let cleaned = raw
             .replacingOccurrences(of: " ", with: "")
             .replacingOccurrences(of: "-", with: "")
@@ -254,7 +260,7 @@ final class IOSAPIClient {
         return cleaned
     }
 
-    static func normalizeLabel(_ raw: String) throws -> String {
+    public static func normalizeLabel(_ raw: String) throws -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let label = trimmed.isEmpty ? "iPhone" : trimmed
         guard label.count <= 40 else {
@@ -265,7 +271,7 @@ final class IOSAPIClient {
 
     // MARK: Endpoints
 
-    func pair(baseURL: URL, code: String, label: String) async throws -> PairResponse {
+    public func pair(baseURL: URL, code: String, label: String) async throws -> PairResponse {
         let cleanCode = try Self.normalizeCode(code)
         let cleanLabel = try Self.normalizeLabel(label)
         var request = URLRequest(url: baseURL.appendingPathComponent("api/ios/v1/pair"))
@@ -280,13 +286,13 @@ final class IOSAPIClient {
         return try decode(PairResponse.self, from: data)
     }
 
-    func bootstrap(session: IOSSession) async throws -> BootstrapResponse {
+    public func bootstrap(session: IOSSession) async throws -> BootstrapResponse {
         try await get(path: "api/ios/v1/bootstrap", query: [], session: session)
     }
 
     /// Short, read-only reachability check used for Home/Away selection. A 401 still proves
     /// the server is reachable; transport errors and 5xx do not.
-    func isServerReachable(baseURL: URL, token: String) async -> Bool {
+    public func isServerReachable(baseURL: URL, token: String) async -> Bool {
         var request = URLRequest(url: baseURL.appendingPathComponent("api/ios/v1/bootstrap"))
         request.httpMethod = "GET"
         request.timeoutInterval = 2
@@ -301,11 +307,11 @@ final class IOSAPIClient {
         }
     }
 
-    func today(session: IOSSession) async throws -> TodayResponse {
+    public func today(session: IOSSession) async throws -> TodayResponse {
         try await get(path: "api/ios/v1/today", query: [], session: session)
     }
 
-    func history(session: IOSSession, limit: Int = 50, offset: Int = 0) async throws -> HistoryResponse {
+    public func history(session: IOSSession, limit: Int = 50, offset: Int = 0) async throws -> HistoryResponse {
         try await get(
             path: "api/ios/v1/history",
             query: [
@@ -316,7 +322,7 @@ final class IOSAPIClient {
         )
     }
 
-    func historyDetail(sessionID: String, session: IOSSession) async throws -> HistoryDetail {
+    public func historyDetail(sessionID: String, session: IOSSession) async throws -> HistoryDetail {
         try await get(
             path: "api/ios/v1/history/\(sessionID)",
             query: [],
@@ -324,7 +330,7 @@ final class IOSAPIClient {
         )
     }
 
-    func writeReadiness(
+    public func writeReadiness(
         _ body: ReadinessWriteRequest,
         session: IOSSession,
         idempotencyKey: String
@@ -339,7 +345,7 @@ final class IOSAPIClient {
         )
     }
 
-    func importHealthKitReadiness(
+    public func importHealthKitReadiness(
         _ body: HealthKitReadinessRequest,
         session: IOSSession,
         idempotencyKey: String
@@ -355,7 +361,7 @@ final class IOSAPIClient {
     }
 
     /// R7: the request is accepted (202) and the plan is built in the background.
-    func issuePrescription(
+    public func issuePrescription(
         _ body: IssuePrescriptionRequest,
         session: IOSSession,
         idempotencyKey: String
@@ -372,11 +378,11 @@ final class IOSAPIClient {
 
     /// The authoritative plan-request state. Read-only: no idempotency key, no retries beyond
     /// the bounded GET policy.
-    func planState(session: IOSSession) async throws -> PlansStateResponse {
+    public func planState(session: IOSSession) async throws -> PlansStateResponse {
         try await get(path: "api/ios/v1/plans/current", query: [], session: session)
     }
 
-    func startWorkout(
+    public func startWorkout(
         issuedPlanId: String,
         session: IOSSession,
         idempotencyKey: String
@@ -391,7 +397,7 @@ final class IOSAPIClient {
         )
     }
 
-    func addSet(
+    public func addSet(
         workoutId: String,
         body: AddSetRequest,
         session: IOSSession,
@@ -409,7 +415,7 @@ final class IOSAPIClient {
         )
     }
 
-    func submitExecutionEvents(
+    public func submitExecutionEvents(
         workoutId: String,
         events: [ExecutionEvent],
         session: IOSSession,
@@ -426,7 +432,7 @@ final class IOSAPIClient {
         )
     }
 
-    func executionAnalytics(
+    public func executionAnalytics(
         workoutId: String,
         session: IOSSession
     ) async throws -> ExecutionAnalyticsResponse {
@@ -437,7 +443,7 @@ final class IOSAPIClient {
         )
     }
 
-    func removeSet(
+    public func removeSet(
         workoutId: String,
         body: RemoveSetRequest,
         session: IOSSession,
@@ -453,15 +459,15 @@ final class IOSAPIClient {
         )
     }
 
-    func discardPendingOperation(_ operationId: String) {
+    public func discardPendingOperation(_ operationId: String) {
         try? journal?.remove(operationId: operationId)
     }
 
-    func exerciseCatalogue(session: IOSSession) async throws -> ExerciseCatalogueResponse {
+    public func exerciseCatalogue(session: IOSSession) async throws -> ExerciseCatalogueResponse {
         try await get(path: "api/ios/v1/exercises", query: [], session: session)
     }
 
-    func exerciseDetail(
+    public func exerciseDetail(
         exerciseId: String,
         session: IOSSession
     ) async throws -> ExerciseDetailResponse {
@@ -472,7 +478,7 @@ final class IOSAPIClient {
         )
     }
 
-    func exerciseHistory(
+    public func exerciseHistory(
         exerciseId: String,
         limit: Int,
         offset: Int,
@@ -488,7 +494,7 @@ final class IOSAPIClient {
         )
     }
 
-    func swapPlanExercise(
+    public func swapPlanExercise(
         workoutId: String,
         itemIndex: Int,
         body: PlanSwapRequest,
@@ -505,7 +511,7 @@ final class IOSAPIClient {
         )
     }
 
-    func removePlanExercise(
+    public func removePlanExercise(
         workoutId: String,
         itemIndex: Int,
         body: PlanRemoveRequest,
@@ -522,7 +528,7 @@ final class IOSAPIClient {
         )
     }
 
-    func changePlanSets(
+    public func changePlanSets(
         workoutId: String,
         itemIndex: Int,
         body: PlanSetsRequest,
@@ -539,7 +545,7 @@ final class IOSAPIClient {
         )
     }
 
-    func addPlanExercise(
+    public func addPlanExercise(
         workoutId: String,
         body: PlanAddRequest,
         session: IOSSession,
@@ -555,7 +561,7 @@ final class IOSAPIClient {
         )
     }
 
-    func rateForm(
+    public func rateForm(
         workoutId: String,
         body: FormRatingRequest,
         session: IOSSession,
@@ -573,7 +579,7 @@ final class IOSAPIClient {
         )
     }
 
-    func completeWorkout(
+    public func completeWorkout(
         workoutId: String,
         body: CompleteWorkoutRequest,
         session: IOSSession,
@@ -591,7 +597,7 @@ final class IOSAPIClient {
         )
     }
 
-    func abandonWorkout(
+    public func abandonWorkout(
         workoutId: String,
         session: IOSSession,
         idempotencyKey: String
@@ -606,7 +612,7 @@ final class IOSAPIClient {
         )
     }
 
-    func progress(
+    public func progress(
         weeks: Int = 8,
         date: String? = nil,
         session: IOSSession
@@ -624,30 +630,30 @@ final class IOSAPIClient {
 
     // MARK: Pending operations
 
-    func pendingMutations(for session: IOSSession) -> [PendingMutation] {
+    public func pendingMutations(for session: IOSSession) -> [PendingMutation] {
         journal?.all(
             for: session.deviceID,
             serverURL: session.baseURL.absoluteString
         ) ?? []
     }
 
-    func discard(_ entry: PendingMutation) {
+    public func discard(_ entry: PendingMutation) {
         try? journal?.remove(entry)
     }
 
-    func discardAll(for session: IOSSession) {
+    public func discardAll(for session: IOSSession) {
         try? journal?.removeAll(
             for: session.deviceID,
             serverURL: session.baseURL.absoluteString
         )
     }
 
-    func markConflict(_ entry: PendingMutation) {
+    public func markConflict(_ entry: PendingMutation) {
         try? journal?.markConflict(entry)
     }
 
     /// Replay a journaled request with its original UUID and exact encoded body.
-    func replay<T: Decodable>(
+    public func replay<T: Decodable>(
         _ entry: PendingMutation,
         session: IOSSession
     ) async throws -> T {

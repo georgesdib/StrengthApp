@@ -1,17 +1,16 @@
 import Foundation
 import Security
-import StrengthCore
 
-protocol TokenStoring {
+public protocol TokenStoring {
     func save(_ token: String) throws
     func load() -> String?
     func delete()
 }
 
-enum KeychainError: LocalizedError {
+public enum KeychainError: LocalizedError {
     case unexpectedStatus(OSStatus)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .unexpectedStatus(let status):
             return "The iPhone Keychain returned status \(status)."
@@ -20,19 +19,19 @@ enum KeychainError: LocalizedError {
 }
 
 /// The only holder of the API token. The token never goes to UserDefaults, a file or a log.
-struct KeychainTokenStore: TokenStoring {
-    static let defaultService = "com.georgesdibpersonalteam.StrengthApp"
-    static let defaultAccount = "api-token"
+public struct KeychainTokenStore: TokenStoring {
+    public static let defaultService = "com.georgesdibpersonalteam.StrengthApp"
+    public static let defaultAccount = "api-token"
 
-    let service: String
-    let account: String
+    public let service: String
+    public let account: String
 
-    init(service: String = Self.defaultService, account: String = Self.defaultAccount) {
+    public init(service: String = Self.defaultService, account: String = Self.defaultAccount) {
         self.service = service
         self.account = account
     }
 
-    func save(_ token: String) throws {
+    public func save(_ token: String) throws {
         guard let data = token.data(using: .utf8) else {
             throw KeychainError.unexpectedStatus(errSecParam)
         }
@@ -58,7 +57,7 @@ struct KeychainTokenStore: TokenStoring {
         }
     }
 
-    func load() -> String? {
+    public func load() -> String? {
         var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -70,7 +69,7 @@ struct KeychainTokenStore: TokenStoring {
         return String(data: data, encoding: .utf8)
     }
 
-    func delete() {
+    public func delete() {
         SecItemDelete(baseQuery as CFDictionary)
     }
 

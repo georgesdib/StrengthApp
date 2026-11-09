@@ -1,5 +1,7 @@
 # StrengthApp — iOS client
 
+[![iOS CI](https://github.com/georgesdib/StrengthApp/actions/workflows/ios-ci.yml/badge.svg)](https://github.com/georgesdib/StrengthApp/actions/workflows/ios-ci.yml)
+
 **Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07; Phase 3A
 closed 2026-11-08** — Phase 3A is unit/simulator/live-server and physical-iPhone verified. Phase 4
 offline capture and replay are closed 2026-11-08 (snapshot/outbox, add set/form/finish, ordered
@@ -247,10 +249,11 @@ workarounds for shells whose sandbox denies what the toolchain expects.
 
 ## Continuous integration
 
-[`.github/workflows/ios-ci.yml`](.github/workflows/ios-ci.yml) runs after every push to `main`
-(and on manual dispatch). A GitHub-hosted `xcode-27` runner selects Xcode 27.2, then builds the
-app and runs the `StrengthAppTests` unit-test target on a simulator. UI tests are excluded: they
-need a live server, a one-use pairing code and seeded data, none of which belong in CI.
+[`.github/workflows/ios-ci.yml`](.github/workflows/ios-ci.yml) runs on every push to `main`,
+on pull requests targeting `main`, and on manual dispatch. A GitHub-hosted `xcode-27` runner
+selects Xcode 27.2, then builds the app and runs the `StrengthAppTests` unit-test target on a
+simulator. UI tests are excluded: they need a live server, a one-use pairing code and seeded data,
+none of which belong in CI.
 
 The same work is one local command:
 
@@ -262,10 +265,11 @@ It builds and runs the unit tests, and refuses to run if `StrengthAppUITests/Liv
 filled in. Override the destination, test filter or derived-data path with
 `DESTINATION=… ONLY_TESTING=… DERIVED_DATA=…`.
 
-The workflow has no `pull_request` trigger, so it reports after a merge rather than gating the
-pull request; [`AGENTS.md`](AGENTS.md) records that as a decision. The app targets iOS 27.0
-(`IPHONEOS_DEPLOYMENT_TARGET`), matching the oldest simulator runtime on the hosted image — a
-higher floor with no matching runtime makes the test step impossible to run there.
+The workflow runs on pull requests as well as post-merge pushes, so the check is available to
+PRs. The app targets iOS 27.0 (`IPHONEOS_DEPLOYMENT_TARGET`), matching the oldest simulator
+runtime on the hosted image — a higher floor with no matching runtime makes the test step
+impossible to run there. The local Mac currently has only the iOS 27.2 simulator runtime, so the
+local gates build with a 27.0 minimum and execute on 27.2.
 
 ## Real-device acceptance
 

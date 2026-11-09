@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct ExerciseWorkoutView: View {
     @ObservedObject var model: AppModel

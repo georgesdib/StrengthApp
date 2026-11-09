@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import SwiftUI
+import StrengthCore
 
 struct RestTimerResult: Equatable {
     let startedAt: Date

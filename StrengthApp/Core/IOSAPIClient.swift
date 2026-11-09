@@ -1,4 +1,5 @@
 import Foundation
+import StrengthCore
 
 /// One paired server session: the base URL the owner entered and the Keychain-held token.
 struct IOSSession: Equatable {

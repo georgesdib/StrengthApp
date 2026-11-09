@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import StrengthApp
+import StrengthCore
 
 @MainActor
 final class HealthKitReadinessTests: XCTestCase {

@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct HistoryView: View {
     @ObservedObject var model: AppModel

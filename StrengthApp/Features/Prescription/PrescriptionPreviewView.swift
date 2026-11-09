@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct PrescriptionPreviewView: View {
     @ObservedObject var model: AppModel

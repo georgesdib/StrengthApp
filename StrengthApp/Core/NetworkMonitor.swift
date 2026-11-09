@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import StrengthCore
 
 /// Reports meaningful network changes while the app is open. It intentionally has no
 /// background execution: Home/Away selection and Phase 4 retries only run on foreground or

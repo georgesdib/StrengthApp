@@ -1,4 +1,5 @@
 import Foundation
+import StrengthCore
 
 struct ExerciseDetailResponse: Decodable {
     let exercise: ExerciseDetailSummary

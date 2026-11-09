@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct RootView: View {
     @StateObject private var model = AppModel()

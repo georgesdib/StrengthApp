@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 @main
 struct MyApp: App {

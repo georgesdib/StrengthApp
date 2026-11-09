@@ -1,4 +1,5 @@
 import Foundation
+import StrengthCore
 
 /// Which configured server address should be used for the current network.
 enum ServerRoute: String, Equatable {

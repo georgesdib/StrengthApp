@@ -1,5 +1,6 @@
 import XCTest
 @testable import StrengthApp
+import StrengthCore
 
 final class ExecutionTelemetryTests: XCTestCase {
     func testExecutionEventPayloadEncodingIsClosedAndTimestamped() throws {

@@ -10,6 +10,12 @@
       "Base",
     ],
   },
+  "packages": [
+    {
+      "kind": "local",
+      "path": "StrengthCore",
+    },
+  ],
   "files": [
     { "kind": "folder", "path": "StrengthApp", "target-membership": [ "StrengthApp" ] },
     {
@@ -36,10 +42,20 @@
       "id": "000000000000000100000000",
       "product": "Products/StrengthApp.app",
       "product-type": "application",
+      "dependencies": [
+        { "kind": "package", "package": "StrengthCore", "product-name": "StrengthCore" },
+      ],
       "build-phases": [
         "compile-sources",
         "frameworks",
         "resources",
+      ],
+      "package-product-members": [
+        {
+          "package": "StrengthCore",
+          "product-name": "StrengthCore",
+          "build-phase": { "build-phase": "frameworks" },
+        },
       ],
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",

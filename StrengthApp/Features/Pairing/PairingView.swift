@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct PairingView: View {
     private enum Field: Hashable {

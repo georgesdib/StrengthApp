@@ -1,4 +1,5 @@
 import Foundation
+import StrengthCore
 
 /// The two HealthKit fields Phase 3A may read. No sleep, workouts, heart-rate stream or write
 /// access belongs here.

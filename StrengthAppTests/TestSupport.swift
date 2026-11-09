@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 
 @testable import StrengthApp
+import StrengthCore
 
 final class StubTransport: HTTPTransport {
     var handler: (URLRequest) throws -> (Int, Data)

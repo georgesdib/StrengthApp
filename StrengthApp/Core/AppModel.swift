@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import StrengthCore
 
 @MainActor
 final class AppModel: ObservableObject {

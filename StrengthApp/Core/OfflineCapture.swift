@@ -1,4 +1,5 @@
 import Foundation
+import StrengthCore
 
 /// Phase 4's durable local capture foundation.
 ///

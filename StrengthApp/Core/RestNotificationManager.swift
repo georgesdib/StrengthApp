@@ -2,6 +2,7 @@ import AudioToolbox
 import Foundation
 import UIKit
 import UserNotifications
+import StrengthCore
 
 /// Schedules the rest-end local notification. The notification is the only way iOS can
 /// alert the owner while the app is suspended; the in-app haptic/sound cover the active case.

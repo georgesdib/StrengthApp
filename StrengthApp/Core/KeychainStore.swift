@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import StrengthCore
 
 protocol TokenStoring {
     func save(_ token: String) throws

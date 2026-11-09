@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel

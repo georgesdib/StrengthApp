@@ -1,4 +1,5 @@
 import Foundation
+import StrengthCore
 
 enum AppConfig {
     #if DEBUG

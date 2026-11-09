@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import StrengthCore
 
 /// Form state for an exercise's next set, kept at the workout-screen level so pushing to the
 /// exercise screen and returning does not discard an unfinished entry.

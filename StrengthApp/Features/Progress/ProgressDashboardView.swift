@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct ProgressDashboardView: View {
     @ObservedObject var model: AppModel

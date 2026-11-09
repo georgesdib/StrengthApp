@@ -1,4 +1,5 @@
 import Foundation
+import StrengthCore
 
 /// One mutation that was sent but whose outcome was not acknowledged.
 struct PendingMutation: Codable, Equatable, Identifiable {

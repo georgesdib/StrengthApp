@@ -1,6 +1,7 @@
 # Phase 1 device acceptance checklist — completed 2026-11-07
 
-**Result: complete.** The owner confirmed the Phase 1 pass on their physical iPhone (iOS 27.2;
+**Result: complete.** The build target is iOS 27.0; the historical passes below were performed on
+iOS 27.2. The owner confirmed the Phase 1 pass on their physical iPhone (iOS 27.2;
 the connected device reports iPhone 16 Pro Max, iPhone17,2) against the local server on the home
 LAN. The simulator pass used the iPhone 18 Pro. The checklist below is retained as the record of
 what was exercised. A later transport-internal remediation hardened the redirect guard to

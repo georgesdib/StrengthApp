@@ -32,19 +32,21 @@ pairs a device and writes readiness, a prescription and a workout.
 
 ## CI
 
-[`.github/workflows/ios-ci.yml`](.github/workflows/ios-ci.yml) runs on pushes to `main` only
-(plus manual dispatch). It uses the hosted `xcode-27` runner, selects Xcode 27.2, then runs
-`scripts/ci.sh`: build plus the `StrengthAppTests` unit-test target on a simulator. UI tests are
-excluded because they need a live server, a pairing code and seeded data.
+[`.github/workflows/ios-ci.yml`](.github/workflows/ios-ci.yml) runs on pushes to `main`, on
+pull requests targeting `main`, and on manual dispatch. It uses the hosted `xcode-27` runner,
+selects Xcode 27.2, then runs `scripts/ci.sh`: build plus the `StrengthAppTests` unit-test target
+on a simulator. UI tests are excluded because they need a live server, a pairing code and seeded
+data.
 
 - `scripts/ci.sh` is the single entry point. Change the script, not the workflow, and run it
   locally before pushing.
 - The script refuses to run if `LiveConfig.swift` is filled in.
-- The workflow deliberately has no `pull_request` trigger. Adding one is a decision: it is what
-  makes the check available to pull requests, and it is required before `main` could require it.
-  Today the check reports after a merge.
+- The workflow deliberately runs on pull requests targeting `main` as well as post-merge
+  pushes; this makes the check available before merge. Keep the workflow trigger and
+  documentation in sync.
 - `IPHONEOS_DEPLOYMENT_TARGET` is 27.0 because the hosted image ships iOS 27.0/27.1 simulator
-  runtimes. Raising it without a matching runtime breaks the test step.
+  runtimes. Raising it without a matching runtime breaks the test step. The local machine has
+  only an iOS 27.2 runtime; it builds with a 27.0 minimum and tests on 27.2.
 
 ## Toolchain on this machine
 

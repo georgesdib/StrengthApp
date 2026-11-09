@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @State private var confirmingForget = false
+    @State private var isSavingServerSettings = false
+    @State private var serverSaveMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -37,10 +39,31 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
-                    Button("Save server settings") {
-                        Task { _ = await model.saveServerSettings() }
+                    if isSavingServerSettings {
+                        HStack {
+                            ProgressView()
+                            Text("Saving…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if let serverSaveMessage {
+                        Label(serverSaveMessage, systemImage: "checkmark.circle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.green)
+                            .accessibilityIdentifier("server-settings-saved")
                     }
-                    .disabled(model.isSaving)
+                    Button("Save server settings") {
+                        Task {
+                            isSavingServerSettings = true
+                            serverSaveMessage = nil
+                            let saved = await model.saveServerSettings()
+                            isSavingServerSettings = false
+                            if saved {
+                                serverSaveMessage = "Saved"
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("save-server-settings")
+                    .disabled(model.isSaving || isSavingServerSettings)
                 } header: {
                     Text("Server")
                 } footer: {
@@ -121,6 +144,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onChange(of: model.homeServerText) { _, _ in serverSaveMessage = nil }
+            .onChange(of: model.awayServerText) { _, _ in serverSaveMessage = nil }
+            .onChange(of: model.preferHome) { _, _ in serverSaveMessage = nil }
             .confirmationDialog(
                 "Forget this device?",
                 isPresented: $confirmingForget,

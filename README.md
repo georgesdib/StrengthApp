@@ -68,14 +68,17 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
   can ask for server-decided, top-set/back-off or straight-set main-lift structure.
 - **Workout** — exercise-first list with an exercise detail screen, prepopulated planned sets,
   performed-set logging with load/reps/RIR, optional mean velocity, optional per-rep velocity with
-  comma/space-separated input, performed-set add/remove, outside-plan exercise logging through the
-  authenticated catalogue, a working-set rest timer using the plan’s `rest_s`, an explicit
-  prescription-item picker when the exercise appears more than once, and form ratings that show
-  the current value and label a later save as a correction, additive plan editing
-  (add/swap/remove and set count), finish with one sRPE picker (Not recorded or 1–10), optional
-  productivity (Not recorded or 1–5), abandon with confirmation.
+  comma/space-separated input, explicit Start set and set-completion timestamps, performed-set
+  add/remove, outside-plan exercise logging through the authenticated catalogue, a working-set
+  rest timer using the plan’s `rest_s` with prescribed/actual comparison, observable skip and
+  extension, an explicit prescription-item picker when the exercise appears more than once, and
+  form ratings that show the current value and label a later save as a correction, additive plan
+  editing (add/swap/remove and set count), finish with one sRPE picker (Not recorded or 1–10),
+  optional productivity (Not recorded or 1–5), abandon with confirmation.
 - **History** — paginated sessions with sets, tonnage, duration, main lifts and review state;
-  tap a session for a read-only outline, duration and set summary; load more, empty and error states.
+  tap a session for a read-only outline, duration and set summary plus a recorded execution
+  timeline, set/rest durations, prescribed-versus-actual rest and missing-data indicators; load
+  more, empty and error states.
 - **Progress** — the server dashboard: sRPE coverage, performance points, weekly volume, attendance
   and back-symptom summary over a 4/8/12/26/52-week window.
 - **Settings** — Home Server, Away Server, Prefer Home Server, active route, Exercise Library,
@@ -86,7 +89,8 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
   on entry, explicit refresh.
 
 HealthKit is read-only, off by default and limited to HRV, resting heart rate and bodyweight. There is no
-offline queue, per-rep VBT, review/rubric or Apple Intelligence/PCC UI. Plan edits are online-only.
+workout-HR import, review/rubric or Apple Intelligence/PCC UI. Execution telemetry is queued through
+the Phase 4 offline capture path; plan edits remain online-only.
 
 ## Storage and networking
 
@@ -114,7 +118,7 @@ offline queue, per-rep VBT, review/rubric or Apple Intelligence/PCC UI. Plan edi
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 97 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 102 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and

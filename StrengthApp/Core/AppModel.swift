@@ -669,6 +669,39 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func executionAnalytics(workoutId: String) async throws -> ExecutionAnalyticsResponse {
+        guard let session else { throw APIError.transport("Pair this device first.") }
+        do {
+            return try await client.executionAnalytics(
+                workoutId: workoutId, session: session
+            )
+        } catch {
+            handle(error)
+            throw error
+        }
+    }
+
+    /// Persist execution telemetry before the UI acknowledges the action. The existing Phase 4
+    /// outbox owns delivery, ordering and retry; this method never waits for the network.
+    func recordExecutionEvents(_ events: [ExecutionEvent]) {
+        guard !events.isEmpty, let activeWorkout else { return }
+        do {
+            offlineCapture = try offlineStore.appendExecutionEvents(
+                workoutId: activeWorkout.workoutId,
+                events: events,
+                activeWorkout: activeWorkout
+            )
+            offlineSyncError = nil
+            Task { await syncOfflineCapture() }
+        } catch {
+            offlineSyncError = message(for: error)
+        }
+    }
+
+    func recordExecutionEvent(_ event: ExecutionEvent) {
+        recordExecutionEvents([event])
+    }
+
     // MARK: Phase 2 mutations
 
     func saveReadiness(
@@ -1409,6 +1442,11 @@ final class AppModel: ObservableObject {
             mutationError = "This workout is already queued for finish."
             return false
         }
+        // Execution events queued before finish must reach the server first; the API accepts
+        // late events but the local replay path needs an active workout to flush them.
+        if hasPendingOfflineCapture {
+            await syncOfflineCapture()
+        }
         if offlineCaptureActive {
             return queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
         }
@@ -1454,6 +1492,9 @@ final class AppModel: ObservableObject {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
         guard permitsMutation(kind: .abandonWorkout, operationId: idempotencyKey) else {
             return false
+        }
+        if hasPendingOfflineCapture {
+            await syncOfflineCapture()
         }
         isSaving = true
         mutationFailureAmbiguous = false
@@ -1544,6 +1585,8 @@ final class AppModel: ObservableObject {
                 case .completeWorkout, .abandonWorkout:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = false
+                case .executionEvents:
+                    break
                 }
             } catch let api as APIError {
                 if api.code == "idempotency_conflict" {
@@ -1816,6 +1859,14 @@ final class AppModel: ObservableObject {
                         activeWorkout = updated
                         offlineCapture = try offlineStore.remove(operation.operationId)
                         offlineCapture = try offlineStore.setActiveWorkout(updated)
+                    case .executionEvents(let events):
+                        _ = try await client.submitExecutionEvents(
+                            workoutId: operation.workoutId,
+                            events: events,
+                            session: session,
+                            idempotencyKey: operation.operationId
+                        )
+                        offlineCapture = try offlineStore.remove(operation.operationId)
                     case .rateForm(let body):
                         let updated = try await client.rateForm(
                             workoutId: operation.workoutId,

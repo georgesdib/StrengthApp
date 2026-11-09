@@ -14,6 +14,9 @@ struct ExerciseWorkoutView: View {
     @State private var addError: String?
     @State private var pendingRemoval: WorkoutSet?
     @State private var removeError: String?
+    @State private var activeLocalSetID: String?
+    @State private var recordedExerciseStart = false
+    @State private var recordedExerciseCompletion = false
 
     private var workout: WorkoutDetail? { model.activeWorkout }
 
@@ -107,7 +110,7 @@ struct ExerciseWorkoutView: View {
                                     .font(.caption)
                                     .foregroundStyle(.green)
                             } else {
-                                Button("Done") {
+                                Button("Start set") {
                                     beginLog(planSetIndex: index)
                                 }
                                 .buttonStyle(.borderedProminent)
@@ -157,7 +160,7 @@ struct ExerciseWorkoutView: View {
                 Button {
                     beginLog(planSetIndex: nil)
                 } label: {
-                    Label("Add another set", systemImage: "plus")
+                    Label("Start another set", systemImage: "plus")
                 }
                 .accessibilityIdentifier("exercise-add-set")
                 .disabled(model.isSaving)
@@ -171,11 +174,25 @@ struct ExerciseWorkoutView: View {
         }
         .navigationTitle(Self.label(exerciseId))
         .safeAreaInset(edge: .bottom) {
-            RestTimerBar(timer: restTimer)
+            RestTimerBar(
+                timer: restTimer,
+                onFinish: { recordRestResult($0) },
+                onExtended: { recordRestExtension($0) }
+            )
         }
         .onAppear {
             if drafts.drafts[draftKey] == nil {
                 drafts.drafts[draftKey] = initialDraft
+            }
+            if !recordedExerciseStart {
+                recordedExerciseStart = true
+                recordExerciseEvent(.exerciseStarted)
+            }
+        }
+        .onDisappear {
+            if !recordedExerciseCompletion {
+                recordedExerciseCompletion = true
+                recordExerciseEvent(.exerciseCompleted)
             }
         }
         .sheet(isPresented: $showingLog) {
@@ -209,6 +226,23 @@ struct ExerciseWorkoutView: View {
 
     private func beginLog(planSetIndex: Int?) {
         addError = nil
+        if restTimer.startedAt != nil {
+            if let result = restTimer.finish(outcome: "interrupted") {
+                recordRestResult(result, reason: "interrupted by next set")
+            }
+        }
+        let localSetID = UUID().uuidString.lowercased()
+        activeLocalSetID = localSetID
+        let setIndex = planSetIndex ?? (performed.compactMap(\.setIndex).max() ?? 0) + 1
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .setStarted,
+            planItemIndex: planIdentity,
+            localSetId: localSetID,
+            payload: [
+                "set_index": .number(Double(setIndex)),
+                "exercise_id": .string(exerciseId),
+            ]
+        ))
         logSetIndex = planSetIndex
         if planSetIndex != nil {
             drafts.drafts[draftKey] = WorkoutDraftStore.Draft(
@@ -256,6 +290,8 @@ struct ExerciseWorkoutView: View {
             return
         }
         let setIndex = logSetIndex ?? (performed.compactMap(\.setIndex).max() ?? 0) + 1
+        let localSetID = activeLocalSetID
+        let completedAt = ExecutionEvent.nowISO()
         let request = AddSetRequest(
             exerciseId: exerciseId,
             loadKg: load,
@@ -269,8 +305,31 @@ struct ExerciseWorkoutView: View {
         let key = addOperation.use(request)
         if await model.addSet(request, idempotencyKey: key) {
             addOperation.acknowledged()
+            let savedSet = (model.activeWorkout?.sets ?? []).last {
+                $0.exerciseId == exerciseId
+                    && $0.setIndex == setIndex
+                    && $0.planItemIndex == planIdentity
+            }
+            recordExecutionEvent(ExecutionEvent(
+                eventType: .setCompleted,
+                occurredAt: completedAt,
+                planItemIndex: planIdentity,
+                setId: savedSet?.setId.flatMap { $0 > 0 ? $0 : nil },
+                localSetId: localSetID,
+                payload: [
+                    "set_index": .number(Double(setIndex)),
+                    "exercise_id": .string(exerciseId),
+                ]
+            ))
+            activeLocalSetID = nil
             if rir != 6 {
-                restTimer.start(seconds: item?.restS ?? 120)
+                let prescribed = item?.restS ?? 120
+                restTimer.start(seconds: prescribed)
+                recordExecutionEvent(ExecutionEvent(
+                    eventType: .restStarted,
+                    planItemIndex: planIdentity,
+                    payload: ["prescribed_rest_s": .number(Double(prescribed))]
+                ))
             }
             showingLog = false
         } else {
@@ -295,6 +354,47 @@ struct ExerciseWorkoutView: View {
         if !ok {
             removeError = model.mutationError
         }
+    }
+
+    private func recordExerciseEvent(_ type: ExecutionEventType) {
+        recordExecutionEvent(ExecutionEvent(
+            eventType: type,
+            planItemIndex: planIdentity,
+            payload: ["exercise_id": .string(exerciseId)]
+        ))
+    }
+
+    private func recordRestResult(_ result: RestTimerResult, reason: String? = nil) {
+        var payload: [String: JSONValue] = [
+            "prescribed_rest_s": .number(Double(result.prescribedSeconds)),
+            "actual_rest_s": .number(Double(result.actualSeconds)),
+            "outcome": .string(result.outcome),
+        ]
+        if let reason { payload["reason"] = .string(reason) }
+        recordExecutionEvent(ExecutionEvent(
+            eventType: result.outcome == "completed" ? .restCompleted : .restSkipped,
+            occurredAt: iso(result.endedAt),
+            planItemIndex: planIdentity,
+            payload: payload
+        ))
+    }
+
+    private func recordRestExtension(_ seconds: Int) {
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .restExtended,
+            planItemIndex: planIdentity,
+            payload: ["added_s": .number(Double(seconds))]
+        ))
+    }
+
+    private func recordExecutionEvent(_ event: ExecutionEvent) {
+        model.recordExecutionEvent(event)
+    }
+
+    private func iso(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     private func parseDouble(_ text: String) -> Double? {

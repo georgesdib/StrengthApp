@@ -395,7 +395,11 @@ struct ActiveWorkoutView: View {
             }
             .navigationTitle("Workout")
             .safeAreaInset(edge: .bottom) {
-                RestTimerBar(timer: restTimer)
+                RestTimerBar(
+                    timer: restTimer,
+                    onFinish: { recordRestResult($0) },
+                    onExtended: { recordRestExtension($0) }
+                )
             }
             .navigationDestination(item: $otherExerciseId) { id in
                 ExerciseWorkoutView(
@@ -681,6 +685,31 @@ struct ActiveWorkoutView: View {
             .filter { $0.exerciseId == exercise }
             .compactMap(\.setIndex)
         return (indexes.max() ?? 0) + 1
+    }
+
+    private func recordRestResult(_ result: RestTimerResult) {
+        model.recordExecutionEvent(ExecutionEvent(
+            eventType: result.outcome == "completed" ? .restCompleted : .restSkipped,
+            occurredAt: iso(result.endedAt),
+            payload: [
+                "prescribed_rest_s": .number(Double(result.prescribedSeconds)),
+                "actual_rest_s": .number(Double(result.actualSeconds)),
+                "outcome": .string(result.outcome),
+            ]
+        ))
+    }
+
+    private func recordRestExtension(_ seconds: Int) {
+        model.recordExecutionEvent(ExecutionEvent(
+            eventType: .restExtended,
+            payload: ["added_s": .number(Double(seconds))]
+        ))
+    }
+
+    private func iso(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     private func parseDouble(_ text: String) -> Double? {

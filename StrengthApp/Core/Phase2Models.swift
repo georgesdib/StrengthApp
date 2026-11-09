@@ -3,7 +3,7 @@ import Foundation
 // MARK: - JSON helpers
 
 /// A small JSON value used for server conflict details. The server only sends JSON here.
-enum JSONValue: Decodable, Equatable {
+enum JSONValue: Codable, Equatable {
     case string(String)
     case number(Double)
     case bool(Bool)
@@ -54,6 +54,18 @@ enum JSONValue: Decodable, Equatable {
     var objectValue: [String: JSONValue]? {
         if case .object(let value) = self { return value }
         return nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
     }
 }
 

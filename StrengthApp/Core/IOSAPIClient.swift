@@ -408,6 +408,34 @@ final class IOSAPIClient {
         )
     }
 
+    func submitExecutionEvents(
+        workoutId: String,
+        events: [ExecutionEvent],
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> ExecutionEventsResponse {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/execution-events",
+            body: ExecutionEventsRequest(events: events),
+            kind: .executionEvents,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey,
+            journaling: false
+        )
+    }
+
+    func executionAnalytics(
+        workoutId: String,
+        session: IOSSession
+    ) async throws -> ExecutionAnalyticsResponse {
+        try await get(
+            path: "api/ios/v1/workouts/\(workoutId)/execution",
+            query: [],
+            session: session
+        )
+    }
+
     func removeSet(
         workoutId: String,
         body: RemoveSetRequest,

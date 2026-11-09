@@ -7,12 +7,14 @@ import Foundation
 
 enum OfflineOperationKind: String, Codable, CaseIterable {
     case addSet
+    case executionEvents
     case rateForm
     case completeWorkout
 
     var label: String {
         switch self {
         case .addSet: return "Add set"
+        case .executionEvents: return "Execution events"
         case .rateForm: return "Form rating"
         case .completeWorkout: return "Finish workout"
         }
@@ -29,12 +31,14 @@ enum OfflineOperationState: String, Codable {
 
 enum OfflineOperationBody: Codable, Equatable {
     case addSet(AddSetRequest)
+    case executionEvents([ExecutionEvent])
     case rateForm(FormRatingRequest)
     case completeWorkout(CompleteWorkoutRequest)
 
     var kind: OfflineOperationKind {
         switch self {
         case .addSet: return .addSet
+        case .executionEvents: return .executionEvents
         case .rateForm: return .rateForm
         case .completeWorkout: return .completeWorkout
         }
@@ -44,7 +48,7 @@ enum OfflineOperationBody: Codable, Equatable {
 struct OfflineOperation: Codable, Equatable, Identifiable {
     let operationId: String
     let workoutId: String
-    let body: OfflineOperationBody
+    var body: OfflineOperationBody
     let createdAt: Date
     let localSetId: Int?
     let localFormId: Int?
@@ -222,6 +226,50 @@ final class OfflineCaptureStore {
             throw OfflineCaptureStoreError.full
         }
         capture.operations.append(operation)
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Appends execution events to the newest unsent batch for this workout, or creates a
+    /// new durable batch. Individual events keep their original occurrence timestamps and IDs.
+    func appendExecutionEvents(
+        workoutId: String,
+        events: [ExecutionEvent],
+        activeWorkout: WorkoutDetail?
+    ) throws -> OfflineCapture {
+        guard !events.isEmpty else { return try load() }
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        if let activeWorkout {
+            if let current = capture.activeWorkout?.workoutId,
+               current != activeWorkout.workoutId,
+               !capture.operations.isEmpty {
+                throw OfflineCaptureStoreError.invalidOperation(
+                    "Resolve queued work before switching to a different active workout."
+                )
+            }
+            capture.activeWorkout = activeWorkout
+        }
+        if let index = capture.operations.lastIndex(where: {
+            $0.workoutId == workoutId
+                && $0.state == .pending
+                && $0.attemptedAt == nil
+        }), case .executionEvents(var queued) = capture.operations[index].body,
+            queued.count + events.count <= 100 {
+            queued.append(contentsOf: events)
+            capture.operations[index].body = .executionEvents(queued)
+        } else {
+            guard capture.operations.count < Self.maxOperations else {
+                throw OfflineCaptureStoreError.full
+            }
+            capture.operations.append(OfflineOperation(
+                operationId: UUID().uuidString.lowercased(),
+                workoutId: workoutId,
+                body: .executionEvents(events),
+                createdAt: now()
+            ))
+        }
         try saveUnlocked(capture)
         return try loadUnlocked()
     }

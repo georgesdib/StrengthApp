@@ -74,9 +74,10 @@ final class RestNotificationManager {
                     return
                 }
                 self.authorizationRequested = true
-                self.center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-                    DispatchQueue.main.async { completion(granted) }
-                }
+                let granted = (try? await self.center.requestAuthorization(
+                    options: [.alert, .sound]
+                )) ?? false
+                completion(granted)
             }
         }
     }

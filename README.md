@@ -21,6 +21,11 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
 `docs/design/IOS-PHASE-2-CONTRACT.md` and `docs/design/IOS-PHASE-3A-CONTRACT.md` in the
 `strength-training-app` repository. The client is this separate repository.
 
+## User guide
+
+See [USER-GUIDE.md](USER-GUIDE.md) for pairing, Home/Away routing, workout controls, rest
+notifications, offline behaviour, History execution timeline, HealthKit and troubleshooting.
+
 ## Requirements
 
 - Xcode 27.2 and an iOS 27.0 or newer simulator or device.

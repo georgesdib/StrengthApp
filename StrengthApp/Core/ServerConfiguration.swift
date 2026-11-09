@@ -9,21 +9,24 @@ enum ServerRoute: String, Equatable {
 struct ServerConfiguration: Equatable {
     var homeURL: String
     var awayURL: String
-    var homeWiFi: String
+    var preferHome: Bool
 
-    /// Home wins only on an exact Wi-Fi name match. Otherwise Away is used when configured;
-    /// Home remains the fallback so a single-address setup keeps working offline.
+    /// Choose Home when it is preferred and either not probed or reachable. Otherwise use
+    /// Away; fall back to Home when Away is not configured. No SSID or location permission is
+    /// involved, so personal development teams can sign the app.
     static func select(
         homeURL: String,
         awayURL: String,
-        homeWiFi: String,
-        currentSSID: String?
+        preferHome: Bool,
+        homeReachable: Bool?
     ) -> (route: ServerRoute, url: String)? {
         let home = homeURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let away = awayURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let wifi = homeWiFi.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !home.isEmpty, !wifi.isEmpty, currentSSID == wifi {
-            return (.home, home)
+        if preferHome, !home.isEmpty {
+            if homeReachable != false {
+                return (.home, home)
+            }
+            return away.isEmpty ? (.home, home) : (.away, away)
         }
         if !away.isEmpty {
             return (.away, away)

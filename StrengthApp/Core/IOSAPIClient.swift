@@ -283,6 +283,23 @@ final class IOSAPIClient {
         try await get(path: "api/ios/v1/bootstrap", query: [], session: session)
     }
 
+    /// Short, read-only reachability check used for Home/Away selection. A 401 still proves
+    /// the server is reachable; transport errors and 5xx do not.
+    func isServerReachable(baseURL: URL, token: String) async -> Bool {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/ios/v1/bootstrap"))
+        request.httpMethod = "GET"
+        request.timeoutInterval = 2
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (_, response) = try await transport.data(for: request)
+            return (200...499).contains(response.statusCode)
+        } catch {
+            return false
+        }
+    }
+
     func today(session: IOSSession) async throws -> TodayResponse {
         try await get(path: "api/ios/v1/today", query: [], session: session)
     }

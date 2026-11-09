@@ -22,19 +22,14 @@ struct SettingsView: View {
                             .autocorrectionDisabled()
                             .multilineTextAlignment(.trailing)
                     }
-                    LabeledContent("Home Wi-Fi") {
-                        TextField("Home network name", text: $model.homeWiFiText)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .multilineTextAlignment(.trailing)
-                    }
+                    Toggle("Prefer Home Server", isOn: $model.preferHome)
                     LabeledContent("Active") {
                         Text(model.serverSelectionSummary)
                             .foregroundStyle(.secondary)
                     }
                     Text(model.pairedServerURL ?? model.serverURLText)
                         .textSelection(.enabled)
-                    Text(model.homeWiFiStatus)
+                    Text(model.homeServerStatus)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     if let error = model.serverSettingsError {
@@ -49,9 +44,10 @@ struct SettingsView: View {
                 } header: {
                     Text("Server")
                 } footer: {
-                    Text("Home Server is used when the phone is on the named Home Wi-Fi; "
-                         + "Away Server is used otherwise. Wi-Fi name detection uses Precise "
-                         + "Location. Both addresses should reach the same paired strength-coach server.")
+                    Text("When Prefer Home Server is on, the app checks whether Home Server "
+                         + "is reachable and otherwise uses Away Server. Turn it off to use Away "
+                         + "Server manually. Both addresses should reach the same paired "
+                         + "strength-coach server.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

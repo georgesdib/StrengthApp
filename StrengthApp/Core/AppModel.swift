@@ -91,9 +91,10 @@ final class AppModel: ObservableObject {
     @Published var serverURLText: String
     @Published var homeServerText: String
     @Published var awayServerText: String
-    @Published var homeWiFiText: String
+    @Published var preferHome: Bool
     @Published private(set) var activeServerRoute: ServerRoute?
-    @Published private(set) var detectedWiFiSSID: String?
+    @Published private(set) var homeServerReachable: Bool?
+    @Published private(set) var isCheckingHomeServer = false
     @Published private(set) var serverSettingsError: String?
     @Published var pairingCodeText: String = ""
     @Published var pairingLabelText: String
@@ -105,7 +106,6 @@ final class AppModel: ObservableObject {
     private let healthKit: any HealthKitReadinessProviding
     private let healthKitDefaults: UserDefaults
     private let offlineStore: OfflineCaptureStore
-    private let wifi: WiFiSSIDProviding
     private let pageSize = 50
     private var session: IOSSession?
     private var historyOffset = 0
@@ -129,8 +129,7 @@ final class AppModel: ObservableObject {
         store: PairedStore? = nil,
         healthKit: (any HealthKitReadinessProviding)? = nil,
         healthKitDefaults: UserDefaults = .standard,
-        offlineStore: OfflineCaptureStore? = nil,
-        wifi: WiFiSSIDProviding? = nil
+        offlineStore: OfflineCaptureStore? = nil
     ) {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
@@ -144,7 +143,6 @@ final class AppModel: ObservableObject {
         self.healthKit = readiness
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
-        self.wifi = wifi ?? WiFiSSIDProvider()
         self.healthKitEnabled = enabled
         self.healthKitState = enabled
             ? (readiness.isAvailable ? .enabled : .unavailable)
@@ -152,7 +150,7 @@ final class AppModel: ObservableObject {
         self.serverURLText = store.serverURL ?? AppConfig.defaultServerURL
         self.homeServerText = store.homeServerURL ?? ""
         self.awayServerText = store.awayServerURL ?? ""
-        self.homeWiFiText = store.homeWiFi ?? ""
+        self.preferHome = store.preferHome
         self.pairingLabelText = store.device?.label ?? "iPhone"
         self.offlineCapture = initialCapture
         self.activeWorkout = initialCapture?.activeWorkout
@@ -217,15 +215,11 @@ final class AppModel: ObservableObject {
         guard phase == .loading else { return }
         homeServerText = store.homeServerURL ?? ""
         awayServerText = store.awayServerURL ?? ""
-        homeWiFiText = store.homeWiFi ?? ""
+        preferHome = store.preferHome
         let configuration = store.serverConfiguration
-        let ssid = await detectedSSIDIfConfigured(configuration)
-        let selection = ServerConfiguration.select(
-            homeURL: configuration.homeURL,
-            awayURL: configuration.awayURL,
-            homeWiFi: configuration.homeWiFi,
-            currentSSID: ssid
-        )
+        let token = tokens.load()
+        let pairedDevice = store.device
+        let selection = await chooseServerSelection(configuration, token: token)
         let savedURL = selection?.url ?? store.serverURL
         guard let savedURL,
               let baseURL = try? IOSAPIClient.validatedBaseURL(savedURL) else {
@@ -234,7 +228,7 @@ final class AppModel: ObservableObject {
         }
         serverURLText = baseURL.absoluteString
         activeServerRoute = selection?.route ?? .home
-        guard let token = tokens.load(), let pairedDevice = store.device else {
+        guard let token, let pairedDevice else {
             phase = .pairing
             return
         }
@@ -257,14 +251,28 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func detectedSSIDIfConfigured(_ configuration: ServerConfiguration) async -> String? {
-        guard !configuration.homeWiFi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            detectedWiFiSSID = nil
-            return nil
+    private func chooseServerSelection(
+        _ configuration: ServerConfiguration,
+        token: String?
+    ) async -> (route: ServerRoute, url: String)? {
+        var homeReachable: Bool?
+        let home = configuration.homeURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let away = configuration.awayURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if configuration.preferHome, !home.isEmpty, !away.isEmpty, home != away,
+           let token, let homeURL = try? IOSAPIClient.validatedBaseURL(home) {
+            isCheckingHomeServer = true
+            homeReachable = await client.isServerReachable(
+                baseURL: homeURL, token: token
+            )
+            isCheckingHomeServer = false
         }
-        let ssid = await wifi.currentSSID()
-        detectedWiFiSSID = ssid
-        return ssid
+        homeServerReachable = homeReachable
+        return ServerConfiguration.select(
+            homeURL: configuration.homeURL,
+            awayURL: configuration.awayURL,
+            preferHome: configuration.preferHome,
+            homeReachable: homeReachable
+        )
     }
 
     // MARK: Pairing
@@ -315,12 +323,12 @@ final class AppModel: ObservableObject {
             }
             homeServerText = store.homeServerURL ?? ""
             awayServerText = store.awayServerURL ?? ""
-            homeWiFiText = store.homeWiFi ?? ""
+            preferHome = store.preferHome
             activeServerRoute = ServerConfiguration.select(
                 homeURL: store.homeServerURL ?? "",
                 awayURL: store.awayServerURL ?? "",
-                homeWiFi: store.homeWiFi ?? "",
-                currentSSID: detectedWiFiSSID
+                preferHome: store.preferHome,
+                homeReachable: nil
             )?.route ?? .home
             store.serverURL = baseURL.absoluteString
             store.device = paired
@@ -356,24 +364,27 @@ final class AppModel: ObservableObject {
         }
     }
 
-    var homeWiFiStatus: String {
-        let configured = (store.homeWiFi ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !configured.isEmpty else {
-            return "No Home Wi-Fi configured; Away Server is the fallback."
+    var homeServerStatus: String {
+        if !preferHome {
+            return "Prefer Home Server is off; Away Server is used when configured."
         }
-        guard let detectedWiFiSSID else {
-            return "Wi-Fi name unavailable. Allow Precise Location to detect Home Wi-Fi."
+        if isCheckingHomeServer {
+            return "Checking whether Home Server is reachable…"
         }
-        return detectedWiFiSSID == configured
-            ? "Connected to Home Wi-Fi: \(detectedWiFiSSID)"
-            : "Current Wi-Fi: \(detectedWiFiSSID)"
+        switch homeServerReachable {
+        case true:
+            return "Home Server is reachable."
+        case false:
+            return "Home Server is unreachable; Away Server is the fallback."
+        case nil:
+            return "Home Server is preferred; reachability is checked on launch, foreground and network changes."
+        }
     }
 
     func saveServerSettings() async -> Bool {
         serverSettingsError = nil
         var home = homeServerText.trimmingCharacters(in: .whitespacesAndNewlines)
         var away = awayServerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let wifiName = homeWiFiText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !home.isEmpty || !away.isEmpty else {
             serverSettingsError = "Enter at least a Home Server or an Away Server."
             return false
@@ -390,21 +401,21 @@ final class AppModel: ObservableObject {
                 return false
             }
         }
-        if !wifiName.isEmpty, home.isEmpty {
-            serverSettingsError = "Set a Home Server before naming a Home Wi-Fi."
-            return false
-        }
-        let ssid: String?
-        if wifiName.isEmpty {
-            detectedWiFiSSID = nil
-            ssid = nil
+        let configuration = ServerConfiguration(
+            homeURL: home, awayURL: away, preferHome: preferHome
+        )
+        let selected: (route: ServerRoute, url: String)?
+        if phase == .paired, let token = tokens.load() {
+            selected = await chooseServerSelection(configuration, token: token)
         } else {
-            ssid = await wifi.currentSSID()
-            detectedWiFiSSID = ssid
+            homeServerReachable = nil
+            isCheckingHomeServer = false
+            selected = ServerConfiguration.select(
+                homeURL: home, awayURL: away, preferHome: preferHome,
+                homeReachable: nil
+            )
         }
-        guard let selected = ServerConfiguration.select(
-            homeURL: home, awayURL: away, homeWiFi: wifiName, currentSSID: ssid
-        ) else {
+        guard let selected else {
             serverSettingsError = "Configure at least one valid server address."
             return false
         }
@@ -416,10 +427,9 @@ final class AppModel: ObservableObject {
         }
         store.homeServerURL = home
         store.awayServerURL = away
-        store.homeWiFi = wifiName
+        store.preferHome = preferHome
         homeServerText = home
         awayServerText = away
-        homeWiFiText = wifiName
         if phase == .pairing {
             serverURLText = selected.url
             activeServerRoute = selected.route
@@ -432,18 +442,13 @@ final class AppModel: ObservableObject {
     func recheckServerSelection(forceRefresh: Bool = false) async {
         guard phase == .paired else { return }
         let configuration = store.serverConfiguration
-        let ssid = await detectedSSIDIfConfigured(configuration)
-        guard let selected = ServerConfiguration.select(
-            homeURL: configuration.homeURL,
-            awayURL: configuration.awayURL,
-            homeWiFi: configuration.homeWiFi,
-            currentSSID: ssid
-        ), let baseURL = try? IOSAPIClient.validatedBaseURL(selected.url) else {
+        guard let token = tokens.load() else { return }
+        guard let selected = await chooseServerSelection(configuration, token: token),
+              let baseURL = try? IOSAPIClient.validatedBaseURL(selected.url) else {
             serverSettingsError = "Configure at least one valid server address."
             return
         }
         guard let currentSession = session,
-              let token = tokens.load(),
               let pairedDevice = store.device else { return }
         let changed = currentSession.baseURL.absoluteString != baseURL.absoluteString
         if changed, hasPendingOfflineCapture || !pendingMutations.isEmpty {

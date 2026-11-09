@@ -26,8 +26,9 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
 - Xcode 27.2 and an iOS 27.0 or newer simulator or device.
 - The server repository running `strength-coach web` on the same trusted home network.
 - For a device build: the owner's personal team (7-day signing) and the owner's iPhone.
-- The Access Wi-Fi Information entitlement and Precise Location permission for Home Wi-Fi
-  detection. Both server addresses must reach the same paired server.
+- No Wi-Fi/location permission is required. Home/Away routing uses a short reachability probe
+  of Home Server, with Prefer Home Server as the manual override; both addresses should reach
+  the same paired server.
 
 ## Run against the local server
 
@@ -77,7 +78,7 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
   tap a session for a read-only outline, duration and set summary; load more, empty and error states.
 - **Progress** — the server dashboard: sRPE coverage, performance points, weekly volume, attendance
   and back-symptom summary over a 4/8/12/26/52-week window.
-- **Settings** — Home Server, Away Server and Home Wi-Fi name, active route, Exercise Library,
+- **Settings** — Home Server, Away Server, Prefer Home Server, active route, Exercise Library,
   device id/label, app version, opt-in HealthKit readiness, Forget this device (local token only),
   re-pair instructions.
 - **Exercise Library** — searchable catalogue, read-only configuration, server-computed e1RM and
@@ -113,7 +114,7 @@ offline queue, per-rep VBT, review/rubric or Apple Intelligence/PCC UI. Plan edi
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 96 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 97 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and

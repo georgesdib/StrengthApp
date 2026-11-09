@@ -27,7 +27,7 @@ final class PairedStore {
     private let serverURLKey = "ios.serverURL"
     private let homeServerURLKey = "ios.server.homeURL"
     private let awayServerURLKey = "ios.server.awayURL"
-    private let homeWiFiKey = "ios.server.homeWiFi"
+    private let preferHomeKey = "ios.server.preferHome"
     private let deviceKey = "ios.paired.device"
 
     init(defaults: UserDefaults = .standard) {
@@ -51,9 +51,14 @@ final class PairedStore {
         set { defaults.setValue(newValue, forKey: awayServerURLKey) }
     }
 
-    var homeWiFi: String? {
-        get { defaults.string(forKey: homeWiFiKey) }
-        set { defaults.setValue(newValue, forKey: homeWiFiKey) }
+    /// Home is preferred by default. Turning this off is the manual Away override; when it is
+    /// on, the app selects Home only if that address answers a short reachability probe.
+    var preferHome: Bool {
+        get {
+            guard defaults.object(forKey: preferHomeKey) != nil else { return true }
+            return defaults.bool(forKey: preferHomeKey)
+        }
+        set { defaults.setValue(newValue, forKey: preferHomeKey) }
     }
 
     /// Existing installations used one server URL. Treat it as Home; Away stays empty so the
@@ -69,7 +74,7 @@ final class PairedStore {
         ServerConfiguration(
             homeURL: homeServerURL ?? "",
             awayURL: awayServerURL ?? "",
-            homeWiFi: homeWiFi ?? ""
+            preferHome: preferHome
         )
     }
 

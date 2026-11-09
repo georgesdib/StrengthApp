@@ -71,7 +71,8 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
   comma/space-separated input, explicit Start set and set-completion timestamps, performed-set
   add/remove, outside-plan exercise logging through the authenticated catalogue, a working-set
   rest timer using the plan’s `rest_s` with prescribed/actual comparison, observable skip and
-  extension, an explicit prescription-item picker when the exercise appears more than once, and
+  extension, an optional local notification at rest end (with in-app haptic/sound while active;
+  tapping the notification opens the app), an explicit prescription-item picker when the exercise appears more than once, and
   form ratings that show the current value and label a later save as a correction, additive plan
   editing (add/swap/remove and set count), finish with one sRPE picker (Not recorded or 1–10),
   optional productivity (Not recorded or 1–5), abandon with confirmation.

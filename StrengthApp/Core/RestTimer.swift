@@ -34,6 +34,7 @@ final class RestTimerModel: ObservableObject {
         endDate = now.addingTimeInterval(TimeInterval(seconds))
         remainingSeconds = seconds
         isComplete = false
+        RestNotificationManager.shared.scheduleRestEnd(after: seconds)
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -49,6 +50,7 @@ final class RestTimerModel: ObservableObject {
         remainingSeconds = max(0, remainingSeconds + seconds)
         addedSeconds += seconds
         isComplete = false
+        RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
     }
 
     /// Ends the current rest and returns the observed interval. nil means no rest was running.
@@ -67,6 +69,7 @@ final class RestTimerModel: ObservableObject {
     }
 
     func dismiss() {
+        RestNotificationManager.shared.cancel()
         ticker?.cancel()
         ticker = nil
         endDate = nil
@@ -85,6 +88,7 @@ final class RestTimerModel: ObservableObject {
             isComplete = true
             ticker?.cancel()
             ticker = nil
+            RestNotificationManager.shared.completeInApp()
         } else {
             remainingSeconds = remaining
         }

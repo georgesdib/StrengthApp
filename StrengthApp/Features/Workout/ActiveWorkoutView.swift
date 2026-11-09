@@ -524,7 +524,45 @@ struct ActiveWorkoutView: View {
             repVelocities: repVelocities
         )
         let key = addOperation.use(request)
+        let localSetID = UUID().uuidString.lowercased()
+        let completedAt = ExecutionEvent.nowISO()
+        model.recordExecutionEvent(ExecutionEvent(
+            eventType: .setStarted,
+            planItemIndex: planIndex,
+            localSetId: localSetID,
+            payload: [
+                "set_index": .number(Double(index)),
+                "exercise_id": .string(exerciseId),
+            ]
+        ))
         if await model.addSet(request, idempotencyKey: key) {
+            let savedSet = (model.activeWorkout?.sets ?? []).last {
+                $0.exerciseId == exerciseId
+                    && $0.setIndex == index
+                    && $0.planItemIndex == planIndex
+            }
+            model.recordExecutionEvent(ExecutionEvent(
+                eventType: .setCompleted,
+                occurredAt: completedAt,
+                planItemIndex: planIndex,
+                setId: savedSet?.setId.flatMap { $0 > 0 ? $0 : nil },
+                localSetId: localSetID,
+                payload: [
+                    "set_index": .number(Double(index)),
+                    "exercise_id": .string(exerciseId),
+                ]
+            ))
+            let plannedRest = workout.plan?.items.first {
+                ($0.orderIndex ?? -1) == planIndex
+            }?.restS ?? 120
+            if rir != 6 {
+                restTimer.start(seconds: plannedRest)
+                model.recordExecutionEvent(ExecutionEvent(
+                    eventType: .restStarted,
+                    planItemIndex: planIndex,
+                    payload: ["prescribed_rest_s": .number(Double(plannedRest))]
+                ))
+            }
             loadText = ""
             repsText = ""
             rirText = ""

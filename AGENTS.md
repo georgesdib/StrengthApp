@@ -4,6 +4,16 @@ Rules for any agent (or human) editing this repository. The project overview and
 recipe are in [`README.md`](README.md); the server contracts live in the sibling
 `strength-training-app` repository.
 
+## Working branch
+
+All development happens on the `development` branch unless the owner explicitly says otherwise.
+`main` is integration-only: it receives pull requests from `development` that pass CI, and
+nothing is committed to it directly. Start work by switching to `development` and pulling it.
+
+Merge `development` into `main` with a merge commit, not a squash: squashing a long-lived branch
+makes the next pull request re-offer the same commits. Squash is fine for short-lived feature
+branches.
+
 ## Standing rule — write down every build/test quirk
 
 Owner instruction (2026-11-08): when building, running tests, or testing the app, anything that

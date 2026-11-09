@@ -1,5 +1,7 @@
 # StrengthApp — iOS client
 
+[![iOS CI](https://github.com/georgesdib/StrengthApp/actions/workflows/ios-ci.yml/badge.svg)](https://github.com/georgesdib/StrengthApp/actions/workflows/ios-ci.yml)
+
 **Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07; Phase 3A
 closed 2026-11-08** — Phase 3A is unit/simulator/live-server and physical-iPhone verified. Phase 4
 offline capture and replay are closed 2026-11-08 (snapshot/outbox, add set/form/finish, ordered

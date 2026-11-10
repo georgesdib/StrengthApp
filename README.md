@@ -19,7 +19,10 @@ loads, sets and training decisions, and the phone never supplies plan content.
 
 The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
 `docs/design/IOS-PHASE-2-CONTRACT.md` and `docs/design/IOS-PHASE-3A-CONTRACT.md` in the
-`strength-training-app` repository. The client is this separate repository.
+`strength-training-app` repository. The Phase 6 watchOS companion contract is
+[`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md)
+in that repository; 6.0 (the S1–S4 shared core) is complete, 6.1 and later are not started. The
+client is this separate repository.
 
 ## Agent documentation
 

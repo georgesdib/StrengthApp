@@ -13,6 +13,10 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
 - [ ] The iPhone is paired with the server (Today loads) and **Settings → Home Server** is the
       reachable LAN address. Do not use the Away address.
 - [ ] Note the iPhone's device id in **Settings → This device**.
+- [ ] Optionally set Prefer Home Server off so the active iPhone route is Away while Home remains
+      configured. Watch Pair/Replace/Revoke must still target Home; it must never mint against Away.
+- [ ] With Home unreachable and Away active, Pair/Replace must show a Home error and create no
+      watch device on Away.
 
 ## Pair and handshake
 
@@ -32,8 +36,16 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
 
 - [ ] Change the Home Server to another address that reaches the same disposable server, then tap
       **Save server settings**.
-- [ ] Foreground both apps. The watch updates its displayed host and remains Ready; it does not
-      receive a new watch token and the server epoch does not change.
+- [ ] Foreground both apps. The watch updates its displayed host; the phone does not report
+      **Paired** until the watch acknowledges that Home URL and the current desired
+      `configVersion`.
+- [ ] Make the watch acknowledge an older Home URL (for example by changing Home while the watch
+      is unreachable). The phone must re-baseline its configuration version, send the new URL, and
+      become **Paired** only after the matching acknowledgement. It must not report Ready while
+      the old URL remains.
+- [ ] Simulate a phone reinstall/configVersion reset while watch metadata survives. A watch
+      acknowledgement ahead of the phone's version must cause a bounded re-baseline and converge,
+      not a permanent version deadlock.
 - [ ] Restore the original Home Server and save again.
 
 ## Revoke and deliberate suppression
@@ -72,7 +84,11 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
       re-acks the old credential; the phone mints a fresh epoch (at most twice in one foreground),
       sends the token, and the new token replaces the old one.
 - [ ] A tokenless probe must never create a new Ready state or grant API access; only a
-      token-bearing higher epoch can replace a valid old token or a revoked credential.
+      token-bearing new lineage can replace a valid old token or a revoked credential.
+- [ ] Move the watch to a second iPhone (or re-pair with a new phone device). A token-bearing
+      credential for the new device identity must establish the new lineage even if its epoch is
+      numerically lower. A same-device stale token at the old epoch must remain rejected, and a
+      cross-device revocation must not clear the current link.
 - [ ] Turn off Wi-Fi on the watch (or move it out of range) and change the Home Server. The watch
       keeps its old Home URL and does not switch to Away; it updates when it can reach the phone and
       the new Home server.

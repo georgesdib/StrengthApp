@@ -159,19 +159,22 @@ public struct WatchAcknowledgement: Equatable, Sendable {
     public let configVersion: Int
     public let deviceID: String
     public let status: WatchCredentialStatus
+    public let homeBaseURL: String?
 
     public init(
         schema: Int = WatchCredentialSchema.version,
         ackEpoch: Int,
         configVersion: Int,
         deviceID: String,
-        status: WatchCredentialStatus
+        status: WatchCredentialStatus,
+        homeBaseURL: String? = nil
     ) {
         self.schema = schema
         self.ackEpoch = ackEpoch
         self.configVersion = configVersion
         self.deviceID = deviceID
         self.status = status
+        self.homeBaseURL = homeBaseURL
     }
 
     public init(dictionary: [String: Any]) throws {
@@ -195,23 +198,32 @@ public struct WatchAcknowledgement: Equatable, Sendable {
               let status = WatchCredentialStatus(rawValue: statusRaw) else {
             throw WatchCredentialError.invalidStatus
         }
+        let homeBaseURL = dictionary["homeBaseURL"] as? String
+        if let homeBaseURL, !homeBaseURL.isEmpty {
+            _ = try IOSAPIClient.validatedBaseURL(homeBaseURL)
+        }
         self.init(
             schema: schema,
             ackEpoch: ackEpoch,
             configVersion: configVersion,
             deviceID: deviceID,
-            status: status
+            status: status,
+            homeBaseURL: homeBaseURL?.isEmpty == false ? homeBaseURL : nil
         )
     }
 
     public var dictionary: [String: Any] {
-        [
+        var value: [String: Any] = [
             "schema": schema,
             "ackEpoch": ackEpoch,
             "configVersion": configVersion,
             "deviceID": deviceID,
             "status": status.rawValue,
         ]
+        if let homeBaseURL {
+            value["homeBaseURL"] = homeBaseURL
+        }
+        return value
     }
 
     private static func int(_ value: Any?) -> Int? {
@@ -266,6 +278,11 @@ public enum WatchCredentialPolicy {
     /// metadata at all), so a reinstalled or stale watch can report the phone's current identity
     /// as missing and trigger a fresh mint. It never replaces a still-valid token or a revoked
     /// credential, and it never grants authenticated access.
+    ///
+    /// Epochs are only comparable inside one device identity's lineage. A token-bearing
+    /// credential for a different device starts a new lineage even when its numeric epoch is
+    /// lower; that is how a watch moves to a different iPhone. A tokenless probe can never start
+    /// a lineage, clear revocation, or replace a valid token.
     public static func decision(
         for context: WatchCredentialContext,
         stored: WatchStoredCredential?,
@@ -282,8 +299,21 @@ public enum WatchCredentialPolicy {
         guard let stored else {
             return context.token == nil ? .adoptMissingProbe : .applyToken
         }
+        if context.deviceID != stored.deviceID {
+            // A new device identity is a new credential lineage. Its epoch is issued by a
+            // different parent phone and is not comparable with the stored lineage. A real
+            // token always establishes the new lineage; a tokenless probe may only replace
+            // metadata with no credential, and never clears revoked state.
+            if context.token != nil {
+                return .applyToken
+            }
+            if stored.revoked {
+                return .ignoreAndReack
+            }
+            return hasToken ? .ignoreAndReack : .adoptMissingProbe
+        }
         if stored.revoked {
-            // Only a real new-epoch token can replace a revoked credential.
+            // Same-device resurrection requires a new epoch and a real token.
             if context.epoch > stored.epoch, context.token != nil {
                 return .applyToken
             }

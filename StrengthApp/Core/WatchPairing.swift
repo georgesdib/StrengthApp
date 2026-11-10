@@ -99,6 +99,7 @@ final class WatchPairingCoordinator: ObservableObject {
         case unavailable(String)
         case notPaired
         case waiting
+        case configuring
         case paired
         case revoked
     }
@@ -118,8 +119,10 @@ final class WatchPairingCoordinator: ObservableObject {
     private var homeBaseURL: String?
     private var pendingToken: String?
     private var retryTask: Task<Void, Never>?
+    private var mintTask: Task<Void, Never>?
     private var retryAttempts = 0
     private var autoMintAttempts = 0
+    private var configRebaselineAttempts = 0
     private var isActive = false
 
     init(
@@ -151,6 +154,7 @@ final class WatchPairingCoordinator: ObservableObject {
         case .unavailable(let message): return message
         case .notPaired: return "Not paired"
         case .waiting: return "Waiting for Apple Watch"
+        case .configuring: return "Updating Apple Watch…"
         case .paired: return "Paired"
         case .revoked: return "Revoked"
         }
@@ -165,12 +169,16 @@ final class WatchPairingCoordinator: ObservableObject {
         self.session = session
         self.homeBaseURL = homeBaseURL
         self.isActive = true
+        retryAttempts = 0
+        configRebaselineAttempts = 0
         connectivity?.delegate = self
         refreshAvailability()
         updatePhase()
         processReceivedContext()
         if let connectivity, connectivity.activationState != .activated {
             connectivity.activate()
+        } else if link?.revoked == true {
+            Task { await sendRevokedContext() }
         } else if link == nil {
             Task { await sendIfNeeded() }
         } else {
@@ -182,6 +190,7 @@ final class WatchPairingCoordinator: ObservableObject {
     func updateSession(_ session: IOSSession, homeBaseURL: String?) {
         self.session = session
         self.homeBaseURL = homeBaseURL
+        updatePhase()
         if let connectivity, connectivity.activationState != .activated {
             connectivity.activate()
         }
@@ -190,6 +199,8 @@ final class WatchPairingCoordinator: ObservableObject {
     func stop() {
         isActive = false
         cancelRetry()
+        mintTask?.cancel()
+        mintTask = nil
         pendingToken = nil
         session = nil
         connectivity?.delegate = nil
@@ -200,6 +211,7 @@ final class WatchPairingCoordinator: ObservableObject {
         link = nil
         retryAttempts = 0
         autoMintAttempts = 0
+        configRebaselineAttempts = 0
         errorMessage = nil
         updatePhase()
     }
@@ -216,12 +228,14 @@ final class WatchPairingCoordinator: ObservableObject {
             updatePhase()
             return
         }
-        guard let session else {
-            errorMessage = "Pair this iPhone with the server first."
+        guard let session = homeSession else {
+            errorMessage = "Pair this iPhone with the server and set a valid Home Server first."
             updatePhase()
             return
         }
         isMinting = true
+        autoMintAttempts = 0
+        configRebaselineAttempts = 0
         errorMessage = nil
         defer {
             isMinting = false
@@ -236,7 +250,12 @@ final class WatchPairingCoordinator: ObservableObject {
     }
 
     func revoke() async {
-        guard !isMinting, !isRevoking, let session, let current = link else { return }
+        guard !isMinting, !isRevoking, let current = link else { return }
+        guard let session = homeSession else {
+            errorMessage = "Set a valid Home Server before revoking the watch."
+            updatePhase()
+            return
+        }
         isRevoking = true
         errorMessage = nil
         defer {
@@ -255,6 +274,9 @@ final class WatchPairingCoordinator: ObservableObject {
 
     func configurationChanged(homeBaseURL: String?) async {
         self.homeBaseURL = homeBaseURL
+        retryAttempts = 0
+        configRebaselineAttempts = 0
+        updatePhase()
         guard isActive, let link, !link.revoked else { return }
         if let connectivity, connectivity.activationState == .activated {
             await sendCredential()
@@ -267,6 +289,7 @@ final class WatchPairingCoordinator: ObservableObject {
         isActive = true
         retryAttempts = 0
         autoMintAttempts = 0
+        configRebaselineAttempts = 0
         refreshAvailability()
         if let connectivity, connectivity.activationState != .activated {
             connectivity.activate()
@@ -319,7 +342,7 @@ final class WatchPairingCoordinator: ObservableObject {
     }
 
     private func reconcileWithServer() async {
-        guard let session, let current = link, !current.revoked else { return }
+        guard let session = homeSession, let current = link, !current.revoked else { return }
         do {
             let response = try await client.devices(session: session)
             let active = response.devices.first {
@@ -329,7 +352,7 @@ final class WatchPairingCoordinator: ObservableObject {
             }
             guard let active else {
                 if isWatchPaired, autoMintAttempts < 2 {
-                    await mintForExistingLink()
+                    requestFreshMint()
                 } else {
                     errorMessage = "The watch is not active on the server. Tap Pair Apple Watch to rotate it."
                 }
@@ -343,6 +366,7 @@ final class WatchPairingCoordinator: ObservableObject {
                 next.epoch = epoch
                 next.ackEpoch = 0
                 next.configVersion = 0
+                next.homeBaseURL = nil
                 next.revoked = false
                 link = next
                 store.watchLink = next
@@ -355,9 +379,10 @@ final class WatchPairingCoordinator: ObservableObject {
         }
     }
 
-    private func mintForExistingLink() async {
-        guard let session, !isMinting else { return }
-        guard validHomeBaseURL() != nil else {
+    private func mintForExistingLink(allowPendingToken: Bool = false) async {
+        guard !isMinting else { return }
+        guard allowPendingToken || pendingToken == nil else { return }
+        guard let session = homeSession else {
             errorMessage = "Set a valid Home Server before pairing the watch."
             return
         }
@@ -370,6 +395,7 @@ final class WatchPairingCoordinator: ObservableObject {
         }
         do {
             let minted = try await client.mintWatch(session: session)
+            guard isActive else { return }
             await adopt(minted: minted, manual: false)
         } catch {
             errorMessage = message(for: error)
@@ -442,56 +468,56 @@ final class WatchPairingCoordinator: ObservableObject {
               let current = link else {
             return
         }
-        let isCurrent = ack.deviceID == current.deviceID
-            && ack.ackEpoch == current.epoch
+        if ack.deviceID != current.deviceID {
+            handleDifferentDevice(ack, current: current)
+        } else {
+            handleSameDevice(ack, current: current)
+        }
+    }
+
+    private func handleSameDevice(
+        _ ack: WatchAcknowledgement,
+        current: PairedWatch
+    ) {
         switch ack.status {
         case .ready:
-            if isCurrent {
-                var next = current
-                next.ackEpoch = ack.ackEpoch
-                next.configVersion = ack.configVersion
-                next.lastAckAt = Self.timestamp()
-                next.revoked = false
-                link = next
-                store.watchLink = next
-                pendingToken = nil
-                retryAttempts = 0
-                autoMintAttempts = 0
-                cancelRetry()
-                errorMessage = nil
-                updatePhase()
-                if next.configVersion < store.watchConfigVersion {
-                    Task { await sendCredential() }
-                }
+            if ack.ackEpoch < current.epoch {
+                // Same lineage, but the watch's acknowledgement is older than the current
+                // credential. If we are already paired, this is a delayed/duplicate ack and
+                // must not trigger another mint. Only an unacknowledged current credential
+                // needs the deliberate replacement.
+                guard current.ackEpoch < current.epoch, pendingToken == nil else { return }
+                requestFreshMint()
                 return
             }
-            // The watch holds a different or older credential. A tokenless probe cannot
-            // replace a valid token, so request one fresh epoch and send the token.
-            guard !current.revoked,
-                  pendingToken == nil,
-                  ack.ackEpoch <= current.epoch else {
-                return
+            var next = current
+            if ack.ackEpoch > current.epoch {
+                // Same watch identity, newer server lineage state. Accept the watch's
+                // persisted epoch; the token remains on the watch.
+                next.epoch = ack.ackEpoch
             }
-            guard autoMintAttempts < 2 else {
-                errorMessage = "Could not replace the watch credential. Tap Pair Apple Watch again."
-                return
-            }
-            Task { await mintForExistingLink() }
+            next.ackEpoch = ack.ackEpoch
+            next.configVersion = ack.configVersion
+            next.homeBaseURL = ack.homeBaseURL
+            next.lastAckAt = Self.timestamp()
+            next.revoked = false
+            link = next
+            store.watchLink = next
+            pendingToken = nil
+            retryAttempts = 0
+            cancelRetry()
+            errorMessage = nil
+            reconcileConfiguration(ack)
         case .missing:
             guard !current.revoked else { return }
-            let canRecover = isCurrent
-                || (pendingToken == nil && ack.ackEpoch <= current.epoch)
-            guard canRecover else { return }
-            if autoMintAttempts < 2 {
-                Task { await mintForExistingLink() }
-            } else {
-                errorMessage = "Could not hand credentials to Apple Watch. Tap Pair Apple Watch again."
-            }
-        case .revoked:
-            guard ack.deviceID == current.deviceID,
-                  ack.ackEpoch >= current.epoch else {
+            if ack.ackEpoch < current.epoch {
+                guard current.ackEpoch < current.epoch, pendingToken == nil else { return }
+                requestFreshMint()
                 return
             }
+            requestFreshMint(allowPendingToken: true)
+        case .revoked:
+            guard ack.ackEpoch >= current.epoch else { return }
             var next = current
             next.epoch = max(current.epoch, ack.ackEpoch)
             next.revoked = true
@@ -502,6 +528,95 @@ final class WatchPairingCoordinator: ObservableObject {
             cancelRetry()
             updatePhase()
         }
+    }
+
+    private func handleDifferentDevice(
+        _ ack: WatchAcknowledgement,
+        current: PairedWatch
+    ) {
+        switch ack.status {
+        case .ready, .missing:
+            // Epochs from a different device lineage are not comparable. A tokenless probe
+            // cannot replace a valid credential; mint one fresh epoch for this phone and
+            // send a token-bearing context. Repeated stale acknowledgements are ignored while
+            // that handoff is in flight or after the bounded automatic attempts are spent.
+            guard !current.revoked,
+                  pendingToken == nil,
+                  !isMinting else {
+                return
+            }
+            requestFreshMint()
+        case .revoked:
+            // A revocation for an unrelated watch must never change this phone's link.
+            return
+        }
+    }
+
+    private func requestFreshMint(allowPendingToken: Bool = false) {
+        guard mintTask == nil, autoMintAttempts < 2 else {
+            if mintTask == nil {
+                errorMessage = "Could not recover the Apple Watch credential. Tap Pair Apple Watch again."
+                updatePhase()
+            }
+            return
+        }
+        mintTask = Task { [weak self] in
+            await self?.mintForExistingLink(allowPendingToken: allowPendingToken)
+            self?.mintTask = nil
+        }
+    }
+
+    private func reconcileConfiguration(_ ack: WatchAcknowledgement) {
+        let desiredVersion = store.watchConfigVersion
+        let desiredURL = validHomeBaseURL()?.absoluteString
+        let urlMatches: Bool
+        if let acknowledgedURL = ack.homeBaseURL, let desiredURL {
+            urlMatches = acknowledgedURL == desiredURL
+        } else {
+            // Older watch builds did not include the URL; configVersion equality remains the
+            // compatibility fallback. The next acknowledgement after this build includes it.
+            urlMatches = true
+        }
+
+        if ack.configVersion > desiredVersion {
+            // The watch is ahead (for example after a phone reinstall). Raise the phone's
+            // desired version above it so future Home changes are not ignored as stale.
+            guard configRebaselineAttempts < 2 else {
+                errorMessage = "Could not reconcile the Apple Watch configuration. Tap Pair Apple Watch again."
+                updatePhase()
+                return
+            }
+            configRebaselineAttempts += 1
+            store.watchConfigVersion = ack.configVersion + 1
+            updatePhase()
+            Task { await sendCredential() }
+            return
+        }
+        if ack.configVersion < desiredVersion {
+            guard configRebaselineAttempts < 2 else {
+                errorMessage = "Could not reconcile the Apple Watch configuration. Tap Pair Apple Watch again."
+                updatePhase()
+                return
+            }
+            configRebaselineAttempts += 1
+            updatePhase()
+            Task { await sendCredential() }
+            return
+        }
+        guard urlMatches else {
+            guard configRebaselineAttempts < 2 else {
+                errorMessage = "Could not reconcile the Apple Watch configuration. Tap Pair Apple Watch again."
+                updatePhase()
+                return
+            }
+            configRebaselineAttempts += 1
+            store.bumpWatchConfigVersion()
+            updatePhase()
+            Task { await sendCredential() }
+            return
+        }
+        configRebaselineAttempts = 0
+        updatePhase()
     }
 
     private func scheduleRetry() {
@@ -541,11 +656,31 @@ final class WatchPairingCoordinator: ObservableObject {
         }
         if link.revoked {
             phase = .revoked
-        } else if link.ackEpoch >= link.epoch {
-            phase = .paired
-        } else {
-            phase = .waiting
+            return
         }
+        guard link.ackEpoch == link.epoch else {
+            phase = .waiting
+            return
+        }
+        guard let desiredURL = validHomeBaseURL()?.absoluteString else {
+            phase = .unavailable("Set a valid Home Server before pairing the watch.")
+            return
+        }
+        let homeMatches = link.homeBaseURL == nil || link.homeBaseURL == desiredURL
+        if link.configVersion != store.watchConfigVersion || !homeMatches {
+            phase = .configuring
+        } else {
+            phase = .paired
+        }
+    }
+
+    private var homeSession: IOSSession? {
+        guard let session, let home = validHomeBaseURL() else { return nil }
+        return IOSSession(
+            baseURL: home,
+            token: session.token,
+            deviceID: session.deviceID
+        )
     }
 
     private func validHomeBaseURL() -> URL? {
@@ -555,6 +690,14 @@ final class WatchPairingCoordinator: ObservableObject {
 
     private func message(for error: Error) -> String {
         if let api = error as? APIError {
+            switch api {
+            case .transport:
+                return "Could not reach the Home Server. Apple Watch operations use Home only; Away is never used."
+            case .unauthorized, .forbidden:
+                return "The Home Server rejected this iPhone's credential. Pair the iPhone again."
+            default:
+                break
+            }
             if api.code == "watch_disabled" {
                 return "Watch pairing is disabled on the server."
             }

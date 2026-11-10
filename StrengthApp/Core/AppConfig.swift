@@ -32,6 +32,7 @@ struct PairedWatch: Codable, Equatable {
     var configVersion: Int
     var revoked: Bool
     var lastAckAt: String?
+    var homeBaseURL: String? = nil
 }
 
 /// Non-secret paired-device metadata. The token lives only in the Keychain.

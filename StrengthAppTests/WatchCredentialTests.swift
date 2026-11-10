@@ -48,7 +48,11 @@ final class WatchCredentialTests: XCTestCase {
 
     func testAcknowledgementRoundTrips() throws {
         let ack = WatchAcknowledgement(
-            ackEpoch: 3, configVersion: 4, deviceID: "watch-1", status: .ready
+            ackEpoch: 3,
+            configVersion: 4,
+            deviceID: "watch-1",
+            status: .ready,
+            homeBaseURL: "http://home.local:8000"
         )
         XCTAssertEqual(try WatchAcknowledgement(dictionary: ack.dictionary), ack)
     }
@@ -92,7 +96,7 @@ final class WatchCredentialTests: XCTestCase {
                 for: context(epoch: 2, configVersion: 4, token: "new", deviceID: "watch-2"),
                 stored: stored, hasToken: true
             ),
-            .ignoreAndReack
+            .applyToken
         )
         XCTAssertEqual(
             WatchCredentialPolicy.decision(
@@ -238,6 +242,74 @@ final class WatchCredentialTests: XCTestCase {
         XCTAssertEqual(store.stored, revokedState)
         XCTAssertFalse(store.hasToken)
         XCTAssertEqual(store.acknowledgement()?.status, .revoked)
+    }
+
+    func testNewDeviceLineageMayStartBelowRevokedEpoch() {
+        let revoked = stored(deviceID: "watch-a", epoch: 9, revoked: true)
+        XCTAssertEqual(
+            WatchCredentialPolicy.decision(
+                for: context(
+                    epoch: 1, token: "new-token", deviceID: "watch-b"
+                ),
+                stored: revoked,
+                hasToken: false
+            ),
+            .applyToken
+        )
+        XCTAssertEqual(
+            WatchCredentialPolicy.decision(
+                for: context(epoch: 1, token: nil, deviceID: "watch-b"),
+                stored: revoked,
+                hasToken: false
+            ),
+            .ignoreAndReack
+        )
+        XCTAssertEqual(
+            WatchCredentialPolicy.decision(
+                for: context(epoch: 9, token: "same-token", deviceID: "watch-a"),
+                stored: revoked,
+                hasToken: false
+            ),
+            .ignoreAndReack
+        )
+        XCTAssertEqual(
+            WatchCredentialPolicy.decision(
+                for: context(epoch: 10, token: "newer-token", deviceID: "watch-a"),
+                stored: revoked,
+                hasToken: false
+            ),
+            .applyToken
+        )
+    }
+
+    func testStoreAcceptsNewDeviceLineageButRejectsStaleLineageIdentity() throws {
+        let suite = "WatchCredentialTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let tokens = InMemoryTokenStore()
+        let store = WatchCredentialStore(defaults: defaults, tokens: tokens)
+        _ = try store.apply(context(epoch: 9, token: "revoked-token", deviceID: "watch-a"))
+        _ = try store.apply(context(
+            epoch: 9, token: nil, status: .revoked, deviceID: "watch-a"
+        ))
+        let revokedState = store.stored
+
+        XCTAssertEqual(
+            try store.apply(context(epoch: 1, token: nil, deviceID: "watch-b")),
+            .ignoreAndReack
+        )
+        XCTAssertEqual(store.stored, revokedState)
+        XCTAssertFalse(store.hasToken)
+        XCTAssertEqual(store.acknowledgement()?.status, .revoked)
+
+        XCTAssertEqual(
+            try store.apply(context(epoch: 1, token: "lineage-b", deviceID: "watch-b")),
+            .applyToken
+        )
+        XCTAssertEqual(store.stored?.deviceID, "watch-b")
+        XCTAssertEqual(store.stored?.epoch, 1)
+        XCTAssertEqual(store.loadToken(), "lineage-b")
+        XCTAssertEqual(store.acknowledgement()?.status, .ready)
     }
 
     func testTokenlessProbePolicyOnlyAdoptsWhenNoCredentialExists() {

@@ -116,6 +116,14 @@ final class WatchPairingTests: XCTestCase {
         )
     }
 
+    private var awayPhoneSession: IOSSession {
+        IOSSession(
+            baseURL: URL(string: "http://away.local:8000")!,
+            token: "phone-token",
+            deviceID: "phone-1"
+        )
+    }
+
     func testPairSendsTokenThenAckMarksPaired() async {
         let (store, defaults, suite) = makeStore()
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -157,6 +165,93 @@ final class WatchPairingTests: XCTestCase {
         XCTAssertEqual(connectivity.updates.last?["epoch"] as? Int, 1)
     }
 
+    func testWatchAPICallsUseHomeWhenPhoneSessionIsAway() async throws {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, transport, _) = makeCoordinator(
+            store: store, connectivity: connectivity
+        )
+        coordinator.start(session: awayPhoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        XCTAssertEqual(coordinator.phase, .waiting)
+
+        connectivity.receive(WatchAcknowledgement(
+            ackEpoch: 1, configVersion: 1, deviceID: "watch-1", status: .ready
+        ).dictionary)
+        await coordinator.foreground(
+            session: awayPhoneSession,
+            homeBaseURL: store.homeServerURL
+        )
+        await coordinator.revoke()
+
+        XCTAssertFalse(transport.requests.isEmpty)
+        XCTAssertTrue(transport.requests.allSatisfy { $0.url?.host == "home.local" })
+        XCTAssertTrue(transport.requests.contains { $0.url?.path == "/api/ios/v1/devices/watch" })
+        XCTAssertTrue(transport.requests.contains { $0.url?.path == "/api/ios/v1/devices" })
+        XCTAssertTrue(transport.requests.contains {
+            $0.httpMethod == "DELETE" && $0.url?.path == "/api/ios/v1/devices/watch-1"
+        })
+        XCTAssertEqual(coordinator.phase, .revoked)
+    }
+
+    func testHomeUnavailableDoesNotMintThroughAway() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        var awayMintCount = 0
+        let transport = StubTransport { request in
+            if request.url?.host == "away.local" {
+                awayMintCount += 1
+                return (201, self.mintBody(epoch: 99))
+            }
+            throw URLError(.cannotConnectToHost)
+        }
+        let client = IOSAPIClient(transport: transport)
+        let coordinator = WatchPairingCoordinator(
+            client: client,
+            store: store,
+            connectivity: connectivity
+        )
+        coordinator.start(session: awayPhoneSession, homeBaseURL: store.homeServerURL)
+
+        await coordinator.pair()
+
+        XCTAssertEqual(awayMintCount, 0)
+        XCTAssertEqual(coordinator.phase, .notPaired)
+        XCTAssertTrue(coordinator.errorMessage?.contains("Home Server") == true)
+        XCTAssertEqual(transport.requests.count, 1)
+        XCTAssertEqual(transport.requests.first?.url?.host, "home.local")
+    }
+
+    func testHomeAuthenticationFailureDoesNotFallBackToAway() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        var awayMintCount = 0
+        let transport = StubTransport { request in
+            if request.url?.host == "away.local" {
+                awayMintCount += 1
+                return (201, self.mintBody(epoch: 99))
+            }
+            return (401, Data("{}".utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        let coordinator = WatchPairingCoordinator(
+            client: client,
+            store: store,
+            connectivity: connectivity
+        )
+        coordinator.start(session: awayPhoneSession, homeBaseURL: store.homeServerURL)
+
+        await coordinator.pair()
+
+        XCTAssertEqual(awayMintCount, 0)
+        XCTAssertTrue(coordinator.errorMessage?.contains("Home Server rejected") == true)
+        XCTAssertEqual(transport.requests.count, 1)
+        XCTAssertEqual(transport.requests.first?.url?.host, "home.local")
+    }
+
     func testConfigChangeSendsSameEpochWithoutToken() async {
         let (store, defaults, suite) = makeStore()
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -176,6 +271,116 @@ final class WatchPairingTests: XCTestCase {
         XCTAssertEqual(update?["configVersion"] as? Int, 2)
         XCTAssertNil(update?["token"])
         XCTAssertEqual(update?["homeBaseURL"] as? String, "http://home.local:8000")
+    }
+
+    private func watchAck(
+        epoch: Int = 1,
+        config: Int,
+        device: String = "watch-1",
+        status: WatchCredentialStatus = .ready,
+        home: String? = "http://home.local:8000"
+    ) -> [String: Any] {
+        WatchAcknowledgement(
+            ackEpoch: epoch,
+            configVersion: config,
+            deviceID: device,
+            status: status,
+            homeBaseURL: home
+        ).dictionary
+    }
+
+    func testWatchConfigAheadOfPhoneIsRebaselinedAndApplied() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, _) = makeCoordinator(store: store, connectivity: connectivity)
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+
+        connectivity.receive(watchAck(config: 5))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(coordinator.phase, .configuring)
+        XCTAssertEqual(store.watchConfigVersion, 6)
+        XCTAssertEqual(connectivity.updates.last?["configVersion"] as? Int, 6)
+        XCTAssertTrue(connectivity.updates.last?["token"] == nil)
+
+        connectivity.receive(watchAck(config: 6))
+        XCTAssertEqual(coordinator.phase, .paired)
+    }
+
+    func testPhoneConfigResetBelowWatchRebaselines() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        store.watchConfigVersion = 1
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, _) = makeCoordinator(store: store, connectivity: connectivity)
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+
+        connectivity.receive(watchAck(config: 9))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(store.watchConfigVersion, 10)
+        XCTAssertNotEqual(coordinator.phase, .paired)
+        connectivity.receive(watchAck(config: 10))
+        XCTAssertEqual(coordinator.phase, .paired)
+    }
+
+    func testOldHomeURLIsRebaselinedAndEventuallyApplied() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, _) = makeCoordinator(store: store, connectivity: connectivity)
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+
+        connectivity.receive(watchAck(config: 1, home: "http://old.local:8000"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertNotEqual(coordinator.phase, .paired)
+        XCTAssertEqual(store.watchConfigVersion, 2)
+        XCTAssertEqual(connectivity.updates.last?["homeBaseURL"] as? String, "http://home.local:8000")
+        XCTAssertEqual(connectivity.updates.last?["configVersion"] as? Int, 2)
+
+        connectivity.receive(watchAck(config: 2))
+        XCTAssertEqual(coordinator.phase, .paired)
+    }
+
+    func testDuplicateConfigurationAcknowledgementIsIdempotent() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, _) = makeCoordinator(store: store, connectivity: connectivity)
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        connectivity.receive(watchAck(config: 1))
+        XCTAssertEqual(coordinator.phase, .paired)
+        let updateCount = connectivity.updates.count
+
+        connectivity.receive(watchAck(config: 1))
+        XCTAssertEqual(coordinator.phase, .paired)
+        XCTAssertEqual(connectivity.updates.count, updateCount)
+    }
+
+    func testConfigurationReconciliationIsBounded() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, _) = makeCoordinator(store: store, connectivity: connectivity)
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+
+        connectivity.receive(watchAck(config: 9, home: "http://old.local:8000"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        connectivity.receive(watchAck(config: 9, home: "http://old.local:8000"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let updateCount = connectivity.updates.count
+
+        connectivity.receive(watchAck(config: 9, home: "http://old.local:8000"))
+        XCTAssertEqual(connectivity.updates.count, updateCount)
+        XCTAssertNotEqual(coordinator.phase, .paired)
+        XCTAssertTrue(coordinator.errorMessage?.contains("configuration") == true)
     }
 
     func testMissingAckTriggersANewEpoch() async {
@@ -202,7 +407,7 @@ final class WatchPairingTests: XCTestCase {
         XCTAssertEqual(connectivity.updates.last?["token"] as? String, "watch-token-2")
     }
 
-    func testMismatchedReadyAckRequestsFreshMintAndConverges() async {
+    func testDifferentDeviceAckWithHigherEpochRequestsFreshMintAndConverges() async {
         let (store, defaults, suite) = makeStore()
         defer { defaults.removePersistentDomain(forName: suite) }
         let connectivity = FakeWatchConnectivity()
@@ -219,7 +424,7 @@ final class WatchPairingTests: XCTestCase {
         // The watch still holds a different device credential. A tokenless probe cannot
         // replace it, so the phone must mint a fresh epoch and send the token.
         connectivity.receive(WatchAcknowledgement(
-            ackEpoch: 1, configVersion: 1, deviceID: "watch-stale", status: .ready
+            ackEpoch: 99, configVersion: 1, deviceID: "watch-stale", status: .ready
         ).dictionary)
 
         for _ in 0..<50 where mintCount() < 2 {
@@ -227,6 +432,7 @@ final class WatchPairingTests: XCTestCase {
         }
         XCTAssertEqual(mintCount(), 2)
         XCTAssertEqual(coordinator.link?.epoch, 2)
+        XCTAssertNotEqual(coordinator.phase, .paired)
         XCTAssertEqual(connectivity.updates.last?["token"] as? String, "watch-token-2")
 
         connectivity.receive(WatchAcknowledgement(
@@ -234,6 +440,177 @@ final class WatchPairingTests: XCTestCase {
         ).dictionary)
         XCTAssertEqual(coordinator.phase, .paired)
         XCTAssertEqual(coordinator.link?.ackEpoch, 2)
+    }
+
+    func testDifferentDeviceAckWithLowerEpochRequestsFreshMint() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, mintCount) = makeCoordinator(
+            store: store, connectivity: connectivity
+        )
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        connectivity.receive(watchAck(config: 1))
+
+        connectivity.receive(WatchAcknowledgement(
+            ackEpoch: 0, configVersion: 1, deviceID: "watch-stale", status: .ready
+        ).dictionary)
+        for _ in 0..<50 where mintCount() < 2 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(mintCount(), 2)
+        XCTAssertNotEqual(coordinator.phase, .paired)
+        XCTAssertEqual(connectivity.updates.last?["token"] as? String, "watch-token-2")
+    }
+
+    func testSameDeviceStaleReadyAckRequestsFreshMint() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, mintCount) = makeCoordinator(
+            store: store, connectivity: connectivity
+        )
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        XCTAssertEqual(coordinator.link?.ackEpoch, 0)
+
+        // Simulate app termination after minting but before the acknowledgement: the phone
+        // has lost the in-memory token, so a stale watch ack must trigger a fresh mint.
+        coordinator.stop()
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+
+        connectivity.receive(WatchAcknowledgement(
+            ackEpoch: 0, configVersion: 1, deviceID: "watch-1", status: .ready
+        ).dictionary)
+        for _ in 0..<50 where mintCount() < 2 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(mintCount(), 2)
+        XCTAssertEqual(coordinator.link?.epoch, 2)
+        XCTAssertNotEqual(coordinator.phase, .paired)
+    }
+
+    func testDelayedSameDeviceStaleAckAfterPairedDoesNotMint() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, mintCount) = makeCoordinator(
+            store: store, connectivity: connectivity
+        )
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        connectivity.receive(watchAck(config: 1))
+        XCTAssertEqual(coordinator.phase, .paired)
+
+        connectivity.receive(WatchAcknowledgement(
+            ackEpoch: 0, configVersion: 1, deviceID: "watch-1", status: .ready
+        ).dictionary)
+
+        XCTAssertEqual(mintCount(), 1)
+        XCTAssertEqual(coordinator.phase, .paired)
+    }
+
+    func testMissingAckForDifferentDeviceRequestsFreshMint() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, mintCount) = makeCoordinator(
+            store: store, connectivity: connectivity
+        )
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        connectivity.receive(watchAck(config: 1))
+
+        connectivity.receive(WatchAcknowledgement(
+            ackEpoch: 1, configVersion: 1, deviceID: "watch-stale", status: .missing
+        ).dictionary)
+        for _ in 0..<50 where mintCount() < 2 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(mintCount(), 2)
+        XCTAssertEqual(connectivity.updates.last?["token"] as? String, "watch-token-2")
+    }
+
+    func testRepeatedStaleAcknowledgementsDoNotDuplicateMintInFlight() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, mintCount) = makeCoordinator(
+            store: store, connectivity: connectivity
+        )
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        connectivity.receive(watchAck(config: 1))
+
+        let stale = WatchAcknowledgement(
+            ackEpoch: 99, configVersion: 1, deviceID: "watch-stale", status: .ready
+        ).dictionary
+        connectivity.receive(stale)
+        connectivity.receive(stale)
+        connectivity.receive(stale)
+
+        for _ in 0..<50 where mintCount() < 2 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(mintCount(), 2)
+        XCTAssertEqual(coordinator.link?.epoch, 2)
+    }
+
+    func testForeignAckRecoveryStopsAfterBoundedAutomaticMints() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, mintCount) = makeCoordinator(
+            store: store, connectivity: connectivity
+        )
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        connectivity.receive(watchAck(config: 1))
+
+        let foreign = WatchAcknowledgement(
+            ackEpoch: 99, configVersion: 1, deviceID: "watch-stale", status: .ready
+        ).dictionary
+        connectivity.receive(foreign)
+        for _ in 0..<50 where mintCount() < 2 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(mintCount(), 2)
+        connectivity.receive(watchAck(epoch: 2, config: 1, device: "watch-2"))
+
+        connectivity.receive(foreign)
+        for _ in 0..<50 where mintCount() < 3 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(mintCount(), 3)
+        connectivity.receive(watchAck(epoch: 3, config: 1, device: "watch-3"))
+
+        connectivity.receive(foreign)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(mintCount(), 3)
+        XCTAssertTrue(coordinator.errorMessage?.contains("Pair Apple Watch") == true)
+    }
+
+    func testRevokedAckFromUnrelatedDeviceDoesNotRevokeCurrentLink() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, _) = makeCoordinator(store: store, connectivity: connectivity)
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        connectivity.receive(watchAck(config: 1))
+        XCTAssertEqual(coordinator.phase, .paired)
+
+        connectivity.receive(watchAck(
+            epoch: 99,
+            config: 1,
+            device: "other-watch",
+            status: .revoked
+        ))
+
+        XCTAssertEqual(coordinator.phase, .paired)
+        XCTAssertEqual(coordinator.link?.revoked, false)
+        XCTAssertEqual(store.watchLink?.revoked, false)
     }
 
     func testRevokeSuppressesAutoMintAndSendsRevokedContext() async {
@@ -260,6 +637,27 @@ final class WatchPairingTests: XCTestCase {
         await coordinator.foreground(session: phoneSession, homeBaseURL: store.homeServerURL)
         XCTAssertEqual(mintCount(), 1)
         XCTAssertEqual(store.watchLink?.revoked, true)
+    }
+
+    func testStartWithRevokedLinkSendsRevokedContext() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        store.watchLink = PairedWatch(
+            deviceID: "watch-1",
+            label: "Apple Watch",
+            epoch: 1,
+            ackEpoch: 0,
+            configVersion: 1,
+            revoked: true,
+            lastAckAt: nil
+        )
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, _) = makeCoordinator(store: store, connectivity: connectivity)
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(coordinator.phase, .revoked)
+        XCTAssertEqual(connectivity.updates.last?["status"] as? String, "revoked")
     }
 
     func testForegroundWithoutAPairedWatchDoesNotMint() async {

@@ -113,7 +113,8 @@ public final class WatchCredentialStore {
             ackEpoch: stored.epoch,
             configVersion: stored.configVersion,
             deviceID: stored.deviceID,
-            status: status
+            status: status,
+            homeBaseURL: stored.homeBaseURL
         )
     }
 

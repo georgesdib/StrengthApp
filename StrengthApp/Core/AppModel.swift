@@ -543,11 +543,12 @@ final class AppModel: ObservableObject {
                 }
             }
             let previousActive = activeWorkout
+            var reconciled = previousActive
             if hasPendingOfflineCapture {
                 // Pending offline work owns the local active-workout view. A completed finish
                 // leaves this nil while failed/conflict operations remain; do not resurrect a
                 // server workout for that state.
-                activeWorkout = offlineCapture?.activeWorkout
+                reconciled = offlineCapture?.activeWorkout
                 workoutRefreshGrace = false
             } else if let serverActive = newToday.activeWorkout {
                 if previousActive?.workoutId != serverActive.workoutId {
@@ -556,27 +557,27 @@ final class AppModel: ObservableObject {
                         sessionType: serverActive.sessionType
                     )
                 }
-                activeWorkout = serverActive
+                reconciled = serverActive
                 workoutRefreshGrace = false
             } else if let previousActive, previousActive.status == "in_progress" {
                 if workoutRefreshGrace {
                     // A mutation just returned an in-progress workout. Keep it for this read;
                     // the next refresh can still reconcile an externally finished workout.
                     workoutRefreshGrace = false
-                    activeWorkout = previousActive
+                    reconciled = previousActive
                 } else {
                     // The server no longer has the workout this session was showing. Do not
                     // silently keep stale local state; surface it for reconciliation.
-                    activeWorkout = nil
+                    reconciled = nil
                     recoveryIssue = .workoutEndedElsewhere(
                         workoutId: previousActive.workoutId
                     )
                 }
             } else {
-                activeWorkout = nil
+                reconciled = nil
                 workoutRefreshGrace = false
             }
-            persistActiveWorkout()
+            _ = apply(.activeWorkoutChanged(reconciled))
             isOffline = false
             if !healthKitEnabled {
                 healthKitState = .featureDisabled
@@ -591,7 +592,7 @@ final class AppModel: ObservableObject {
         } catch {
             isOffline = true
             if activeWorkout == nil, let cached = offlineCapture?.activeWorkout {
-                activeWorkout = cached
+                _ = apply(.activeWorkoutChanged(cached))
             }
             handle(error)
             return .failure(message(for: error))

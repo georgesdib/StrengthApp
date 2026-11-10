@@ -1394,15 +1394,11 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .planEdit, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await operation()
-            mutationError = nil
+            let updated = try await operation()
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1438,20 +1434,16 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .completeWorkout, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.completeWorkout(
+            let updated = try await client.completeWorkout(
                 workoutId: workout.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             recoveryIssue = nil
             workoutRefreshGrace = false
             try? offlineStore.clear()
@@ -1481,21 +1473,17 @@ final class AppModel: ObservableObject {
         if hasPendingOfflineCapture {
             await syncOfflineCapture()
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.abandonWorkout(
+            let updated = try await client.abandonWorkout(
                 workoutId: workout.workoutId,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
+            _ = apply(.operationSucceeded(updated))
             try? offlineStore.clear()
             offlineCapture = try? offlineStore.load()
-            mutationError = nil
             recoveryIssue = nil
             workoutRefreshGrace = false
             await refresh()
@@ -1802,11 +1790,11 @@ final class AppModel: ObservableObject {
                 createdAt: Date()
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: workout)
+            _ = apply(.operationQueued(workout))
             isOffline = true
-            mutationError = nil
             return true
         } catch {
-            mutationError = message(for: error)
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
             return false
         }
     }

@@ -1070,22 +1070,18 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .startWorkout, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.startWorkout(
+            let workout = try await client.startWorkout(
                 issuedPlanId: issued.issuedPlanId,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
+            _ = apply(.operationSucceeded(workout))
             try? offlineStore.clear()
             offlineCapture = try? offlineStore.load()
             persistActiveWorkout()
-            mutationError = nil
             recoveryIssue = nil
             workoutRefreshGrace = true
             await refresh()
@@ -1642,6 +1638,34 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    private func apply(_ event: SessionEvent) -> [SessionEffect] {
+        let current = SessionState(
+            activeWorkout: activeWorkout,
+            isSaving: isSaving,
+            mutationError: mutationError,
+            mutationFailureAmbiguous: mutationFailureAmbiguous
+        )
+        let (next, effects) = SessionReducer.reduce(current, event)
+        activeWorkout = next.activeWorkout
+        isSaving = next.isSaving
+        mutationError = next.mutationError
+        mutationFailureAmbiguous = next.mutationFailureAmbiguous
+        for effect in effects {
+            execute(effect)
+        }
+        return effects
+    }
+
+    private func execute(_ effect: SessionEffect) {
+        switch effect {
+        case .persistActiveWorkout:
+            persistActiveWorkout()
+        case .refreshPendingMutations:
+            refreshPendingMutations()
+        }
+    }
+
     private func refreshPendingMutations() {
         guard let session else {
             pendingMutations = []
@@ -2155,11 +2179,13 @@ final class AppModel: ObservableObject {
 
     private func handleMutation(_ error: Error) {
         if let api = error as? APIError, api.isAuthenticationFailure {
-            mutationFailureAmbiguous = false
+            _ = apply(.mutationErrorCleared)
             forgetLocally(message: api.errorDescription)
         } else {
-            mutationError = message(for: error)
-            mutationFailureAmbiguous = Self.isAmbiguous(error)
+            _ = apply(.operationFailed(
+                message: message(for: error),
+                ambiguous: Self.isAmbiguous(error)
+            ))
         }
     }
 

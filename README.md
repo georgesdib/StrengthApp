@@ -8,9 +8,10 @@ offline capture and replay are closed 2026-11-08 (snapshot/outbox, add set/form/
 sync, conflict handling and cancellation); physical offline acceptance was owner-confirmed. R1 durable pending-mutation journal, R3 explicit plan-item selection,
 R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
 closed. Phase 6.0 (the shared watch core) and 6.1 (the server watch contract) are complete. Phase
-6.2a adds the embedded watch app target and its CI build; 6.2b adds the credential/config handoff,
-phone-side Pair/Status/Revoke and the watch's Keychain receiver; 6.2c adds the read-only Today
-plan fetch. The watch has no start, set logging, HealthKit or offline execution yet.
+6.2 is complete and closed 2026-11-10: 6.2a embedded watch target and CI, 6.2b credential/config
+handoff and phone-side Pair/Status/Revoke, and 6.2c read-only Today from the Home server. Physical
+Apple Watch acceptance remains owner-run. The watch has no start, set logging, HealthKit or offline
+execution yet.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active

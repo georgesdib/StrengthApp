@@ -27,10 +27,10 @@ closed.
 Server contracts:
 [`design/IOS-R7-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-R7-CONTRACT.md) and
 [`design/IOS-R8-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-R8-CONTRACT.md). Later phases remain proposals and need
-separate approval. **Phase 6 (watchOS companion) is in progress: 6.0 shared core, 6.1 server
-contract, 6.2a watch target, 6.2b credential handoff and 6.2c read-only Today are complete; 6.3+ is
-planned, not started**:
-[`design/IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md); the watch cannot start or log a workout yet.
+separate approval. **Phase 6 (watchOS companion): Phase 6.2 is complete and closed 2026-11-10**
+(6.0 shared core, 6.1 server contract, 6.2a watch target, 6.2b credential handoff and 6.2c read-only
+Today). Physical Apple Watch acceptance remains owner-run; 6.3+ is planned, not started:
+[`design/IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md). The watch cannot start or log a workout yet.
 
 **Purpose:** deliver a practical iPhone interface for one person's existing strength-training workflow, without porting the training method or making a public cloud service a prerequisite. Start with an ordinary, connected strength session. Add offline capture, HealthKit, and Apple Intelligence only after the smaller client proves useful and reliable.
 

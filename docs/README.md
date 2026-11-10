@@ -12,20 +12,19 @@ app presents and records that authority.
 
 ## Client plan and contracts
 
-- [IOS-CLIENT-PLAN.md](IOS-CLIENT-PLAN.md) — phased iPhone implementation plan, architecture
+- [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) — phased iPhone implementation plan, architecture
   invariants, rollback gates and completion records.
 - [Server API contract](https://github.com/georgesdib/strength-training-app/blob/development/docs/API.md)
   — authoritative HTTP routes and limits.
-- [iOS Phase 1 contract](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-PHASE-1-CONTRACT.md)
-- [iOS Phase 2 contract](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-PHASE-2-CONTRACT.md)
-- [iOS Phase 3A contract](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-PHASE-3A-CONTRACT.md)
-- [iOS Phase 4 contract](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-PHASE-4-CONTRACT.md)
-- [iOS R7 contract](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-R7-CONTRACT.md)
-- [iOS R8 contract](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-R8-CONTRACT.md)
-- [watchOS Phase 6 contract](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md)
+- [iOS Phase 1 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-1-CONTRACT.md)
+- [iOS Phase 2 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-2-CONTRACT.md)
+- [iOS Phase 3A contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-3A-CONTRACT.md)
+- [iOS Phase 4 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-4-CONTRACT.md)
+- [iOS R7 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R7-CONTRACT.md)
+- [iOS R8 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R8-CONTRACT.md)
+- [watchOS Phase 6 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
 
-The contracts stay in the server repository because they define the server API and data model.
-Do not copy them here; link to them.
+Shared server/client phase contracts are canonical in the portfolio `docs/contracts/` directory; backend implementation, migrations and tests stay in the server repository. Do not maintain duplicate contract text here.
 
 ## Agent guidance
 
@@ -36,12 +35,15 @@ Do not copy them here; link to them.
 
 ## Repository ownership
 
-- Client plan, client UI/UX, iPhone user guide, device acceptance, client build/test guidance →
-  this repository.
-- Training methodology, server API/data model, server design contracts, server web UI → the
-  sibling `strength-training-app` repository.
-- Portfolio routing, machine handoff and documentation policy →
-  [the portfolio repository](https://github.com/georgesdib/strength-app/blob/main/docs/DOCUMENTATION.md).
+- Shared phase plans and server/client contracts → [portfolio canonical docs](https://github.com/georgesdib/strength-app/blob/main/docs/README.md).
+- Client UI/UX implementation, iPhone user guide, device acceptance, client build/test/live-test guidance → this repository.
+- Server API/data-model implementation, schema/migrations, server web UI and backend operations → sibling `strength-training-app` repository.
+- Portfolio routing and documentation policy → [portfolio ownership rules](https://github.com/georgesdib/strength-app/blob/main/docs/DOCUMENTATION.md).
 
 When adding a document, put it in the repository that owns the subject and link across
 repositories with absolute GitHub URLs.
+
+
+### Canonical shared phase contracts
+
+Use the portfolio [iOS contract index](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/README.md). Local client-specific acceptance/build instructions remain in this repository.

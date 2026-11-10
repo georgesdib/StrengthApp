@@ -120,7 +120,7 @@ record of what was exercised.
 ## Before you start
 
 - [ ] Take a consistent backup of the live database before applying migration 0053 (the plan in this
-      repository, [`docs/IOS-CLIENT-PLAN.md`](docs/IOS-CLIENT-PLAN.md) §13.1); use a temporary database for the rehearsal.
+      repository, [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.1); use a temporary database for the rehearsal.
 - [ ] The server is running over plain HTTP on the trusted home LAN and is not Internet-reachable.
 - [ ] config/ios.v1.yaml has mutations_enabled: true; bootstrap reports readiness_write,
       prescription and workout_write as true.
@@ -230,7 +230,7 @@ iOS 27.2  ·  Simulator: iPhone 18 Pro, iOS 27.2
 
 **Status: physically tested and owner-confirmed 2026-11-08.** The implementation is also
 unit/simulator/live-server verified. The canonical server-side commands, backup, migration,
-pairing-code and rollback runbook is [`docs/IOS-CLIENT-PLAN.md`](docs/IOS-CLIENT-PLAN.md) §13.3 in
+pairing-code and rollback runbook is [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.3 in
 this repository.
 
 ## Before you start

@@ -19,10 +19,10 @@ loads, sets and training decisions, and the phone never supplies plan content.
 
 The server-side contracts live in the `strength-training-app` repository; the
 [client docs index](docs/README.md) lists them. The Phase 6 watchOS companion contract is
-[`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md)
+[`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
 in that repository; 6.0 (the S1–S4 shared core) and 6.1 (the server contract) are complete, and
 6.2+ is planned, not started. The client plan is
-[`docs/IOS-CLIENT-PLAN.md`](docs/IOS-CLIENT-PLAN.md); start with
+[iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md); start with
 [`docs/README.md`](docs/README.md) for the client documentation map.
 
 ## Agent documentation
@@ -31,7 +31,7 @@ in that repository; 6.0 (the S1–S4 shared core) and 6.1 (the server contract) 
 - [docs/AGENT-WORKFLOWS.md](docs/AGENT-WORKFLOWS.md) — build, test, CI and completion procedures.
 - [docs/AGENT-LIVE-TESTS.md](docs/AGENT-LIVE-TESTS.md) — disposable live-server UI acceptance.
 - [docs/AGENT-CONTRACTS.md](docs/AGENT-CONTRACTS.md) — server authority and API contract rules.
-- [docs/IOS-CLIENT-PLAN.md](docs/IOS-CLIENT-PLAN.md) — phased iPhone implementation plan and rollback gates.
+- [Canonical iOS client phase plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) — phased plan, architecture invariants and rollback gates.
 
 ## User guide
 
@@ -205,7 +205,7 @@ Two failure modes that are environmental rather than code:
 The physical-device Phase 3A checklist and rollback steps are in
 [`DEVICE-ACCEPTANCE.md`](DEVICE-ACCEPTANCE.md); the server-side backup, migration and
 pairing-code runbook is in
-[`docs/IOS-CLIENT-PLAN.md`](docs/IOS-CLIENT-PLAN.md) §13.3.
+[iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.3.
 
 ### Running the live UI tests
 

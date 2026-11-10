@@ -1,7 +1,6 @@
 # Agent contracts — StrengthApp
 
-Rules for client/server contract work. Read ../AGENTS.md and AGENT-WORKFLOWS.md; the server
-is authoritative.
+Rules for client/server contract work. Read the iOS `AGENTS.md`, `AGENT-WORKFLOWS.md`, and the portfolio canonical docs index at https://github.com/georgesdib/strength-app/blob/main/docs/README.md; the server remains authoritative for API behavior and training decisions.
 
 ## 1. Authority
 
@@ -14,22 +13,18 @@ source of truth.
 
 ## 2. Canonical contracts
 
-The server repository is authoritative for:
-- docs/design/IOS-PHASE-1-CONTRACT.md
-- docs/design/IOS-PHASE-2-CONTRACT.md
-- docs/design/IOS-PHASE-3A-CONTRACT.md
-- docs/design/IOS-PHASE-4-CONTRACT.md
-- docs/design/IOS-R7-CONTRACT.md
-- docs/design/IOS-R8-CONTRACT.md
-- docs/design/IOS-WATCH-CONTRACT.md
-- docs/API.md
-- docs/DATA-MODEL.md
+Shared iOS phase contracts are canonical in the portfolio repository: https://github.com/georgesdib/strength-app/blob/main/docs/contracts/README.md . Individual documents:
+- [iOS Phase 1 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-1-CONTRACT.md)
+- [iOS Phase 2 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-2-CONTRACT.md)
+- [iOS Phase 3A contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-3A-CONTRACT.md)
+- [iOS Phase 4 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-4-CONTRACT.md)
+- [iOS R7 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R7-CONTRACT.md)
+- [iOS R8 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R8-CONTRACT.md)
+- [watchOS Phase 6 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
 
-The client-side phase plan is [`IOS-CLIENT-PLAN.md`](IOS-CLIENT-PLAN.md) in this repository. It
-describes the phases, invariants and rollback gates, but it is not a substitute for a server
-contract. Start with [README.md](README.md) for the client documentation map.
+The backend API reference and data-model implementation details remain in this repository: [`docs/API.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/API.md) and [`docs/DATA-MODEL.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/DATA-MODEL.md). The shared phase plan is [canonical in the portfolio](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md); it does not replace these implementation references.
 
-Read the relevant contract before editing. Do not infer a contract from Swift models alone.
+Read the relevant portfolio contract before editing. Do not infer a contract from Swift models alone.
 
 ## 3. Cross-repo change checklist
 
@@ -76,8 +71,7 @@ For API, schema, authentication or client/server behaviour changes:
 ## 7. Documentation
 
 Update the server API/data-model docs and the client README/USER-GUIDE when user-visible
-behaviour changes. Keep the authoritative explanation on the server side; link to it rather
-than duplicating policy.
+behaviour changes. Keep shared requirements/contracts in the portfolio canonical documents and server API/data-model implementation detail in the backend; link to those authorities rather than duplicating policy.
 
 ## 8. What needs explicit owner approval
 

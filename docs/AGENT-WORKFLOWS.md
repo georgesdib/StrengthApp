@@ -91,7 +91,7 @@ private/BUILD-TEST-QUIRKS.md in the same turn. Read that file before a build/tes
 - USER-GUIDE.md — owner-facing iPhone use.
 - DEVICE-ACCEPTANCE.md — physical acceptance checklist.
 - docs/README.md — client documentation index and repository ownership.
-- docs/IOS-CLIENT-PLAN.md — phased client plan, invariants and rollback gates.
+- https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md — phased client plan, invariants and rollback gates.
 - docs/AGENT-LIVE-TESTS.md — disposable live server/UI acceptance.
 - docs/AGENT-CONTRACTS.md — server authority and additive client/server changes.
 

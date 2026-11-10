@@ -1,17 +1,14 @@
 # AGENTS.md — StrengthApp (iOS client)
 
-Lean entry point for agents editing the native iPhone client. Read the workspace-level
-../AGENTS.md first, then the topic document for the task:
+Lean entry point for agents editing the native iPhone client. Read the canonical portfolio shared-doc index at https://github.com/georgesdib/strength-app/blob/main/docs/README.md first (a sibling workspace checkout is not assumed), then the topic document for the task:
 
 - docs/README.md — client documentation index and repository ownership.
 - docs/AGENT-WORKFLOWS.md — build, test, CI, toolchain, branch and completion procedure.
 - docs/AGENT-LIVE-TESTS.md — disposable-server live UI setup and cleanup.
 - docs/AGENT-CONTRACTS.md — API authority and client/server contract rules.
-- docs/IOS-CLIENT-PLAN.md — phased client plan, architecture invariants and rollback gates.
+- https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md — phased client plan, architecture invariants and rollback gates.
 
-README.md remains the project overview and build recipe. The client plan and documentation index
-live in this repository; server API/data-model contracts live in the sibling strength-training-app
-repository. Do not copy those contracts here.
+README.md remains the project overview and build recipe. Client build/test/UI/live-test and device-acceptance docs stay here. Shared phase plans and server/client contracts are canonical in the portfolio docs; server API/data-model implementation docs stay in the sibling strength-training-app repository. Do not duplicate shared plans or contracts.
 
 ## Branch
 
@@ -19,7 +16,7 @@ repository. Do not copy those contracts here.
 - main is integration-only; merge development into main with a merge commit, never squash.
 - Do not merge or push an integration branch without the owner's explicit instruction.
 
-Output discipline and high-risk approval rules are defined by the workspace `../AGENTS.md`.
+Output discipline and high-risk approval rules are in the canonical portfolio `AGENTS.md`: https://github.com/georgesdib/strength-app/blob/main/AGENTS.md .
 
 ## Contract authority
 
@@ -48,3 +45,8 @@ agreed. See docs/AGENT-CONTRACTS.md.
 
 Detailed commands and CI rules are in docs/AGENT-WORKFLOWS.md. Live-test setup is in
 docs/AGENT-LIVE-TESTS.md.
+
+
+## Shared documentation changes
+
+Do not maintain shared plan/contract copies in this repository. Read and update the portfolio canonical plan/contract when client implementation affects cross-repository requirements; retain client-specific UI/build/test and device acceptance documentation here. Commit client implementation changes on the iOS task branch and shared docs changes in the portfolio repository branch. Update local references and do not update portfolio submodule pointers unless explicitly requested.

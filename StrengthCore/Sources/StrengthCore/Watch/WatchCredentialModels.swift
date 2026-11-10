@@ -254,13 +254,18 @@ public enum WatchCredentialDecision: Equatable, Sendable {
     case applyToken
     case applyConfiguration
     case ignoreAndReack
+    case adoptMissingProbe
     case revoke
-    case missingToken
 }
 
 public enum WatchCredentialPolicy {
     /// The watch accepts a new epoch, or a same-epoch higher configVersion. A duplicate is
     /// ignored but re-acked; a revoked credential cannot be resurrected at the same epoch.
+    ///
+    /// A tokenless probe is metadata only. It may replace metadata that has no token (or no
+    /// metadata at all), so a reinstalled or stale watch can report the phone's current identity
+    /// as missing and trigger a fresh mint. It never replaces a still-valid token or a revoked
+    /// credential, and it never grants authenticated access.
     public static func decision(
         for context: WatchCredentialContext,
         stored: WatchStoredCredential?,
@@ -268,16 +273,32 @@ public enum WatchCredentialPolicy {
     ) -> WatchCredentialDecision {
         if context.status == .revoked {
             guard let stored else { return .revoke }
+            // A revocation for another device must not revoke this device's credential.
+            guard context.deviceID == stored.deviceID else {
+                return .ignoreAndReack
+            }
             return context.epoch >= stored.epoch ? .revoke : .ignoreAndReack
         }
         guard let stored else {
-            return context.token == nil ? .missingToken : .applyToken
+            return context.token == nil ? .adoptMissingProbe : .applyToken
+        }
+        if stored.revoked {
+            // Only a real new-epoch token can replace a revoked credential.
+            if context.epoch > stored.epoch, context.token != nil {
+                return .applyToken
+            }
+            return .ignoreAndReack
         }
         if context.epoch < stored.epoch {
             return .ignoreAndReack
         }
         if context.epoch == stored.epoch {
-            if stored.revoked || context.deviceID != stored.deviceID {
+            if context.deviceID != stored.deviceID {
+                // A tokenless probe may replace metadata only when there is no token to
+                // preserve. A token-bearing context at the same epoch is not a valid rotation.
+                if context.token == nil, !hasToken {
+                    return .adoptMissingProbe
+                }
                 return .ignoreAndReack
             }
             guard context.configVersion > stored.configVersion else {
@@ -285,6 +306,11 @@ public enum WatchCredentialPolicy {
             }
             return context.token == nil ? .applyConfiguration : .applyToken
         }
-        return context.token == nil ? .missingToken : .applyToken
+        // A newer epoch with a token is a real credential. Without a token it can only clear
+        // metadata that has no credential; a valid token is preserved for the phone to replace.
+        if context.token != nil {
+            return .applyToken
+        }
+        return hasToken ? .ignoreAndReack : .adoptMissingProbe
     }
 }

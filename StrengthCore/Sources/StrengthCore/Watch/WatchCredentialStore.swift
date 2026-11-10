@@ -79,19 +79,19 @@ public final class WatchCredentialStore {
                     revoked: true
                 ))
             }
-        case .missingToken:
-            // Keep the non-secret device/epoch so a tokenless probe can be acknowledged as
-            // "missing" and the phone can mint a new epoch.
-            if stored == nil {
-                save(WatchStoredCredential(
-                    deviceID: context.deviceID,
-                    epoch: context.epoch,
-                    configVersion: context.configVersion,
-                    homeBaseURL: context.homeBaseURL,
-                    lastAckAt: nil,
-                    revoked: false
-                ))
-            }
+        case .adoptMissingProbe:
+            // A probe is metadata only. Replace stale, tokenless metadata with the phone's
+            // current identity so the acknowledgement names the state we actually hold. A
+            // token is deliberately absent; the phone must mint a new epoch to grant access.
+            tokens.delete()
+            save(WatchStoredCredential(
+                deviceID: context.deviceID,
+                epoch: context.epoch,
+                configVersion: context.configVersion,
+                homeBaseURL: context.homeBaseURL,
+                lastAckAt: nil,
+                revoked: false
+            ))
         case .ignoreAndReack:
             break
         }

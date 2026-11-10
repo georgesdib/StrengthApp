@@ -53,6 +53,8 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
 - [ ] Confirm the iPhone's active child watch is also revoked in the same operation
       (`revoked_watch_ids` in the DELETE response / `strength-coach ios devices`).
 - [ ] The old watch token cannot read any `/api/ios/v1/*` route.
+- [ ] A revocation context naming a different watch device is ignored; it must not clear the
+      current watch token.
 
 ## Failure and recovery
 
@@ -62,6 +64,15 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
 - [ ] Kill the iPhone app after minting but before the ack, then relaunch. It may show Waiting; the
       tokenless probe either gets a re-ack or the watch reports missing and the phone mints a new
       epoch.
+- [ ] Leave the watch with stale metadata (a different device id or an older epoch) and no token,
+      then pair the phone's current credential. The watch adopts the current device/epoch as
+      **missing**, clears the stale token, and the phone mints once; it must not loop on an old
+      acknowledgement.
+- [ ] Leave the watch with a valid old token while the phone expects a newer device/epoch. The watch
+      re-acks the old credential; the phone mints a fresh epoch (at most twice in one foreground),
+      sends the token, and the new token replaces the old one.
+- [ ] A tokenless probe must never create a new Ready state or grant API access; only a
+      token-bearing higher epoch can replace a valid old token or a revoked credential.
 - [ ] Turn off Wi-Fi on the watch (or move it out of range) and change the Home Server. The watch
       keeps its old Home URL and does not switch to Away; it updates when it can reach the phone and
       the new Home server.

@@ -202,6 +202,40 @@ final class WatchPairingTests: XCTestCase {
         XCTAssertEqual(connectivity.updates.last?["token"] as? String, "watch-token-2")
     }
 
+    func testMismatchedReadyAckRequestsFreshMintAndConverges() async {
+        let (store, defaults, suite) = makeStore()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let connectivity = FakeWatchConnectivity()
+        let (coordinator, _, mintCount) = makeCoordinator(
+            store: store, connectivity: connectivity
+        )
+        coordinator.start(session: phoneSession, homeBaseURL: store.homeServerURL)
+        await coordinator.pair()
+        connectivity.receive(WatchAcknowledgement(
+            ackEpoch: 1, configVersion: 1, deviceID: "watch-1", status: .ready
+        ).dictionary)
+        XCTAssertEqual(coordinator.phase, .paired)
+
+        // The watch still holds a different device credential. A tokenless probe cannot
+        // replace it, so the phone must mint a fresh epoch and send the token.
+        connectivity.receive(WatchAcknowledgement(
+            ackEpoch: 1, configVersion: 1, deviceID: "watch-stale", status: .ready
+        ).dictionary)
+
+        for _ in 0..<50 where mintCount() < 2 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(mintCount(), 2)
+        XCTAssertEqual(coordinator.link?.epoch, 2)
+        XCTAssertEqual(connectivity.updates.last?["token"] as? String, "watch-token-2")
+
+        connectivity.receive(WatchAcknowledgement(
+            ackEpoch: 2, configVersion: 1, deviceID: "watch-2", status: .ready
+        ).dictionary)
+        XCTAssertEqual(coordinator.phase, .paired)
+        XCTAssertEqual(coordinator.link?.ackEpoch, 2)
+    }
+
     func testRevokeSuppressesAutoMintAndSendsRevokedContext() async {
         let (store, defaults, suite) = makeStore()
         defer { defaults.removePersistentDomain(forName: suite) }

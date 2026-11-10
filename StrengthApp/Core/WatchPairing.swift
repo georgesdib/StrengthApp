@@ -439,37 +439,61 @@ final class WatchPairingCoordinator: ObservableObject {
 
     private func handle(_ dictionary: [String: Any]) {
         guard let ack = try? WatchAcknowledgement(dictionary: dictionary),
-              let current = link,
-              ack.deviceID == current.deviceID else {
+              let current = link else {
             return
         }
+        let isCurrent = ack.deviceID == current.deviceID
+            && ack.ackEpoch == current.epoch
         switch ack.status {
         case .ready:
-            guard ack.ackEpoch == current.epoch else { return }
-            var next = current
-            next.ackEpoch = ack.ackEpoch
-            next.configVersion = ack.configVersion
-            next.lastAckAt = Self.timestamp()
-            next.revoked = false
-            link = next
-            store.watchLink = next
-            pendingToken = nil
-            retryAttempts = 0
-            cancelRetry()
-            errorMessage = nil
-            updatePhase()
-            if next.configVersion < store.watchConfigVersion {
-                Task { await sendCredential() }
+            if isCurrent {
+                var next = current
+                next.ackEpoch = ack.ackEpoch
+                next.configVersion = ack.configVersion
+                next.lastAckAt = Self.timestamp()
+                next.revoked = false
+                link = next
+                store.watchLink = next
+                pendingToken = nil
+                retryAttempts = 0
+                autoMintAttempts = 0
+                cancelRetry()
+                errorMessage = nil
+                updatePhase()
+                if next.configVersion < store.watchConfigVersion {
+                    Task { await sendCredential() }
+                }
+                return
             }
+            // The watch holds a different or older credential. A tokenless probe cannot
+            // replace a valid token, so request one fresh epoch and send the token.
+            guard !current.revoked,
+                  pendingToken == nil,
+                  ack.ackEpoch <= current.epoch else {
+                return
+            }
+            guard autoMintAttempts < 2 else {
+                errorMessage = "Could not replace the watch credential. Tap Pair Apple Watch again."
+                return
+            }
+            Task { await mintForExistingLink() }
         case .missing:
             guard !current.revoked else { return }
+            let canRecover = isCurrent
+                || (pendingToken == nil && ack.ackEpoch <= current.epoch)
+            guard canRecover else { return }
             if autoMintAttempts < 2 {
                 Task { await mintForExistingLink() }
             } else {
                 errorMessage = "Could not hand credentials to Apple Watch. Tap Pair Apple Watch again."
             }
         case .revoked:
+            guard ack.deviceID == current.deviceID,
+                  ack.ackEpoch >= current.epoch else {
+                return
+            }
             var next = current
+            next.epoch = max(current.epoch, ack.ackEpoch)
             next.revoked = true
             next.ackEpoch = 0
             link = next

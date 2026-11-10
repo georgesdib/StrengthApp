@@ -85,7 +85,9 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 - **Workout ready** — once the server finishes building, Today shows a ready card with the
   session type, date, exercise count and warnings. Start workout starts by issued-plan id and
   opens the active workout screen directly; no preview sheet opens automatically. Request workout
-  can ask for server-decided, top-set/back-off or straight-set main-lift structure.
+  can ask for server-decided, top-set/back-off or straight-set main-lift structure and chooses
+  **iPhone** or **Apple Watch** as the execution target. A watch-targeted plan shows a notice on
+  the phone and is started on the watch; it never exposes the phone Start button.
 - **Workout** — exercise-first list with an exercise detail screen, prepopulated planned sets,
   performed-set logging with load/reps/RIR, optional mean velocity, optional per-rep velocity with
   comma/space-separated input, explicit Start set and set-completion timestamps, performed-set
@@ -145,7 +147,7 @@ the Phase 4 offline capture path; plan edits remain online-only.
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 164 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 172 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
@@ -169,8 +171,10 @@ acknowledgement, re-mint on missing credentials, deliberate revoke suppression, 
 revocation rejection, duplicate-revocation idempotence, tokenless-probe recovery from stale
 metadata, credential-lineage replacement, Home-only watch API routing, configuration-version
 re-baselining, and convergence to a fresh epoch or config without an acknowledgement loop. The
-read-only watch Today tests cover plan-state mapping, watch-target filtering, plan item labels,
-bootstrap plus plan fetches over the supplied watch session, and authentication failure.
+read-only watch Today tests cover plan-state mapping, strict target filtering (including
+missing/unknown targets), plan item labels, bootstrap plus plan fetches over the supplied watch
+session, and authentication failure. AppModel integration tests cover watch-coordinator startup
+after initial pairing, existing-pair launch, re-pair reset, and execution-target forwarding.
 
 ### Building and testing from the command line
 

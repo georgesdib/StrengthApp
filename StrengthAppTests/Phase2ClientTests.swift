@@ -159,6 +159,26 @@ final class Phase2ClientTests: XCTestCase {
         XCTAssertEqual(json["note"] as? String, "felt good")
     }
 
+    func testIssuePrescriptionSendsWatchExecutionTarget() async throws {
+        let transport = StubTransport { _ in
+            (202, Data(Fixtures.planAck.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        _ = try await client.issuePrescription(
+            IssuePrescriptionRequest(
+                readinessAck: false,
+                confirmations: nil,
+                settings: nil,
+                executionTarget: .watch
+            ),
+            session: session,
+            idempotencyKey: "key-watch-issue"
+        )
+        let issueRequest = try XCTUnwrap(transport.requests.first)
+        let json = body(issueRequest)
+        XCTAssertEqual(json["execution_target"] as? String, "watch")
+    }
+
     func testIssuePrescriptionSendsAcknowledgementAndSettings() async throws {
         let transport = StubTransport { request in
             if request.url?.path == "/api/ios/v1/plans/current" {
@@ -191,6 +211,7 @@ final class Phase2ClientTests: XCTestCase {
         XCTAssertEqual(settings?["session_type"] as? String, "squat")
         XCTAssertEqual(settings?["minimum_session"] as? Bool, true)
         XCTAssertNil(json["plan"])
+        XCTAssertEqual(json["execution_target"] as? String, "phone")
 
         // The plan itself comes from the authoritative read, never from the POST response.
         let state = try await client.planState(session: session)
@@ -1063,6 +1084,42 @@ final class Phase2AppModelTests: XCTestCase {
         let removal = try encoder.encode(RemoveSetRequest(setId: 42))
         let removalText = try XCTUnwrap(String(data: removal, encoding: .utf8))
         XCTAssertTrue(removalText.contains("\"set_id\":42"))
+    }
+
+    func testAppModelForwardsWatchExecutionTarget() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+
+        await model.issuePrescription(
+            readinessAck: false,
+            executionTarget: .watch,
+            idempotencyKey: "issue-watch"
+        )
+
+        guard let issue = transport.requests.first(where: {
+            $0.url?.path == "/api/ios/v1/prescriptions"
+        }) else {
+            return XCTFail("expected a prescription request")
+        }
+        let object = issue.httpBody.flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+        } ?? [:]
+        XCTAssertEqual(object["execution_target"] as? String, "watch")
     }
 
     private func pairedModel(

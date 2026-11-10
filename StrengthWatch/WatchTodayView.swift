@@ -29,6 +29,8 @@ struct WatchTodayView: View {
                     message("No workout for Apple Watch.")
                 case .phonePlan:
                     message("This workout is planned for iPhone.")
+                case .unsupportedTarget:
+                    message("This plan is not available on Apple Watch.")
                 case .generating(let elapsed):
                     VStack(alignment: .leading, spacing: 4) {
                         ProgressView()

@@ -275,7 +275,7 @@ on boundaries and per-stage acceptance.
 1. **6.0 StrengthCore extraction (iOS first) — complete 2026-11-10.** S1 models, S2 API client,
    S3 journal/Keychain/offline capture and S4 session reducer are in the package; the iPhone app is
    the adapter. Parity was proved per stage. Acceptance: the 102 existing iPhone tests stayed green,
-   five reducer tests were added (107 total at 6.0; 159 today with 6.2b coverage), no view changed,
+   five reducer tests were added (107 total at 6.0; 172 today with 6.2b/6.2c coverage), no view changed,
    and the package builds for iOS 27.0 and watchOS 27.0. S5 (the watch target) is 6.2a.
 2. **6.1 Server contract — complete 2026-11-10.** `0058_watch_companion.sql` adds watch kind,
    parent, monotonic `credential_epoch`, the one-active-watch index, `target_device_id` and

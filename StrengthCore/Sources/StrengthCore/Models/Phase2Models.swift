@@ -554,15 +554,34 @@ public struct ReadinessWriteRequest: Encodable, Equatable {
     }
 }
 
+public enum PrescriptionExecutionTarget: String, Codable, CaseIterable, Hashable, Sendable {
+    case phone
+    case watch
+
+    public var label: String {
+        switch self {
+        case .phone: return "iPhone"
+        case .watch: return "Apple Watch"
+        }
+    }
+}
+
 public struct IssuePrescriptionRequest: Encodable {
     public let readinessAck: Bool
     public let confirmations: [String: Bool]?
     public let settings: PlanSettings?
+    public let executionTarget: PrescriptionExecutionTarget
 
-    public init(readinessAck: Bool, confirmations: [String: Bool]?, settings: PlanSettings?) {
+    public init(
+        readinessAck: Bool,
+        confirmations: [String: Bool]?,
+        settings: PlanSettings?,
+        executionTarget: PrescriptionExecutionTarget = .phone
+    ) {
         self.readinessAck = readinessAck
         self.confirmations = confirmations
         self.settings = settings
+        self.executionTarget = executionTarget
     }
 }
 

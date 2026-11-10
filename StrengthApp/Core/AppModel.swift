@@ -355,6 +355,11 @@ final class AppModel: ObservableObject {
                 deviceID: response.device.deviceId
             )
             phase = .paired
+            store.clearWatchLink()
+            watchPairing.reset()
+            if let session {
+                watchPairing.start(session: session, homeBaseURL: store.homeServerURL)
+            }
             let refreshed = await refresh()
             await recoverPendingMutations()
             if refreshed.succeeded, healthKitEnabled {
@@ -879,6 +884,7 @@ final class AppModel: ObservableObject {
         readinessAck: Bool,
         confirmations: [String: Bool]? = nil,
         settings: PlanSettings? = nil,
+        executionTarget: PrescriptionExecutionTarget = .phone,
         idempotencyKey: String
     ) async {
         guard !isSaving, let session else { return }
@@ -902,7 +908,8 @@ final class AppModel: ObservableObject {
                 IssuePrescriptionRequest(
                     readinessAck: readinessAck,
                     confirmations: confirmations,
-                    settings: settings
+                    settings: settings,
+                    executionTarget: executionTarget
                 ),
                 session: session,
                 idempotencyKey: idempotencyKey

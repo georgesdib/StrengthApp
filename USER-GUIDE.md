@@ -66,13 +66,15 @@ raw 100.x address.
 ## 4. Daily workout flow
 
 1. Open **Today** and review readiness and the prescription.
-2. Start the workout. The server issues the plan; the phone never invents plan content.
-3. Open an exercise and tap **Start set** before the set.
-4. Enter load, reps, RIR, and optional mean/per-rep velocity, then save.
-5. A working set starts the rest timer automatically. Warm-up sets (RIR 6) do not.
-6. Repeat for the remaining sets and exercises.
-7. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
-8. Review the completed session in **History**.
+2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
+   is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
+3. Start the workout. The server issues the plan; the phone never invents plan content.
+4. Open an exercise and tap **Start set** before the set.
+5. Enter load, reps, RIR, and optional mean/per-rep velocity, then save.
+6. A working set starts the rest timer automatically. Warm-up sets (RIR 6) do not.
+7. Repeat for the remaining sets and exercises.
+8. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
+9. Review the completed session in **History**.
 
 ### Set controls
 

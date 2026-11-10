@@ -62,6 +62,7 @@ public enum WatchTodayState: Equatable, Sendable {
     case missingCredentials
     case noPlan
     case phonePlan
+    case unsupportedTarget
     case generating(elapsedSeconds: Int?)
     case ready(WatchPlanSummary)
     case offline(WatchPlanSummary?)
@@ -70,15 +71,22 @@ public enum WatchTodayState: Equatable, Sendable {
 
 public enum WatchTodayMapper {
     public static func map(_ state: PlansStateResponse) -> WatchTodayState {
-        let target = state.executionTarget ?? "watch"
+        let target = state.executionTarget
         switch state.status {
         case "none":
             return .noPlan
         case "queued", "building":
-            return target == "phone" ? .phonePlan : .generating(elapsedSeconds: state.elapsedSeconds)
+            switch target {
+            case "watch":
+                return .generating(elapsedSeconds: state.elapsedSeconds)
+            case "phone":
+                return .phonePlan
+            default:
+                return .unsupportedTarget
+            }
         case "ready":
             guard target == "watch" else {
-                return .phonePlan
+                return target == "phone" ? .phonePlan : .unsupportedTarget
             }
             guard let plan = state.plan else {
                 return .unavailable("The server marked a plan ready without a plan body.")
@@ -101,7 +109,7 @@ public enum WatchTodayMapper {
                 items: items,
                 warnings: state.warnings ?? plan.warnings ?? [],
                 expiresAt: state.planExpiresAt,
-                executionTarget: target
+                executionTarget: "watch"
             ))
         default:
             return .unavailable("The server returned an unknown plan state.")

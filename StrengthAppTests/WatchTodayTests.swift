@@ -76,6 +76,15 @@ final class WatchTodayTests: XCTestCase {
         )
     }
 
+    func testMissingOrUnknownExecutionTargetFailsClosedWithoutPlanDetails() throws {
+        let missing = WatchTodayMapper.map(try planState(target: nil))
+        XCTAssertEqual(missing, .unsupportedTarget)
+
+        let unknown = WatchTodayMapper.map(try planState(target: "tablet"))
+        XCTAssertEqual(unknown, .unsupportedTarget)
+        XCTAssertFalse(String(describing: unknown).contains("back_squat"))
+    }
+
     func testNoPlanAndBuildingStates() throws {
         XCTAssertEqual(
             WatchTodayMapper.map(try planState(status: "none", withPlan: false)),

@@ -63,7 +63,7 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
 
 - [ ] Revoke the iPhone device on the server with the CLI (or re-pair the iPhone).
 - [ ] Confirm the iPhone's active child watch is also revoked in the same operation
-      (`revoked_watch_ids` in the DELETE response / `strength-coach ios devices`).
+      (`revoked_watch_ids` in the DELETE response; the CLI prints `revoked watches:`).
 - [ ] The old watch token cannot read any `/api/ios/v1/*` route.
 - [ ] A revocation context naming a different watch device is ignored; it must not clear the
       current watch token.
@@ -95,12 +95,15 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
 
 ## Read-only Today (6.2c)
 
-- [ ] With a ready plan requested for the watch, open Strength on the watch. It shows the session
-      type, date, exercise items with sets/reps/load/RIR/rest, warnings and **Read-only preview**.
+- [ ] On the iPhone, request a workout and choose **Apple Watch** as the device. The request uses
+      `execution_target: "watch"`; the iPhone shows the watch-targeted notice and no Start button.
+- [ ] Open Strength on the watch. It shows the session type, date, exercise items with
+      sets/reps/load/RIR/rest, warnings and **Read-only preview**.
 - [ ] The watch has no Start, Log set, Finish or edit control.
 - [ ] Tap Refresh on the watch to update the plan. Foregrounding the watch also refreshes it.
 - [ ] Request a plan for the iPhone. The watch shows "This workout is planned for iPhone" and does
-      not display the phone-targeted plan body.
+      not display the phone-targeted plan body. A plan with a missing or unknown target shows the
+      unsupported-target message and no prescription details.
 - [ ] With no plan, the watch shows "No workout for Apple Watch."
 - [ ] Kill the watch app and relaunch while offline. It does not fabricate a plan; it shows the
       connect-to-home message rather than a stale persisted plan.

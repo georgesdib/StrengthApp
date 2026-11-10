@@ -21,6 +21,12 @@ The server contracts are `docs/design/IOS-PHASE-1-CONTRACT.md`,
 `docs/design/IOS-PHASE-2-CONTRACT.md` and `docs/design/IOS-PHASE-3A-CONTRACT.md` in the
 `strength-training-app` repository. The client is this separate repository.
 
+## Agent documentation
+
+- [docs/AGENT-WORKFLOWS.md](docs/AGENT-WORKFLOWS.md) — build, test, CI and completion procedures.
+- [docs/AGENT-LIVE-TESTS.md](docs/AGENT-LIVE-TESTS.md) — disposable live-server UI acceptance.
+- [docs/AGENT-CONTRACTS.md](docs/AGENT-CONTRACTS.md) — server authority and API contract rules.
+
 ## User guide
 
 See [USER-GUIDE.md](USER-GUIDE.md) for pairing, Home/Away routing, workout controls, rest

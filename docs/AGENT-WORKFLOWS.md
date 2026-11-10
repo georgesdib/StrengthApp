@@ -13,9 +13,9 @@ workspace-wide rules are in ../../AGENTS.md.
 
 ## 2. Toolchain
 
-The deployed minimum is iOS 27.0. Build with Xcode 27.2. The local machine has an iOS 27.2
-simulator runtime; hosted CI has 27.0/27.1 runtimes. Do not raise the deployment target
-without checking the hosted runtime.
+The deployed minimum is iOS 27.0, and the watch app targets watchOS 27.0. Build with Xcode 27.2.
+The local machine has iOS 27.2 and watchOS 27.2 simulator runtimes; hosted CI has 27.0/27.1
+runtimes. Do not raise either deployment target without checking the hosted runtime.
 
 xcode-select points at CommandLineTools on this machine, so prefix build/test commands:
 
@@ -36,7 +36,9 @@ CI:
 
     scripts/ci.sh
 
-It builds and runs StrengthAppTests on a simulator. It refuses to run if LiveConfig.swift is
+It builds StrengthWatch on the first available Apple Watch simulator, builds StrengthApp
+(including the embedded Watch/StrengthWatch.app), and runs StrengthAppTests on an iPhone
+simulator. Override the watch with WATCH_DESTINATION. It refuses to run if LiveConfig.swift is
 filled. UI tests are excluded because they need a live server and pairing data.
 
 Focused unit run:
@@ -45,6 +47,12 @@ Focused unit run:
       -destination 'platform=iOS Simulator,id=<simulator-id>' \
       -derivedDataPath <derived> -only-testing:StrengthAppTests \
       OTHER_SWIFT_FLAGS='-disable-sandbox -Xcc -fmodules-cache-path=<derived>/clang-module-cache'
+
+Watch-only build:
+
+    xcodebuild -project StrengthApp.xcodeproj -scheme StrengthWatch \
+      -destination 'platform=watchOS Simulator,id=<watch-simulator-id>' \
+      -derivedDataPath <derived> build
 
 Release compile:
 
@@ -59,7 +67,8 @@ the full suite to watch it. Live UI tests use docs/AGENT-LIVE-TESTS.md.
 
 1. The narrowest relevant unit/UI tests pass.
 2. A new behaviour has a test that fails without it.
-3. The app builds under the current minimum.
+3. The app and the watch target build under the current minimums, and the app contains
+   Watch/StrengthWatch.app.
 4. LiveConfig.swift is disabled and git status is clean.
 5. UI changes are checked in portrait and landscape where relevant.
 6. User-visible changes update README/USER-GUIDE or relevant contract docs.
@@ -68,8 +77,8 @@ the full suite to watch it. Live UI tests use docs/AGENT-LIVE-TESTS.md.
 ## 5. CI rules
 
 .github/workflows/ios-ci.yml runs on pushes to main, PRs targeting main, and manual dispatch.
-It selects Xcode 27.2 and calls scripts/ci.sh. Change the script, not the workflow. Keep the
-workflow trigger and documentation in sync.
+It selects Xcode 27.2 and calls scripts/ci.sh, which builds both schemes. Change the script,
+not the workflow. Keep the workflow trigger and documentation in sync.
 
 The script refuses a filled LiveConfig.swift. A filled config carries a server address and a
 one-use pairing code.

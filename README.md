@@ -7,7 +7,9 @@ closed 2026-11-08** — Phase 3A is unit/simulator/live-server and physical-iPho
 offline capture and replay are closed 2026-11-08 (snapshot/outbox, add set/form/finish, ordered
 sync, conflict handling and cancellation); physical offline acceptance was owner-confirmed. R1 durable pending-mutation journal, R3 explicit plan-item selection,
 R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
-closed.
+closed. Phase 6.0 (the shared watch core) and 6.1 (the server watch contract) are complete. Phase
+6.2a adds the embedded watch app target and its CI build; the watch is still a shell with no
+pairing, credentials or Today screen.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
@@ -20,8 +22,8 @@ loads, sets and training decisions, and the phone never supplies plan content.
 The server-side contracts live in the `strength-training-app` repository; the
 [client docs index](docs/README.md) lists them. The Phase 6 watchOS companion contract is
 [`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md)
-in that repository; 6.0 (the S1–S4 shared core) and 6.1 (the server contract) are complete, and
-6.2+ is planned, not started. The client plan is
+in that repository; 6.0 (the S1–S4 shared core) and 6.1 (the server watch contract) are complete,
+and 6.2a adds the watch target. The client plan is
 [`docs/IOS-CLIENT-PLAN.md`](docs/IOS-CLIENT-PLAN.md); start with
 [`docs/README.md`](docs/README.md) for the client documentation map.
 
@@ -136,7 +138,7 @@ the Phase 4 offline capture path; plan edits remain online-only.
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 102 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 107 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
@@ -157,8 +159,9 @@ parsing and the refresh gate before import.
 
 ### Building and testing from the command line
 
-Prerequisites: Xcode 27.x, an iOS 27.x simulator runtime, and the Xcode developer directory
-selected. If `xcode-select -p` prints `/Library/Developer/CommandLineTools`, every `xcodebuild`
+Prerequisites: Xcode 27.x, an iOS 27.x simulator runtime, a watchOS 27.x simulator runtime, and
+the Xcode developer directory selected. If `xcode-select -p` prints
+`/Library/Developer/CommandLineTools`, every `xcodebuild`
 call fails with "requires Xcode"; either select it once
 (`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`) or prefix each command with
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
@@ -167,12 +170,16 @@ The repository tracks `project.xcproj` rather than a `project.pbxproj`; Xcode 27
 `xcodebuild` reads it directly, so there is nothing to generate first.
 
 ```bash
-# What exists: three targets and one shared scheme.
+# What exists: four targets and two shared schemes.
 xcodebuild -list -project StrengthApp.xcodeproj
 
-# Build the app for a simulator.
+# Build the app for a simulator. This also builds and embeds StrengthWatch.app.
 xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
+
+# Build the watch app on its own (use an available watch simulator id).
+xcodebuild -project StrengthApp.xcodeproj -scheme StrengthWatch \
+  -destination 'platform=watchOS Simulator,id=<watch-simulator-id>' build
 
 # Run every unit test.
 xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
@@ -184,7 +191,8 @@ xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
   -only-testing:StrengthAppTests/Phase2AppModelTests/testIssueStartSetAndCompleteFlow
 ```
 
-`./scripts/ci.sh` wraps the build and unit-test commands above and is what CI runs.
+`./scripts/ci.sh` wraps the watch build, the app build and the unit-test command above and is
+what CI runs. Set `WATCH_DESTINATION` to override the first available Apple Watch simulator.
 
 Install and launch the built app by hand (the UI test does this itself when it is enabled):
 

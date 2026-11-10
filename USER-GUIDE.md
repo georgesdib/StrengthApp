@@ -172,9 +172,33 @@ and HR is not used for readiness, fatigue, progression or prescriptions.
 
 - **Home/Away server** — addresses and preference.
 - **Exercise Library** — catalogue and history.
+- **Apple Watch** — pair, replace or revoke the watch credential.
 - **HealthKit** — opt-in readiness import.
 - **Forget this device** — removes the local token; the server-side device record is managed
   separately with the server CLI.
+
+### Apple Watch pairing
+
+The watch uses the **Home Server** only. Set a valid Home Server before pairing; the watch never
+follows the Away route.
+
+1. Install and open Strength on the Apple Watch once, then keep both apps open.
+2. On the iPhone, open **Settings → Apple Watch**.
+3. Tap **Pair Apple Watch**. The status changes from *Waiting for Apple Watch* to *Paired* when
+   the watch acknowledges the credential.
+4. If the status stays waiting, bring the watch near the phone, open both apps and try again.
+
+The watch receives its own server device token. The iPhone keeps that token only until the watch
+acknowledges it; the watch stores it in its own Keychain. **Replace Apple Watch** rotates the
+credential. **Revoke Apple Watch** revokes it on the server, clears the watch, and suppresses
+automatic re-pairing until you tap Pair again.
+
+Changing the Home Server and tapping **Save server settings** increments the watch configuration
+version. When the watch has no active session, it updates its Home address without receiving a new
+token.
+
+The current watch build shows pairing/credential status only. Workout and read-only Today screens
+arrive in later phases.
 
 If the server address changes, save the settings and let the app recheck. If you change to a
 different server/database, pair again.

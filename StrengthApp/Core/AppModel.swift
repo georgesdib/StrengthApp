@@ -104,6 +104,7 @@ final class AppModel: ObservableObject {
     private let client: IOSAPIClient
     private let tokens: TokenStoring
     private let store: PairedStore
+    let watchPairing: WatchPairingCoordinator
     private let healthKit: any HealthKitReadinessProviding
     private let healthKitDefaults: UserDefaults
     private let offlineStore: OfflineCaptureStore
@@ -130,7 +131,8 @@ final class AppModel: ObservableObject {
         store: PairedStore? = nil,
         healthKit: (any HealthKitReadinessProviding)? = nil,
         healthKitDefaults: UserDefaults = .standard,
-        offlineStore: OfflineCaptureStore? = nil
+        offlineStore: OfflineCaptureStore? = nil,
+        watchConnectivity: WatchConnectivitySession? = nil
     ) {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
@@ -138,9 +140,15 @@ final class AppModel: ObservableObject {
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
         let initialCapture = try? captureStore.load()
-        self.client = client ?? IOSAPIClient(journal: MutationJournal())
+        let apiClient = client ?? IOSAPIClient(journal: MutationJournal())
+        self.client = apiClient
         self.tokens = tokens ?? KeychainTokenStore()
         self.store = store
+        self.watchPairing = WatchPairingCoordinator(
+            client: apiClient,
+            store: store,
+            connectivity: watchConnectivity
+        )
         self.healthKit = readiness
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
@@ -243,6 +251,9 @@ final class AppModel: ObservableObject {
         pairedServerURL = baseURL.absoluteString
         pairingLabelText = pairedDevice.label
         phase = .paired
+        if let session {
+            watchPairing.start(session: session, homeBaseURL: store.homeServerURL)
+        }
         let refreshed = await refresh()
         isOffline = !refreshed.succeeded
         await recoverPendingMutations()
@@ -429,6 +440,7 @@ final class AppModel: ObservableObject {
         store.homeServerURL = home
         store.awayServerURL = away
         store.preferHome = preferHome
+        store.bumpWatchConfigVersion()
         homeServerText = home
         awayServerText = away
         if phase == .pairing {
@@ -437,6 +449,7 @@ final class AppModel: ObservableObject {
             return true
         }
         await recheckServerSelection(forceRefresh: true)
+        await watchPairing.configurationChanged(homeBaseURL: store.homeServerURL)
         return serverSettingsError == nil
     }
 
@@ -467,6 +480,9 @@ final class AppModel: ObservableObject {
             store.serverURL = baseURL.absoluteString
             serverURLText = baseURL.absoluteString
             pairedServerURL = baseURL.absoluteString
+            if let session {
+                watchPairing.updateSession(session, homeBaseURL: store.homeServerURL)
+            }
         }
         if changed || forceRefresh {
             let outcome = await refresh()
@@ -477,6 +493,9 @@ final class AppModel: ObservableObject {
     func appBecameActive() async {
         await recheckServerSelection()
         await syncOfflineCapture()
+        if phase == .paired, let session {
+            await watchPairing.foreground(session: session, homeBaseURL: store.homeServerURL)
+        }
     }
 
     // MARK: Reads
@@ -2098,8 +2117,10 @@ final class AppModel: ObservableObject {
         if let session {
             client.discardAll(for: session)
         }
+        watchPairing.reset()
         tokens.delete()
         store.device = nil
+        store.clearWatchLink()
         device = nil
         session = nil
         bootstrap = nil

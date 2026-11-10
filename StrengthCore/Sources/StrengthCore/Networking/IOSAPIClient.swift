@@ -218,7 +218,7 @@ public final class IOSAPIClient {
 
     // MARK: Input validation
 
-    public static func validatedBaseURL(_ raw: String) throws -> URL {
+    public nonisolated static func validatedBaseURL(_ raw: String) throws -> URL {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw APIError.invalidBaseURL("Enter the server address, for example http://192.168.1.10:8000.")
@@ -260,10 +260,10 @@ public final class IOSAPIClient {
         return cleaned
     }
 
-    public static func normalizeLabel(_ raw: String) throws -> String {
+    public static func normalizeLabel(_ raw: String, defaultLabel: String = "iPhone") throws -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let label = trimmed.isEmpty ? "iPhone" : trimmed
-        guard label.count <= 40 else {
+        let label = trimmed.isEmpty ? defaultLabel : trimmed
+        guard !label.isEmpty, label.count <= 40 else {
             throw APIError.invalidLabel("The device label must be 1-40 characters.")
         }
         return label
@@ -284,6 +284,47 @@ public final class IOSAPIClient {
         let (data, response) = try await performNoRetry(request)
         try validate(response, data: data)
         return try decode(PairResponse.self, from: data)
+    }
+
+    // MARK: Watch devices
+
+    public func mintWatch(
+        session: IOSSession,
+        label: String = "Apple Watch"
+    ) async throws -> WatchMintResponse {
+        let cleanLabel = try Self.normalizeLabel(label, defaultLabel: "Apple Watch")
+        var request = URLRequest(url: try url(path: "api/ios/v1/devices/watch", query: [], baseURL: session.baseURL))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(session.token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try encoder.encode(WatchMintRequest(label: cleanLabel))
+        let (data, response) = try await performNoRetry(request)
+        try validate(response, data: data)
+        return try decode(WatchMintResponse.self, from: data)
+    }
+
+    public func devices(session: IOSSession) async throws -> DeviceListResponse {
+        try await get(path: "api/ios/v1/devices", query: [], session: session)
+    }
+
+    public func revokeDevice(
+        deviceId: String,
+        session: IOSSession
+    ) async throws -> DeviceRevokeResponse {
+        var request = URLRequest(
+            url: try url(path: "api/ios/v1/devices/\(deviceId)", query: [], baseURL: session.baseURL)
+        )
+        request.httpMethod = "DELETE"
+        request.timeoutInterval = 10
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(session.token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await performNoRetry(request)
+        try validate(response, data: data)
+        return try decode(DeviceRevokeResponse.self, from: data)
     }
 
     public func bootstrap(session: IOSSession) async throws -> BootstrapResponse {
@@ -684,6 +725,10 @@ public final class IOSAPIClient {
 
     private struct PairRequest: Encodable {
         let code: String
+        let label: String
+    }
+
+    private struct WatchMintRequest: Encodable {
         let label: String
     }
 

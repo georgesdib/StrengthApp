@@ -27,9 +27,10 @@ closed.
 Server contracts:
 [`design/IOS-R7-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-R7-CONTRACT.md) and
 [`design/IOS-R8-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-R8-CONTRACT.md). Later phases remain proposals and need
-separate approval. **Phase 6 (watchOS companion) is in progress: 6.0 shared core and 6.1 server
-contract are complete; 6.2+ is planned, not started**:
-[`design/IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md); the watch target code has not started.
+separate approval. **Phase 6 (watchOS companion) is in progress: 6.0 shared core, 6.1 server
+contract, 6.2a watch target and 6.2b credential handoff are complete; 6.2c+ is planned, not
+started**:
+[`design/IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md); the watch shows credential status only.
 
 **Purpose:** deliver a practical iPhone interface for one person's existing strength-training workflow, without porting the training method or making a public cloud service a prerequisite. Start with an ordinary, connected strength session. Add offline capture, HealthKit, and Apple Intelligence only after the smaller client proves useful and reliable.
 
@@ -242,14 +243,15 @@ Only pursue after the core app is useful and stable, with a separate scope/appro
 
 **Acceptance:** each enhancement is independently disableable and does not become a dependency of pairing, readiness, prescription, workout capture, or review. On-device AI and PCC outputs are suggestions/text only; all numeric training data still pass through explicit user review and existing server validation.
 
-### Phase 6 — watchOS companion (6.0–6.1 complete; 6.2+ planned, not started)
+### Phase 6 — watchOS companion (6.0–6.2b complete; 6.2c+ pending)
 
 The phone plans; the watch executes. Full contract:
 [`design/IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md). Decisions locked 2026-11-09 and
 remediated the same day for extraction, credential handoff, the home-server config, offline-first
 execution, lifecycle, offline conflicts, HealthKit idempotency and acceptance. Targets:
-**iOS 27.0** and **watchOS 27.0**. The 6.0 shared-core extraction (S1–S4) and 6.1 server contract
-are complete, including migration `0058_watch_companion.sql`; 6.2 and later are not started.
+**iOS 27.0** and **watchOS 27.0**. The 6.0 shared-core extraction (S1–S4), 6.1 server contract,
+6.2a watch target and 6.2b credential handoff are complete, including migration
+`0058_watch_companion.sql`; 6.2c (read-only Today) and later are not started.
 
 **Scope.** The phone requests a plan with an explicit `execution_target` (`phone` or `watch`);
 the watch fetches the plan targeted for it, starts the session, logs sets, rest, form ratings and
@@ -273,8 +275,8 @@ on boundaries and per-stage acceptance.
 1. **6.0 StrengthCore extraction (iOS first) — complete 2026-11-10.** S1 models, S2 API client,
    S3 journal/Keychain/offline capture and S4 session reducer are in the package; the iPhone app is
    the adapter. Parity was proved per stage. Acceptance: the 102 existing iPhone tests stayed green,
-   five reducer tests were added (107 total), no view changed, and the package builds for iOS 27.0
-   and watchOS 27.0. S5 (the watch target) is 6.2.
+   five reducer tests were added (107 total at 6.0; 126 today with 6.2b coverage), no view changed,
+   and the package builds for iOS 27.0 and watchOS 27.0. S5 (the watch target) is 6.2a.
 2. **6.1 Server contract — complete 2026-11-10.** `0058_watch_companion.sql` adds watch kind,
    parent, monotonic `credential_epoch`, the one-active-watch index, `target_device_id` and
    `execution_target` on issued plans, and owner/revision/activity on workouts. Mint/list/revoke,
@@ -282,10 +284,12 @@ on boundaries and per-stage acceptance.
    `409 plan_item_mismatch`, idle warning and 24h lazy abandonment, 4h plan TTL and
    `watch_enabled` are implemented with migration, device, routing, ownership, revision, mismatch,
    idle and regression tests.
-3. **6.2 Watch shell and credentials.** Create the embedded watch target and scheme (S5), then
-   the WatchConnectivity handoff as state with epoch, `configVersion` and `homeBaseURL`,
-   acknowledgement, bounded foreground retry, 401/revocation recovery; no Home/Away switching;
-   plan fetch and a read-only Today.
+3. **6.2 Watch shell and credentials — 6.2a/b complete; 6.2c pending.** 6.2a created the
+   embedded watch target, scheme, CI build and credential-status shell. 6.2b adds the
+   WatchConnectivity handoff as state with epoch, `configVersion` and `homeBaseURL`,
+   acknowledgement, bounded foreground retry, 401/revocation recovery, phone-side Pair/Status/
+   Revoke and the watch Keychain; no Home/Away switching. 6.2c adds plan fetch and a read-only
+   Today.
 4. **6.3 Execution lifecycle.** HK-session-anchored state machine, persist-first set capture, rest
    timer persistence, offline-first network policy with partial flushes and 5s/15s/60s/5min backoff,
    finish queue and foreground retry, dim/background/termination/relaunch behaviour, and execution
@@ -479,18 +483,18 @@ was owner-confirmed. Phase 4 is closed under
 owner-confirmed.
 
 Phase 6 (watchOS companion) has an agreed plan and contract
-([`design/IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md)). Its 6.0 shared-core extraction and
-6.1 server contract are complete; 6.2 (watch shell and credentials) and later are **not started**
-and need a separate go-ahead.
+([`design/IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md)). Its 6.0 shared-core extraction,
+6.1 server contract, 6.2a watch target and 6.2b credential handoff are complete; 6.2c (read-only
+Today) and later are **not started** and need a separate go-ahead.
 
 Phase 3B (Apple Workout summaries and related cardio data) remains a separate proposal and needs
 its own approved contract. Phase 5 remains optional and separately approved. The agreed next plan
 is Phase 6, starting at 6.2. R7 and R8 are recorded in section 4.30 and their contracts rather
 than as pending next steps.
 
-Do not begin Phase 3B, cardio, PCC or Phase 6.2+ work without separate approval. Phase 4 is
-closed; Phase 3B remains a separate contract; Phase 6 has 6.0–6.1 complete, with 6.2+ planned but
-not started.
+Do not begin Phase 3B, cardio, PCC or Phase 6.2c+ work without separate approval. Phase 4 is
+closed; Phase 3B remains a separate contract; Phase 6 has 6.0–6.2b complete, with 6.2c+ planned
+but not started.
 
 ## 12. References
 

@@ -110,6 +110,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                WatchSettingsSection(model: model)
+
                 Section("This device") {
                     if let device = model.device {
                         LabeledContent("Label", value: device.label)

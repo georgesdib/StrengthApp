@@ -162,10 +162,20 @@
       "id": "000000000000000200000000",
       "product": "Products/StrengthWatch.app",
       "product-type": "application",
+      "dependencies": [
+        { "kind": "package", "package": "StrengthCore", "product-name": "StrengthCore" },
+      ],
       "build-phases": [
         "compile-sources",
         "frameworks",
         "resources",
+      ],
+      "package-product-members": [
+        {
+          "package": "StrengthCore",
+          "product-name": "StrengthCore",
+          "build-phase": { "build-phase": "frameworks" },
+        },
       ],
       "build-settings": {
         "CODE_SIGN_STYLE": "Automatic",

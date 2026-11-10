@@ -8,8 +8,9 @@ offline capture and replay are closed 2026-11-08 (snapshot/outbox, add set/form/
 sync, conflict handling and cancellation); physical offline acceptance was owner-confirmed. R1 durable pending-mutation journal, R3 explicit plan-item selection,
 R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
 closed. Phase 6.0 (the shared watch core) and 6.1 (the server watch contract) are complete. Phase
-6.2a adds the embedded watch app target and its CI build; the watch is still a shell with no
-pairing, credentials or Today screen.
+6.2a adds the embedded watch app target and its CI build; 6.2b adds the credential/config handoff,
+phone-side Pair/Status/Revoke and the watch's Keychain receiver. The watch shows credential status
+only; read-only Today is 6.2c.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
@@ -22,8 +23,8 @@ loads, sets and training decisions, and the phone never supplies plan content.
 The server-side contracts live in the `strength-training-app` repository; the
 [client docs index](docs/README.md) lists them. The Phase 6 watchOS companion contract is
 [`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md)
-in that repository; 6.0 (the S1–S4 shared core) and 6.1 (the server watch contract) are complete,
-and 6.2a adds the watch target. The client plan is
+in that repository; 6.0 (the S1–S4 shared core), 6.1 (the server watch contract), 6.2a (the watch
+target) and 6.2b (credential handoff) are complete. The client plan is
 [`docs/IOS-CLIENT-PLAN.md`](docs/IOS-CLIENT-PLAN.md); start with
 [`docs/README.md`](docs/README.md) for the client documentation map.
 
@@ -102,8 +103,8 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 - **Progress** — the server dashboard: sRPE coverage, performance points, weekly volume, attendance
   and back-symptom summary over a 4/8/12/26/52-week window.
 - **Settings** — Home Server, Away Server, Prefer Home Server, active route, Exercise Library,
-  device id/label, app version, opt-in HealthKit readiness, Forget this device (local token only),
-  re-pair instructions.
+  Apple Watch Pair/Status/Revoke, device id/label, app version, opt-in HealthKit readiness, Forget
+  this device (local token only), re-pair instructions.
 - **Exercise Library** — searchable catalogue, read-only configuration, server-computed e1RM and
   paginated working-set history; catalogue/config cached for the app session, e1RM/history fetched
   on entry, explicit refresh.
@@ -133,12 +134,16 @@ the Phase 4 offline capture path; plan edits remain online-only.
   and a separate physical R1 pass was not performed.
 - 401/403 clears the local pairing and returns to the pairing screen. Other 4xx show the server
   message/code; 5xx shows a generic failure.
+- The watch has its own server device/token. The phone holds that token in memory only until the
+  watch acknowledges it; the watch stores it in its own Keychain. Non-secret watch metadata
+  (device id, epoch, configVersion, Home URL) is separate from the token. The watch never follows
+  the phone's Away route.
 - Plain HTTP on the trusted home LAN. No TLS, proxy, CA or remote access. No analytics, telemetry,
   advertising, cloud database or Internet fallback.
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 107 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 126 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
@@ -155,7 +160,10 @@ non-blocking form-rating failure, R5 server-active/ended-elsewhere/consumed-pres
 Phase 3A Apple Watch classification, HRV/RHR/bodyweight selection/freshness, per-metric
 eligible/missing/stale states, coalesced authoritative refresh, import/refresh concurrency,
 HealthKit request encoding and indeterminate no-sample handling, plus optional per-rep velocity
-parsing and the refresh gate before import.
+parsing and the refresh gate before import. Watch tests cover credential payload validation,
+epoch/configVersion ordering, stale/revoked re-ack, config-only refresh without a token, the
+watch Keychain/metadata split, mint/list/revoke requests, the phone handoff state machine, a lost
+acknowledgement, re-mint on missing credentials, and deliberate revoke suppression.
 
 ### Building and testing from the command line
 
@@ -211,8 +219,9 @@ Two failure modes that are environmental rather than code:
   command: `script -q /dev/null xcodebuild test …` (macOS). The build alone does not need it.
 
 The physical-device Phase 3A checklist and rollback steps are in
-[`DEVICE-ACCEPTANCE.md`](DEVICE-ACCEPTANCE.md); the server-side backup, migration and
-pairing-code runbook is in
+[`DEVICE-ACCEPTANCE.md`](DEVICE-ACCEPTANCE.md). The Phase 6.2b watch credential handshake and
+revocation script is in [`WATCH-ACCEPTANCE.md`](WATCH-ACCEPTANCE.md); it is owner-run and has not
+been performed. The server-side backup, migration and pairing-code runbook is in
 [`docs/IOS-CLIENT-PLAN.md`](docs/IOS-CLIENT-PLAN.md) §13.3.
 
 ### Running the live UI tests

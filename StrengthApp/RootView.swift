@@ -2,8 +2,14 @@ import SwiftUI
 import StrengthCore
 
 struct RootView: View {
-    @StateObject private var model = AppModel()
+    @StateObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        _model = StateObject(wrappedValue: AppModel(
+            watchConnectivity: LiveWatchConnectivitySession()
+        ))
+    }
 
     var body: some View {
         Group {

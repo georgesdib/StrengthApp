@@ -9,8 +9,8 @@ sync, conflict handling and cancellation); physical offline acceptance was owner
 R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
 closed. Phase 6.0 (the shared watch core) and 6.1 (the server watch contract) are complete. Phase
 6.2a adds the embedded watch app target and its CI build; 6.2b adds the credential/config handoff,
-phone-side Pair/Status/Revoke and the watch's Keychain receiver. The watch shows credential status
-only; read-only Today is 6.2c.
+phone-side Pair/Status/Revoke and the watch's Keychain receiver; 6.2c adds the read-only Today
+plan fetch. The watch has no start, set logging, HealthKit or offline execution yet.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
@@ -24,7 +24,7 @@ The server-side contracts live in the `strength-training-app` repository; the
 [client docs index](docs/README.md) lists them. The Phase 6 watchOS companion contract is
 [`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md)
 in that repository; 6.0 (the S1–S4 shared core), 6.1 (the server watch contract), 6.2a (the watch
-target) and 6.2b (credential handoff) are complete. The client plan is
+target), 6.2b (credential handoff) and 6.2c (read-only Today) are complete. The client plan is
 [`docs/IOS-CLIENT-PLAN.md`](docs/IOS-CLIENT-PLAN.md); start with
 [`docs/README.md`](docs/README.md) for the client documentation map.
 
@@ -105,6 +105,8 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 - **Settings** — Home Server, Away Server, Prefer Home Server, active route, Exercise Library,
   Apple Watch Pair/Status/Revoke, device id/label, app version, opt-in HealthKit readiness, Forget
   this device (local token only), re-pair instructions.
+- **Apple Watch** — credential status plus a read-only Today plan fetched from the Home server;
+  phone-targeted plans are hidden; no start, sets, forms, HealthKit or offline execution.
 - **Exercise Library** — searchable catalogue, read-only configuration, server-computed e1RM and
   paginated working-set history; catalogue/config cached for the app session, e1RM/history fetched
   on entry, explicit refresh.
@@ -143,7 +145,7 @@ the Phase 4 offline capture path; plan edits remain online-only.
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 159 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 164 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
@@ -166,7 +168,9 @@ watch Keychain/metadata split, mint/list/revoke requests, the phone handoff stat
 acknowledgement, re-mint on missing credentials, deliberate revoke suppression, cross-device
 revocation rejection, duplicate-revocation idempotence, tokenless-probe recovery from stale
 metadata, credential-lineage replacement, Home-only watch API routing, configuration-version
-re-baselining, and convergence to a fresh epoch or config without an acknowledgement loop.
+re-baselining, and convergence to a fresh epoch or config without an acknowledgement loop. The
+read-only watch Today tests cover plan-state mapping, watch-target filtering, plan item labels,
+bootstrap plus plan fetches over the supplied watch session, and authentication failure.
 
 ### Building and testing from the command line
 

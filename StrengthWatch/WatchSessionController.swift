@@ -110,7 +110,7 @@ final class WatchSessionController: NSObject, ObservableObject {
         retryTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
             guard !Task.isCancelled else { return }
-            await self?.sendAcknowledgement()
+            self?.sendAcknowledgement()
         }
     }
 

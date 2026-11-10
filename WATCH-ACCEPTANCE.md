@@ -1,4 +1,4 @@
-# Phase 6.2b watch credential acceptance — owner-run
+# Phase 6.2b/6.2c watch acceptance — owner-run
 
 **Status: not yet performed.** This script is for the owner's physical iPhone + Apple Watch. A
 simulator build is not proof of WatchConnectivity delivery, Keychain isolation or watch installation.
@@ -92,6 +92,22 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
 - [ ] Turn off Wi-Fi on the watch (or move it out of range) and change the Home Server. The watch
       keeps its old Home URL and does not switch to Away; it updates when it can reach the phone and
       the new Home server.
+
+## Read-only Today (6.2c)
+
+- [ ] With a ready plan requested for the watch, open Strength on the watch. It shows the session
+      type, date, exercise items with sets/reps/load/RIR/rest, warnings and **Read-only preview**.
+- [ ] The watch has no Start, Log set, Finish or edit control.
+- [ ] Tap Refresh on the watch to update the plan. Foregrounding the watch also refreshes it.
+- [ ] Request a plan for the iPhone. The watch shows "This workout is planned for iPhone" and does
+      not display the phone-targeted plan body.
+- [ ] With no plan, the watch shows "No workout for Apple Watch."
+- [ ] Kill the watch app and relaunch while offline. It does not fabricate a plan; it shows the
+      connect-to-home message rather than a stale persisted plan.
+- [ ] Revoke the watch credential while the watch is open, then refresh. The watch clears its token,
+      shows the pairing instruction, and does not retry in a loop.
+- [ ] Stop the Home server, then refresh. The watch shows an offline/Home error; it does not fall
+      back to Away and does not display the phone's current plan as a watch plan.
 
 ## Secrets and cleanup
 

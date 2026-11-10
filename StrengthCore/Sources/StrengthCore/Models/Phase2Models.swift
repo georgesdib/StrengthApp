@@ -211,6 +211,7 @@ public struct PlansStateResponse: Decodable {
     public let planExpiresAt: String?
     public let retryAfterMs: Int?
     public let settings: PlanSettings?
+    public let executionTarget: String?
     public let sessionType: String?
     public let plan: PrescriptionPlan?
     public let readiness: ReadinessScore?
@@ -220,7 +221,8 @@ public struct PlansStateResponse: Decodable {
     public static let none = PlansStateResponse(
         status: "none", issuedPlanId: nil, forDate: nil, elapsedSeconds: nil,
         requestExpiresAt: nil, planExpiresAt: nil, retryAfterMs: nil, settings: nil,
-        sessionType: nil, plan: nil, readiness: nil, warnings: nil, error: nil
+        executionTarget: nil, sessionType: nil, plan: nil, readiness: nil, warnings: nil,
+        error: nil
     )
 
     /// A ready state is the only one that can be previewed and started.
@@ -233,7 +235,8 @@ public struct PlansStateResponse: Decodable {
             expiresAt: planExpiresAt ?? "",
             plan: plan,
             readiness: readiness,
-            warnings: warnings ?? []
+            warnings: warnings ?? [],
+            executionTarget: executionTarget
         )
     }
 }
@@ -247,6 +250,7 @@ public struct IssuedPlanResponse: Identifiable {
     public let plan: PrescriptionPlan
     public let readiness: ReadinessScore?
     public let warnings: [String]
+    public let executionTarget: String?
 
     public var id: String { issuedPlanId }
 }

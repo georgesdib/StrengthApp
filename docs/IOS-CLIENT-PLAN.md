@@ -28,9 +28,9 @@ Server contracts:
 [`design/IOS-R7-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-R7-CONTRACT.md) and
 [`design/IOS-R8-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-R8-CONTRACT.md). Later phases remain proposals and need
 separate approval. **Phase 6 (watchOS companion) is in progress: 6.0 shared core, 6.1 server
-contract, 6.2a watch target and 6.2b credential handoff are complete; 6.2c+ is planned, not
-started**:
-[`design/IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md); the watch shows credential status only.
+contract, 6.2a watch target, 6.2b credential handoff and 6.2c read-only Today are complete; 6.3+ is
+planned, not started**:
+[`design/IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/design/IOS-WATCH-CONTRACT.md); the watch cannot start or log a workout yet.
 
 **Purpose:** deliver a practical iPhone interface for one person's existing strength-training workflow, without porting the training method or making a public cloud service a prerequisite. Start with an ordinary, connected strength session. Add offline capture, HealthKit, and Apple Intelligence only after the smaller client proves useful and reliable.
 
@@ -284,12 +284,11 @@ on boundaries and per-stage acceptance.
    `409 plan_item_mismatch`, idle warning and 24h lazy abandonment, 4h plan TTL and
    `watch_enabled` are implemented with migration, device, routing, ownership, revision, mismatch,
    idle and regression tests.
-3. **6.2 Watch shell and credentials — 6.2a/b complete; 6.2c pending.** 6.2a created the
-   embedded watch target, scheme, CI build and credential-status shell. 6.2b adds the
-   WatchConnectivity handoff as state with epoch, `configVersion` and `homeBaseURL`,
-   acknowledgement, bounded foreground retry, 401/revocation recovery, phone-side Pair/Status/
-   Revoke and the watch Keychain; no Home/Away switching. 6.2c adds plan fetch and a read-only
-   Today.
+3. **6.2 Watch shell, credentials and read-only Today — complete.** 6.2a created the embedded
+   watch target, scheme and CI build. 6.2b added the WatchConnectivity credential handoff with
+   epoch, `configVersion`, `homeBaseURL`, bounded retry, 401/revocation recovery and Home-only
+   API sessions. 6.2c adds the read-only plan fetch and watches-targeted Today display; it does
+   not start or log a workout.
 4. **6.3 Execution lifecycle.** HK-session-anchored state machine, persist-first set capture, rest
    timer persistence, offline-first network policy with partial flushes and 5s/15s/60s/5min backoff,
    finish queue and foreground retry, dim/background/termination/relaunch behaviour, and execution

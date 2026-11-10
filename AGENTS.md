@@ -3,12 +3,15 @@
 Lean entry point for agents editing the native iPhone client. Read the workspace-level
 ../AGENTS.md first, then the topic document for the task:
 
+- docs/README.md — client documentation index and repository ownership.
 - docs/AGENT-WORKFLOWS.md — build, test, CI, toolchain, branch and completion procedure.
 - docs/AGENT-LIVE-TESTS.md — disposable-server live UI setup and cleanup.
 - docs/AGENT-CONTRACTS.md — API authority and client/server contract rules.
+- docs/IOS-CLIENT-PLAN.md — phased client plan, architecture invariants and rollback gates.
 
-README.md remains the project overview and build recipe. Server contracts live in the sibling
-strength-training-app repository.
+README.md remains the project overview and build recipe. The client plan and documentation index
+live in this repository; server API/data-model contracts live in the sibling strength-training-app
+repository. Do not copy those contracts here.
 
 ## Branch
 

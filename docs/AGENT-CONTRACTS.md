@@ -21,8 +21,13 @@ The server repository is authoritative for:
 - docs/design/IOS-PHASE-4-CONTRACT.md
 - docs/design/IOS-R7-CONTRACT.md
 - docs/design/IOS-R8-CONTRACT.md
+- docs/design/IOS-WATCH-CONTRACT.md
 - docs/API.md
 - docs/DATA-MODEL.md
+
+The client-side phase plan is [`IOS-CLIENT-PLAN.md`](IOS-CLIENT-PLAN.md) in this repository. It
+describes the phases, invariants and rollback gates, but it is not a substitute for a server
+contract. Start with [README.md](README.md) for the client documentation map.
 
 Read the relevant contract before editing. Do not infer a contract from Swift models alone.
 

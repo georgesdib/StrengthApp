@@ -89,10 +89,15 @@ private/BUILD-TEST-QUIRKS.md in the same turn. Read that file before a build/tes
 
 - README.md — build/test/architecture.
 - USER-GUIDE.md — owner-facing iPhone use.
+- DEVICE-ACCEPTANCE.md — physical acceptance checklist.
+- docs/README.md — client documentation index and repository ownership.
+- docs/IOS-CLIENT-PLAN.md — phased client plan, invariants and rollback gates.
 - docs/AGENT-LIVE-TESTS.md — disposable live server/UI acceptance.
 - docs/AGENT-CONTRACTS.md — server authority and additive client/server changes.
-- DEVICE-ACCEPTANCE.md — physical acceptance checklist.
 
+Put client-owned documents in this repository and link to server contracts rather than copying
+them. The portfolio placement policy is
+[`docs/DOCUMENTATION.md`](https://github.com/georgesdib/strength-app/blob/main/docs/DOCUMENTATION.md).
 Do not duplicate live-test secrets or real server values in tracked files.
 
 ## 8. Reporting

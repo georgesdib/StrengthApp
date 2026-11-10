@@ -1,7 +1,8 @@
 # StrengthApp — iPhone user guide
 
 This is the owner-facing guide for the native iPhone client. The server, web UI and training
-engine are documented separately in the strength-training-app repository.
+engine are documented separately in the
+[strength-training-app docs](https://github.com/georgesdib/strength-training-app/blob/development/docs/README.md).
 
 ## 1. What the app does
 

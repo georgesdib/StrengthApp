@@ -1120,20 +1120,16 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .addSet, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.addSet(
+            let updated = try await client.addSet(
                 workoutId: workout.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1199,20 +1195,16 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .rateForm, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.rateForm(
+            let updated = try await client.rateForm(
                 workoutId: workout.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1741,12 +1733,11 @@ final class AppModel: ObservableObject {
                 localSetId: localId
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
-            activeWorkout = updated
+            _ = apply(.operationQueued(updated))
             isOffline = true
-            mutationError = nil
             return true
         } catch {
-            mutationError = message(for: error)
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
             return false
         }
     }
@@ -1782,12 +1773,11 @@ final class AppModel: ObservableObject {
                 localFormId: localId
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
-            activeWorkout = updated
+            _ = apply(.operationQueued(updated))
             isOffline = true
-            mutationError = nil
             return true
         } catch {
-            mutationError = message(for: error)
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
             return false
         }
     }

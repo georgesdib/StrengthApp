@@ -1160,20 +1160,16 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .removeSet, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.removeSet(
+            let updated = try await client.removeSet(
                 workoutId: workoutId,
                 body: RemoveSetRequest(setId: setId),
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true

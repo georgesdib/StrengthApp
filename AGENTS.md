@@ -4,6 +4,23 @@ Rules for any agent (or human) editing this repository. The project overview and
 recipe are in [`README.md`](README.md); the server contracts live in the sibling
 `strength-training-app` repository.
 
+## Output discipline
+
+Never paste full test, build, install, log, database, or command output into
+context.
+
+On failure, return only:
+1. Pass/fail summary.
+2. Failing test or command.
+3. Assertion/error message.
+4. Relevant traceback/log excerpt, maximum 40 lines.
+5. Most likely cause.
+6. Minimal next diagnostic command.
+
+Use targeted searches and small file excerpts. Do not read generated artefacts,
+large logs, exports, lockfiles, build outputs, or databases unless essential.
+
+
 ## Working branch
 
 All development happens on the `development` branch unless the owner explicitly says otherwise.

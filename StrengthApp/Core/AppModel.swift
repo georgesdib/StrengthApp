@@ -543,11 +543,12 @@ final class AppModel: ObservableObject {
                 }
             }
             let previousActive = activeWorkout
+            var reconciled = previousActive
             if hasPendingOfflineCapture {
                 // Pending offline work owns the local active-workout view. A completed finish
                 // leaves this nil while failed/conflict operations remain; do not resurrect a
                 // server workout for that state.
-                activeWorkout = offlineCapture?.activeWorkout
+                reconciled = offlineCapture?.activeWorkout
                 workoutRefreshGrace = false
             } else if let serverActive = newToday.activeWorkout {
                 if previousActive?.workoutId != serverActive.workoutId {
@@ -556,27 +557,27 @@ final class AppModel: ObservableObject {
                         sessionType: serverActive.sessionType
                     )
                 }
-                activeWorkout = serverActive
+                reconciled = serverActive
                 workoutRefreshGrace = false
             } else if let previousActive, previousActive.status == "in_progress" {
                 if workoutRefreshGrace {
                     // A mutation just returned an in-progress workout. Keep it for this read;
                     // the next refresh can still reconcile an externally finished workout.
                     workoutRefreshGrace = false
-                    activeWorkout = previousActive
+                    reconciled = previousActive
                 } else {
                     // The server no longer has the workout this session was showing. Do not
                     // silently keep stale local state; surface it for reconciliation.
-                    activeWorkout = nil
+                    reconciled = nil
                     recoveryIssue = .workoutEndedElsewhere(
                         workoutId: previousActive.workoutId
                     )
                 }
             } else {
-                activeWorkout = nil
+                reconciled = nil
                 workoutRefreshGrace = false
             }
-            persistActiveWorkout()
+            _ = apply(.activeWorkoutChanged(reconciled))
             isOffline = false
             if !healthKitEnabled {
                 healthKitState = .featureDisabled
@@ -591,7 +592,7 @@ final class AppModel: ObservableObject {
         } catch {
             isOffline = true
             if activeWorkout == nil, let cached = offlineCapture?.activeWorkout {
-                activeWorkout = cached
+                _ = apply(.activeWorkoutChanged(cached))
             }
             handle(error)
             return .failure(message(for: error))
@@ -1070,22 +1071,18 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .startWorkout, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.startWorkout(
+            let workout = try await client.startWorkout(
                 issuedPlanId: issued.issuedPlanId,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
+            _ = apply(.operationSucceeded(workout))
             try? offlineStore.clear()
             offlineCapture = try? offlineStore.load()
             persistActiveWorkout()
-            mutationError = nil
             recoveryIssue = nil
             workoutRefreshGrace = true
             await refresh()
@@ -1124,20 +1121,16 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .addSet, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.addSet(
+            let updated = try await client.addSet(
                 workoutId: workout.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1168,20 +1161,16 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .removeSet, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.removeSet(
+            let updated = try await client.removeSet(
                 workoutId: workoutId,
                 body: RemoveSetRequest(setId: setId),
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1203,20 +1192,16 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .rateForm, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.rateForm(
+            let updated = try await client.rateForm(
                 workoutId: workout.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1410,15 +1395,11 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .planEdit, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await operation()
-            mutationError = nil
+            let updated = try await operation()
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1454,20 +1435,16 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .completeWorkout, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.completeWorkout(
+            let updated = try await client.completeWorkout(
                 workoutId: workout.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             recoveryIssue = nil
             workoutRefreshGrace = false
             try? offlineStore.clear()
@@ -1497,21 +1474,17 @@ final class AppModel: ObservableObject {
         if hasPendingOfflineCapture {
             await syncOfflineCapture()
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.abandonWorkout(
+            let updated = try await client.abandonWorkout(
                 workoutId: workout.workoutId,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
+            _ = apply(.operationSucceeded(updated))
             try? offlineStore.clear()
             offlineCapture = try? offlineStore.load()
-            mutationError = nil
             recoveryIssue = nil
             workoutRefreshGrace = false
             await refresh()
@@ -1642,6 +1615,34 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    private func apply(_ event: SessionEvent) -> [SessionEffect] {
+        let current = SessionState(
+            activeWorkout: activeWorkout,
+            isSaving: isSaving,
+            mutationError: mutationError,
+            mutationFailureAmbiguous: mutationFailureAmbiguous
+        )
+        let (next, effects) = SessionReducer.reduce(current, event)
+        activeWorkout = next.activeWorkout
+        isSaving = next.isSaving
+        mutationError = next.mutationError
+        mutationFailureAmbiguous = next.mutationFailureAmbiguous
+        for effect in effects {
+            execute(effect)
+        }
+        return effects
+    }
+
+    private func execute(_ effect: SessionEffect) {
+        switch effect {
+        case .persistActiveWorkout:
+            persistActiveWorkout()
+        case .refreshPendingMutations:
+            refreshPendingMutations()
+        }
+    }
+
     private func refreshPendingMutations() {
         guard let session else {
             pendingMutations = []
@@ -1717,12 +1718,11 @@ final class AppModel: ObservableObject {
                 localSetId: localId
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
-            activeWorkout = updated
+            _ = apply(.operationQueued(updated))
             isOffline = true
-            mutationError = nil
             return true
         } catch {
-            mutationError = message(for: error)
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
             return false
         }
     }
@@ -1758,12 +1758,11 @@ final class AppModel: ObservableObject {
                 localFormId: localId
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
-            activeWorkout = updated
+            _ = apply(.operationQueued(updated))
             isOffline = true
-            mutationError = nil
             return true
         } catch {
-            mutationError = message(for: error)
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
             return false
         }
     }
@@ -1792,11 +1791,11 @@ final class AppModel: ObservableObject {
                 createdAt: Date()
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: workout)
+            _ = apply(.operationQueued(workout))
             isOffline = true
-            mutationError = nil
             return true
         } catch {
-            mutationError = message(for: error)
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
             return false
         }
     }
@@ -2155,11 +2154,13 @@ final class AppModel: ObservableObject {
 
     private func handleMutation(_ error: Error) {
         if let api = error as? APIError, api.isAuthenticationFailure {
-            mutationFailureAmbiguous = false
+            _ = apply(.mutationErrorCleared)
             forgetLocally(message: api.errorDescription)
         } else {
-            mutationError = message(for: error)
-            mutationFailureAmbiguous = Self.isAmbiguous(error)
+            _ = apply(.operationFailed(
+                message: message(for: error),
+                ambiguous: Self.isAmbiguous(error)
+            ))
         }
     }
 

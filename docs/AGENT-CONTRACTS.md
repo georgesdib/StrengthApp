@@ -79,5 +79,5 @@ than duplicating policy.
 - Changing a training rule or threshold.
 - Breaking an API contract.
 - Making the client authoritative for any training decision.
-- Merging a worktree/branch or pushing an integration branch.
+- Merging or pushing an integration branch.
 - Adding a Watch app or a new data-sharing/cloud surface.

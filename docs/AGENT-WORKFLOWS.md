@@ -3,13 +3,12 @@
 Detailed procedures for the native iPhone client. The lean entry point is ../AGENTS.md;
 workspace-wide rules are in ../../AGENTS.md.
 
-## 1. Branch and worktree
+## 1. Branch
 
 - Work on development; main is integration-only.
 - Merge development into main with a merge commit, never squash. Squash is for short-lived
   feature branches only.
-- Use a git worktree for isolated work. Do not merge or push an integration branch until the
-  owner explicitly says so.
+- Do not merge or push an integration branch until the owner explicitly says so.
 - Keep the CI workflow aligned with main; scripts/ci.sh is the single entry point.
 
 ## 2. Toolchain

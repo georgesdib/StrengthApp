@@ -10,27 +10,13 @@ Lean entry point for agents editing the native iPhone client. Read the workspace
 README.md remains the project overview and build recipe. Server contracts live in the sibling
 strength-training-app repository.
 
-## Output discipline
-
-Never paste full test, build, install, log, database, or command output into context.
-
-On failure, return only:
-1. Pass/fail summary.
-2. Failing test or command.
-3. Assertion/error message.
-4. Relevant traceback/log excerpt, maximum 40 lines.
-5. Most likely cause.
-6. Minimal next diagnostic command.
-
-Use targeted searches and small file excerpts. Do not read generated artefacts,
-large logs, exports, lockfiles, build outputs, or databases unless essential.
-
-## Branch and worktree
+## Branch
 
 - Development happens on development, not main.
 - main is integration-only; merge development into main with a merge commit, never squash.
-- Use an isolated git worktree and branch for a multi-step change.
 - Do not merge or push an integration branch without the owner's explicit instruction.
+
+Output discipline and high-risk approval rules are defined by the workspace `../AGENTS.md`.
 
 ## Contract authority
 

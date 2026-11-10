@@ -93,7 +93,7 @@ server date for the pairing test with a new code.
 3. Confirm the visible file has enabled = false.
 4. Stop the disposable server job.
 5. Check git status; no filled config or generated artifacts may remain.
-6. Do not merge the worktree/branch until the owner says so.
+6. Do not merge or push an integration branch until the owner says so.
 
 ## 7. Evidence and limitations
 

@@ -67,8 +67,10 @@ struct WatchSetPage: View {
                         .foregroundStyle(.secondary)
 
                     if execution.activeSet == nil {
-                        Button("Start set") { execution.beginSet() }
-                            .font(.footnote)
+                        Button("Start set") {
+                            execution.beginSet(loadKg: loadKg, reps: reps)
+                        }
+                        .font(.footnote)
                     } else {
                         Text("Set in progress")
                             .font(.caption2)
@@ -105,6 +107,10 @@ struct WatchSetPage: View {
                         .font(.caption2)
                         .foregroundStyle(.red)
                 }
+                if execution.exerciseItemIndex != nil {
+                    Button("Done with exercise") { execution.doneWithExercise() }
+                        .font(.footnote)
+                }
                 if execution.canUndo {
                     Button("Undo last set") { execution.undoLastSet() }
                         .font(.footnote)
@@ -115,6 +121,9 @@ struct WatchSetPage: View {
         }
         .onAppear { prepare() }
         .onChange(of: execution.currentItem?.exerciseId) { _, _ in prepare() }
+        .onChange(of: execution.currentItem?.orderIndex) { _, _ in prepare() }
+        .onChange(of: loadKg) { _, value in execution.draftChanged(loadKg: value, reps: reps) }
+        .onChange(of: reps) { _, value in execution.draftChanged(loadKg: loadKg, reps: value) }
         .sheet(isPresented: $showingRIR) { rirPicker }
     }
 
@@ -180,11 +189,18 @@ struct WatchSetPage: View {
 
     private func prepare() {
         guard let item = execution.currentItem else { return }
-        let key = item.exerciseId ?? "item"
-        guard preparedFor != key || loadKg == 0 else { return }
+        let itemIndex = item.orderIndex ?? -1
+        let key = "\(itemIndex)-\(item.exerciseId ?? "")"
+        guard preparedFor != key else { return }
         preparedFor = key
-        loadKg = item.loadKg ?? loadKg
-        reps = item.repsLow ?? item.repsHigh ?? reps
+        if let active = execution.activeSet, active.planItemIndex == itemIndex {
+            // A terminated session restored its draft: keep the lifter's adjustments.
+            loadKg = active.loadKg ?? item.loadKg ?? loadKg
+            reps = active.reps ?? item.repsLow ?? item.repsHigh ?? reps
+        } else {
+            loadKg = item.loadKg ?? loadKg
+            reps = item.repsLow ?? item.repsHigh ?? reps
+        }
     }
 
     private func adjustLoad(_ delta: Double) {
@@ -279,10 +295,7 @@ struct WatchSessionPage: View {
     }
 
     private func elapsed(at date: Date) -> String {
-        guard let startedAt = execution.workout?.startedAt.flatMap(ServerClock.parse) else {
-            return "0:00"
-        }
-        let seconds = max(0, Int(date.timeIntervalSince(startedAt)))
+        let seconds = Int(execution.elapsed(at: date))
         return "\(seconds / 60):\(String(format: "%02d", seconds % 60))"
     }
 }

@@ -101,6 +101,34 @@ move ahead of the set it describes. "Pending" in the UI counts user work, not te
 `WATCH-ACCEPTANCE.md` gained the owner-run 6.3 section. The portfolio plan status update stays
 open until this slice is reviewed.
 
+## 6.3 fixups — complete 2026-11-11
+
+Review findings closed after 6.3c, all within the slice (nothing here is 6.4 conflict or revision
+work):
+
+- **One write per action.** `OfflineCaptureStore.perform` applies the outbox operation, the
+  session-record change and the telemetry event in a single save, so a termination cannot leave a
+  queued set beside a stale active set or a set without its completion event.
+- **Finish closes what is open.** Finishing during a rest emits `rest_completed` at the finish
+  timestamp; finishing during an unlogged set drops the queued `set_started`, because a set that
+  never happened leaves no record.
+- **Rest follows a durable set.** `logSet` returns a capture result separate from the flush
+  result, and rest starts only when the set was persisted locally.
+- **Elapsed time is server-adjusted** through the persisted offset, so a fast or slow watch clock
+  cannot distort the session clock. A derived offset larger than a day is treated as a wrong watch
+  clock and ignored rather than shifting captures out of the replay window.
+- **Network-path changes retry** through `NWPathMonitor`; together with foreground and the manual
+  retry this satisfies contract §10.7 after the 15-minute window is spent.
+- **The set draft survives termination**: load and reps are persisted into `ActiveSet` (throttled)
+  and restored on relaunch; screen seeding is keyed by plan item, not exercise id.
+- **Liveness is confirmed, not assumed.** `WatchHealthKitAnchor` now waits for the
+  `HKWorkoutSession` delegate to report `.running` (8-second timeout) and treats a session that
+  never runs as a hard start failure.
+- **Exercise telemetry and the end of an exercise**: `exercise_started` on the first set of an
+  item, `exercise_completed` on **Done with exercise**, on the next item's first set, or at
+  finish. **Done** on an item that never started emits nothing, and wasted time between exercises
+  is the gap between a completion and the next start.
+
 ## Verification
 
 ```bash

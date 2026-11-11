@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Network
 import StrengthCore
 
 /// Wires the tested execution engine to the watch UI, HealthKit liveness and the credential
@@ -19,6 +20,7 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var authorization: LivenessAuthorization = .notDetermined
     @Published private(set) var canUndo = false
     @Published private(set) var activeSet: ActiveSet?
+    @Published private(set) var exerciseItemIndex: Int?
 
     private let credentialStore: WatchCredentialStore
     private let engine: WatchExecutionEngine
@@ -26,6 +28,11 @@ final class WatchExecutionController: ObservableObject {
     private let onCredentialsMissing: @MainActor () -> Void
     private var retryTask: Task<Void, Never>?
     private var livenessStarted = false
+    private let pathMonitor = NWPathMonitor()
+    private var pathMonitorStarted = false
+    private var draftTask: Task<Void, Never>?
+    private var draftLoad: Double?
+    private var draftReps: Int?
 
     init(
         store: WatchCredentialStore = WatchCredentialStore(),
@@ -60,6 +67,7 @@ final class WatchExecutionController: ObservableObject {
             lastError = "The saved session could not be read."
         }
         sync()
+        startPathMonitor()
         Task {
             authorization = await anchor.authorizationStatus()
             if engine.phase == .active || engine.phase == .finishing {
@@ -77,6 +85,12 @@ final class WatchExecutionController: ObservableObject {
     func sceneWillResign() {
         retryTask?.cancel()
         retryTask = nil
+        persistDraft()
+    }
+
+    /// Server-adjusted elapsed time for the session screen.
+    func elapsed(at date: Date) -> TimeInterval {
+        engine.sessionRecord?.elapsedSeconds(at: date) ?? 0
     }
 
     // MARK: - Start
@@ -127,11 +141,13 @@ final class WatchExecutionController: ObservableObject {
         )
         isWorking = true
         defer { isWorking = false }
-        let stop = await engine.logSet(entry, session: session)
-        if engine.phase == .active, let seconds = item.restS, seconds > 0 {
+        let result = await engine.logSet(entry, session: session)
+        // Rest belongs to a set that actually happened: a local storage failure must not start
+        // one, while a network failure still does.
+        if result.persisted, engine.phase == .active, let seconds = item.restS, seconds > 0 {
             try? engine.startRest(seconds: seconds, planItemIndex: item.orderIndex)
         }
-        await handle(stop)
+        await handle(result.stop)
         sync()
     }
 
@@ -146,13 +162,46 @@ final class WatchExecutionController: ObservableObject {
 
     /// Explicitly marks that the lifter began a set, so its start time is observed rather than
     /// inferred. Logging without it is still allowed and simply records no start event.
-    func beginSet() {
+    func beginSet(loadKg: Double?, reps: Int?) {
         do {
-            try engine.beginSet()
+            try engine.beginSet(loadKg: loadKg, reps: reps)
+            draftLoad = loadKg
+            draftReps = reps
         } catch {
             lastError = "The set could not be started on the watch."
         }
         sync()
+    }
+
+    /// The lifter says this exercise is done. Wasted time before the next exercise is then
+    /// visible as the gap between this completion and the next exercise's start.
+    func doneWithExercise() {
+        do {
+            try engine.doneWithExercise()
+        } catch {
+            lastError = "The exercise could not be marked done."
+        }
+        sync()
+    }
+
+    /// Persists the in-progress adjustments, throttled so the Digital Crown does not write on
+    /// every detent. A resign forces the last value immediately.
+    func draftChanged(loadKg: Double?, reps: Int?) {
+        draftLoad = loadKg
+        draftReps = reps
+        draftTask?.cancel()
+        draftTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            self?.persistDraft()
+        }
+    }
+
+    private func persistDraft() {
+        draftTask?.cancel()
+        draftTask = nil
+        guard engine.activeSet != nil else { return }
+        try? engine.updateActiveSetDraft(loadKg: draftLoad, reps: draftReps)
     }
 
     func extendRest(by seconds: Int) {
@@ -245,6 +294,23 @@ final class WatchExecutionController: ObservableObject {
         onCredentialsMissing()
     }
 
+    private func startPathMonitor() {
+        guard !pathMonitorStarted else { return }
+        pathMonitorStarted = true
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { @MainActor in
+                await self?.pathBecameAvailable()
+            }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "strength.watch.path"))
+    }
+
+    private func pathBecameAvailable() async {
+        guard engine.phase == .active || engine.phase == .finishing else { return }
+        await flushNow()
+    }
+
     private func beginLivenessIfNeeded() async {
         guard !livenessStarted else { return }
         let status = await anchor.authorizationStatus()
@@ -270,6 +336,7 @@ final class WatchExecutionController: ObservableObject {
         currentItem = engine.currentItem
         canUndo = engine.canUndoLastSet
         activeSet = engine.activeSet
+        exerciseItemIndex = engine.exerciseItemIndex
         isOffline = engine.network == .offline
         lastError = engine.lastError
     }

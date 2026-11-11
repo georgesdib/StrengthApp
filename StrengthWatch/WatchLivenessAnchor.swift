@@ -9,9 +9,15 @@ enum LivenessAuthorization: Equatable {
 
 enum LivenessError: LocalizedError {
     case unavailable
+    case notRunning
 
     var errorDescription: String? {
-        "Health access is unavailable, so the watch cannot keep this session alive. Log on the iPhone instead."
+        switch self {
+        case .unavailable:
+            return "Health access is unavailable, so the watch cannot keep this session alive. Log on the iPhone instead."
+        case .notRunning:
+            return "The watch could not keep a workout running. Try again, or log this workout on the iPhone."
+        }
     }
 }
 

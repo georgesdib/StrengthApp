@@ -200,6 +200,60 @@ public final class OfflineCaptureStore {
         return try loadUnlocked()
     }
 
+    /// One atomic write: apply several related changes to the capture and persist it once, so a
+    /// termination cannot leave a half-updated session or outbox.
+    public func perform(
+        _ body: (inout OfflineCapture) throws -> Void
+    ) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        try body(&capture)
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Appends events inside a caller's capture mutation, merging only into the newest operation
+    /// so a completion can never overtake the set it describes.
+    public static func appendExecutionEvents(
+        _ events: [ExecutionEvent],
+        workoutId: String,
+        activeWorkout: WorkoutDetail?,
+        to capture: inout OfflineCapture,
+        now: Date
+    ) throws {
+        guard !events.isEmpty else { return }
+        if let activeWorkout {
+            if let current = capture.activeWorkout?.workoutId,
+               current != activeWorkout.workoutId,
+               !capture.operations.isEmpty {
+                throw OfflineCaptureStoreError.invalidOperation(
+                    "Resolve queued work before switching to a different active workout."
+                )
+            }
+            capture.activeWorkout = activeWorkout
+        }
+        if let index = capture.operations.indices.last,
+           capture.operations[index].workoutId == workoutId,
+           capture.operations[index].state == .pending,
+           capture.operations[index].attemptedAt == nil,
+           case .executionEvents(var queued) = capture.operations[index].body,
+           queued.count + events.count <= 100 {
+            queued.append(contentsOf: events)
+            capture.operations[index].body = .executionEvents(queued)
+        } else {
+            guard capture.operations.count < maxOperations else {
+                throw OfflineCaptureStoreError.full
+            }
+            capture.operations.append(OfflineOperation(
+                operationId: UUID().uuidString.lowercased(),
+                workoutId: workoutId,
+                body: .executionEvents(events),
+                createdAt: now
+            ))
+        }
+    }
+
     /// Drops queued telemetry that belongs to a set whose capture was undone before it was ever
     /// sent. Attempted batches are left alone so the server and the queue never disagree.
     public func removeExecutionEvents(localSetID: String) throws -> OfflineCapture {
@@ -266,7 +320,7 @@ public final class OfflineCaptureStore {
                 "Operation \(operation.operationId) is already queued."
             )
         }
-        try validate(operation, against: capture)
+        try Self.validateOperation(operation, against: capture)
         guard capture.operations.count < Self.maxOperations else {
             throw OfflineCaptureStoreError.full
         }
@@ -421,7 +475,10 @@ public final class OfflineCaptureStore {
         return result
     }
 
-    private func validate(_ operation: OfflineOperation, against capture: OfflineCapture) throws {
+    public static func validateOperation(
+        _ operation: OfflineOperation,
+        against capture: OfflineCapture
+    ) throws {
         if let localSetId = operation.localSetId {
             guard operation.kind == .addSet, localSetId < 0 else {
                 throw OfflineCaptureStoreError.invalidOperation(

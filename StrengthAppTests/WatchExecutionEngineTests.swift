@@ -15,7 +15,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         super.setUp()
         fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("watch-engine-\(UUID().uuidString).json")
-        clock = Date(timeIntervalSince1970: 1_800_000_000)
+        clock = ServerClock.parse("2026-11-07T16:00:00+00:00")!
         store = OfflineCaptureStore(fileURL: fileURL, now: { [unowned self] in self.clock })
     }
 
@@ -69,14 +69,17 @@ final class WatchExecutionEngineTests: XCTestCase {
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
 
-        let stop = await engine.logSet(entry(setIndex: 1), session: session())
+        let result = await engine.logSet(entry(setIndex: 1), session: session())
 
-        XCTAssertTrue(stop.isRetryable)
-        XCTAssertEqual(engine.pendingCount, 1)
+        XCTAssertTrue(result.persisted, "stop=\(result.stop) error=\(engine.lastError ?? "nil")")
+        XCTAssertTrue(result.stop.isRetryable, "stop=\(result.stop)")
+        XCTAssertEqual(engine.pendingCount, 1, "stop=\(result.stop)")
         let capture = try store.load()
-        let operation = try XCTUnwrap(capture.operations.first)
+        let operation = try XCTUnwrap(capture.operations.first { $0.kind == .addSet })
         XCTAssertEqual(operation.state, .pending)
-        XCTAssertNotNil(operation.attemptedAt)
+        // The start event is queued ahead of the set, so the first failing send is that batch.
+        XCTAssertEqual(capture.operations.map(\.kind), [.executionEvents, .addSet, .executionEvents])
+        XCTAssertNotNil(capture.operations.first?.attemptedAt)
         guard case .addSet(let body) = operation.body else {
             return XCTFail("expected an add-set operation")
         }
@@ -97,9 +100,10 @@ final class WatchExecutionEngineTests: XCTestCase {
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
 
-        let stop = await engine.logSet(entry(setIndex: 1), session: session())
+        let result = await engine.logSet(entry(setIndex: 1), session: session())
 
-        XCTAssertEqual(stop, .allSent)
+        XCTAssertTrue(result.persisted)
+        XCTAssertEqual(result.stop, .allSent)
         XCTAssertEqual(engine.pendingCount, 0)
         XCTAssertEqual(engine.completedSetCount, 1)
         XCTAssertEqual(engine.workout?.sets?.count, 1)
@@ -117,9 +121,9 @@ final class WatchExecutionEngineTests: XCTestCase {
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
 
-        let stop = await engine.logSet(entry(setIndex: 1), session: session())
+        let result = await engine.logSet(entry(setIndex: 1), session: session())
 
-        XCTAssertEqual(stop, .credentialsMissing)
+        XCTAssertEqual(result.stop, .credentialsMissing)
         XCTAssertEqual(engine.pendingCount, 1)
         let operation = try XCTUnwrap(try store.load().operations.first)
         XCTAssertEqual(operation.state, .pending)
@@ -184,8 +188,8 @@ final class WatchExecutionEngineTests: XCTestCase {
         guard case .executionEvents(let events) = try XCTUnwrap(capture.operations.first).body else {
             return XCTFail("expected a queued event batch")
         }
-        XCTAssertEqual(events.map(\.eventType), [.setStarted])
-        XCTAssertEqual(events.first?.localSetId, active.localSetID)
+        XCTAssertEqual(events.map(\.eventType), [.exerciseStarted, .setStarted])
+        XCTAssertEqual(events.compactMap(\.localSetId), [active.localSetID])
     }
 
     func testLoggingASetClosesAnOpenRestWithOneDeliberateEvent() async throws {
@@ -207,7 +211,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             guard case .executionEvents(let events) = operation.body else { return [] }
             return events.map(\.eventType)
         }
-        XCTAssertEqual(types, [.restStarted, .restCompleted, .setCompleted])
+        XCTAssertEqual(types, [.restStarted, .restCompleted, .exerciseStarted, .setCompleted])
         XCTAssertFalse(types.contains(.restSkipped))
         XCTAssertNotNil(capture.session?.rest?.endedAt, "the rest is closed, not left open")
     }
@@ -263,6 +267,120 @@ final class WatchExecutionEngineTests: XCTestCase {
             return XCTFail("expected added_s in the payload")
         }
         XCTAssertEqual(added, 15)
+    }
+
+    // MARK: - Fixups: rest at finish, drafts, exercise lifecycle
+
+    func testFinishClosesAnOpenRestWithATerminalEvent() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.startRest(seconds: 120, planItemIndex: 0)
+
+        let stop = await engine.finish(sessionRpe: 8, session: session())
+
+        XCTAssertTrue(stop.isRetryable)
+        XCTAssertEqual(engine.phase, .finishing)
+        let capture = try store.load()
+        XCTAssertNotNil(capture.session?.rest?.endedAt, "the rest is closed, not deleted")
+        let types = capture.operations.flatMap { operation -> [ExecutionEventType] in
+            guard case .executionEvents(let events) = operation.body else { return [] }
+            return events.map(\.eventType)
+        }
+        XCTAssertEqual(types.filter { $0 == .restCompleted }.count, 1)
+        XCTAssertFalse(types.contains(.restSkipped))
+    }
+
+    func testFinishDropsTheStartEventOfASetThatWasNeverLogged() async throws {
+        let transport = AsyncStubTransport { request in
+            (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.beginSet(loadKg: 140, reps: 5)
+        let token = try XCTUnwrap(engine.activeSet?.localSetID)
+
+        _ = await engine.finish(sessionRpe: 8, session: session())
+
+        let capture = try store.load()
+        XCTAssertNil(capture.session?.activeSet)
+        let locals = capture.operations.flatMap { operation -> [String?] in
+            guard case .executionEvents(let events) = operation.body else { return [] }
+            return events.map(\.localSetId)
+        }
+        XCTAssertFalse(locals.contains(token), "a set that never happened leaves no start event")
+    }
+
+    func testSetDraftSurvivesARelaunch() async throws {
+        let transport = AsyncStubTransport { request in
+            (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.beginSet(loadKg: 140, reps: 5)
+        try engine.updateActiveSetDraft(loadKg: 142.5, reps: 4)
+
+        let relaunched = makeEngine(transport: transport)
+        try relaunched.restore()
+
+        let active = try XCTUnwrap(relaunched.activeSet)
+        XCTAssertEqual(active.loadKg, 142.5)
+        XCTAssertEqual(active.reps, 4)
+        XCTAssertEqual(relaunched.phase, .active)
+    }
+
+    func testElapsedTimeUsesThePersistedServerOffset() throws {
+        let started = Date(timeIntervalSince1970: 1_800_000_000)
+        let record = WatchSessionRecord(
+            sessionUUID: "session-1",
+            startedAt: started,
+            clockOffsetSeconds: -300
+        )
+        // The local clock runs five minutes ahead, so 360 local seconds are 60 server seconds.
+        XCTAssertEqual(record.elapsedSeconds(at: started.addingTimeInterval(360)), 60, accuracy: 0.5)
+    }
+
+    func testExerciseEventsStartOnTheFirstSetAndEndOnDone() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Self.twoItemWorkout.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        try engine.beginSet(loadKg: 140, reps: 5)
+        _ = await engine.logSet(
+            WatchExecutionEngine.SetEntry(
+                exerciseId: "competition_squat",
+                planItemIndex: 0,
+                setIndex: 1,
+                loadKg: 140,
+                reps: 5,
+                rir: 2
+            ),
+            session: session()
+        )
+        try engine.beginSet(loadKg: 100, reps: 8)
+        try engine.doneWithExercise()
+
+        let capture = try store.load()
+        let events = capture.operations.flatMap { operation -> [ExecutionEvent] in
+            guard case .executionEvents(let batch) = operation.body else { return [] }
+            return batch
+        }
+        XCTAssertEqual(events.map(\.eventType), [
+            .exerciseStarted, .setStarted, .setCompleted,
+            .exerciseCompleted, .exerciseStarted, .setStarted,
+            .exerciseCompleted,
+        ])
+        XCTAssertEqual(events.map(\.planItemIndex), [0, 0, 0, 0, 1, 1, 1])
     }
 
     // MARK: - Finish and discard
@@ -346,6 +464,28 @@ final class WatchExecutionEngineTests: XCTestCase {
             now: { [unowned self] in self.clock }
         )
     }
+
+    private static let twoItemWorkout = #"""
+    {
+      "workout_id": "workout-1",
+      "for_date": "2026-11-07",
+      "session_type": "squat",
+      "status": "in_progress",
+      "plan": {
+        "for_date": "2026-11-07",
+        "session_type": "squat",
+        "items": [
+          {"order_index": 0, "exercise_id": "competition_squat", "sets": 1,
+           "reps_low": 5, "load_kg": 140.0, "rir_target": 2, "rest_s": 120},
+          {"order_index": 1, "exercise_id": "bench_press", "sets": 1,
+           "reps_low": 8, "load_kg": 100.0, "rir_target": 2, "rest_s": 120}
+        ]
+      },
+      "sets": [],
+      "forms": [],
+      "started_at": "2026-11-07T16:00:00+00:00"
+    }
+    """#
 
     private static let eventsAccepted = #"""
     {"workout_id":"workout-1","accepted":[],"duplicates":[],

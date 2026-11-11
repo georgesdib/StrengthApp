@@ -131,6 +131,8 @@ suspension or the Digital Crown.
 - [ ] Start: the Set screen shows the first exercise, "Set 1 of n" and the target load × reps @ RIR.
 - [ ] Lower the wrist for a minute, then raise it. The screen wakes on the same set, elapsed time
       has advanced, and nothing was lost.
+- [ ] With Wi-Fi off, **Start set** and adjust load, then force-quit before logging. Relaunch:
+      the active set returns with the same load and reps, not the prescription's.
 - [ ] **Start set**, adjust load with the Digital Crown (±2.5 kg) and reps with −/+, then
       **Log set**. The RIR sheet defaults to the prescribed target and offers 0–6 and
       *Not recorded*.
@@ -147,6 +149,12 @@ suspension or the Digital Crown.
 - [ ] Turn off Wi-Fi mid-session and log two sets: both are captured, the banner reads
       offline · n pending, and nothing claims to be saved.
 - [ ] Re-enable Wi-Fi: pending work flushes in order (the set, then its events), once each.
+- [ ] **Done with exercise** while resting: the rest closes and the next exercise's start is
+      later; the server shows one `exercise_completed` and a gap before the next
+      `exercise_started`.
+- [ ] Finish while a rest is open: the server receives a terminal `rest_completed` at the finish
+      time, never an unterminated rest.
+- [ ] Finish while a set is started but not logged: no `set_started` is recorded for it.
 - [ ] Finish while offline with an sRPE. "Finish saved on watch — syncing" persists; reopen at
       home and the server shows one completed session with the original end time.
 - [ ] **Discard session** on the finish screen asks for confirmation, abandons the server session

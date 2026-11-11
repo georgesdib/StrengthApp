@@ -11,12 +11,24 @@ public struct ActiveSet: Codable, Equatable, Sendable {
     public var planItemIndex: Int
     public var setIndex: Int
     public var startedAt: Date
+    /// The lifter's adjustments, persisted so a termination mid-set does not lose them.
+    public var loadKg: Double?
+    public var reps: Int?
 
-    public init(localSetID: String, planItemIndex: Int, setIndex: Int, startedAt: Date) {
+    public init(
+        localSetID: String,
+        planItemIndex: Int,
+        setIndex: Int,
+        startedAt: Date,
+        loadKg: Double? = nil,
+        reps: Int? = nil
+    ) {
         self.localSetID = localSetID
         self.planItemIndex = planItemIndex
         self.setIndex = setIndex
         self.startedAt = startedAt
+        self.loadKg = loadKg
+        self.reps = reps
     }
 }
 
@@ -31,6 +43,8 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
     public var finish: FinishIntent?
     /// The set the lifter explicitly began, before it is logged.
     public var activeSet: ActiveSet?
+    /// The plan item whose exercise is currently in progress, for exercise telemetry.
+    public var exerciseItemIndex: Int?
     /// local set id -> server set id, learned when the add-set is acknowledged. Used only to
     /// attach `set_id` to the matching telemetry event; a missing entry sends no set id.
     public var eventSetIDs: [String: Int]?
@@ -43,7 +57,8 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         rest: RestInterval? = nil,
         finish: FinishIntent? = nil,
         activeSet: ActiveSet? = nil,
-        eventSetIDs: [String: Int]? = nil
+        eventSetIDs: [String: Int]? = nil,
+        exerciseItemIndex: Int? = nil
     ) {
         self.sessionUUID = sessionUUID
         self.startedAt = startedAt
@@ -53,9 +68,17 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         self.finish = finish
         self.activeSet = activeSet
         self.eventSetIDs = eventSetIDs
+        self.exerciseItemIndex = exerciseItemIndex
     }
 
     public var clock: ServerClock? {
         clockOffsetSeconds.map(ServerClock.init(offset:))
+    }
+
+    /// Elapsed session time measured in server-adjusted terms, so a fast or slow watch clock
+    /// cannot distort it (contract §8).
+    public func elapsedSeconds(at local: Date) -> TimeInterval {
+        let now = clock?.serverNow(from: local) ?? local
+        return max(0, now.timeIntervalSince(startedAt))
     }
 }

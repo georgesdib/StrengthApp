@@ -26,9 +26,11 @@ public enum WatchFlushStop: Equatable, Sendable {
     }
 }
 
-/// The watch's execution lifecycle (contract §11). It performs the network calls and the durable
-/// local writes; HealthKit, UI and scheduling stay outside so every rule here is testable on the
-/// iPhone simulator.
+/// The watch's execution lifecycle (contract §11).
+///
+/// Every user action is one atomic local write: the outbox operation, the session record and the
+/// telemetry events for that action move together or not at all. Network calls and HealthKit stay
+/// outside this type so the rules are testable on the iPhone simulator.
 @MainActor
 public final class WatchExecutionEngine {
     public struct SetEntry: Equatable, Sendable {
@@ -53,6 +55,18 @@ public final class WatchExecutionEngine {
             self.loadKg = loadKg
             self.reps = reps
             self.rir = rir
+        }
+    }
+
+    /// A local capture result, kept separate from the flush outcome: a set that failed to persist
+    /// must not be treated like a set that is merely waiting for the network.
+    public struct CaptureResult: Equatable, Sendable {
+        public let persisted: Bool
+        public let stop: WatchFlushStop
+
+        public init(persisted: Bool, stop: WatchFlushStop) {
+            self.persisted = persisted
+            self.stop = stop
         }
     }
 
@@ -103,6 +117,14 @@ public final class WatchExecutionEngine {
         workout?.plan?.items ?? []
     }
 
+    public var activeSet: ActiveSet? {
+        sessionRecord?.activeSet
+    }
+
+    public var exerciseItemIndex: Int? {
+        sessionRecord?.exerciseItemIndex
+    }
+
     /// The item still short of its prescribed sets, or the last item once everything is done so
     /// an extra set can still be logged against something real.
     public var currentItem: PrescriptionItem? {
@@ -135,11 +157,9 @@ public final class WatchExecutionEngine {
     /// Relaunches from the durable record without contacting the server (contract §11.5 is 6.4).
     public func restore() throws {
         let capture = try store.load()
-        workout = capture.activeWorkout
-        sessionRecord = capture.session
-        pending = capture.operations.filter { $0.state == .pending }
-        guard capture.session != nil else {
-            phase = capture.activeWorkout == nil ? .ready : .active
+        apply(capture)
+        guard capture.session != nil, capture.activeWorkout != nil else {
+            phase = .ready
             return
         }
         if let finish = capture.session?.finish {
@@ -166,20 +186,27 @@ public final class WatchExecutionEngine {
                 session: session,
                 idempotencyKey: "watch-start-\(issuedPlanID)"
             )
-            let clock = detail.startedAt.flatMap {
-                ServerClock(serverTimestamp: $0, receivedAt: receivedAt)
-            }
+            // A derived offset larger than a day means the watch clock is wrong, not the server:
+            // applying it would push every capture outside the replay window and the workout.
+            let clock = detail.startedAt
+                .flatMap { ServerClock(serverTimestamp: $0, receivedAt: receivedAt) }
+                .flatMap { $0.isPlausible ? $0 : nil }
             let record = WatchSessionRecord(
                 sessionUUID: UUID().uuidString.lowercased(),
                 startedAt: clock?.serverNow(from: receivedAt) ?? receivedAt,
                 planRevision: 0,
                 clockOffsetSeconds: clock?.offset
             )
-            _ = try store.setSession(record)
-            _ = try store.setActiveWorkout(detail)
-            workout = detail
-            sessionRecord = record
-            pending = []
+            try mutate { capture in
+                if !capture.operations.isEmpty,
+                   capture.activeWorkout?.workoutId != detail.workoutId {
+                    throw OfflineCaptureStoreError.invalidOperation(
+                        "Resolve queued work before starting a different workout."
+                    )
+                }
+                capture.session = record
+                capture.activeWorkout = detail
+            }
             phase = .active
             nextRetryAt = nil
             ladder.succeeded()
@@ -193,62 +220,89 @@ public final class WatchExecutionEngine {
         }
     }
 
-    public var activeSet: ActiveSet? {
-        sessionRecord?.activeSet
-    }
-
     // MARK: - Sets
 
     /// The lifter began a set. This is an explicit observation, never inferred from a screen.
-    public func beginSet() throws {
-        guard let item = currentItem else { return }
+    public func beginSet(loadKg: Double? = nil, reps: Int? = nil) throws {
+        guard let item = currentItem, let workout else { return }
         let itemIndex = item.orderIndex ?? 0
         let setIndex = setsDone(planItemIndex: itemIndex) + 1
-        try closeRestIfOpen()
-        guard var record = sessionRecord else { return }
+        let stamp = stampedNow()
         let token = UUID().uuidString.lowercased()
-        record.activeSet = ActiveSet(
-            localSetID: token,
-            planItemIndex: itemIndex,
-            setIndex: setIndex,
-            startedAt: now()
-        )
-        _ = try store.setSession(record)
-        sessionRecord = record
-        try enqueue([ExecutionEvent(
-            eventId: UUID().uuidString.lowercased(),
-            eventType: .setStarted,
-            occurredAt: ServerClock.encodedISO(stampedNow()),
-            planItemIndex: itemIndex,
-            localSetId: token,
-            payload: ["set_index": .number(Double(setIndex))]
-        )])
+        try mutate { capture in
+            try self.closeRest(in: &capture, at: stamp, workout: workout)
+            try self.touchExercise(in: &capture, itemIndex: itemIndex, at: stamp, workout: workout)
+            guard var record = capture.session else { return }
+            record.activeSet = ActiveSet(
+                localSetID: token,
+                planItemIndex: itemIndex,
+                setIndex: setIndex,
+                startedAt: stamp,
+                loadKg: loadKg,
+                reps: reps
+            )
+            capture.session = record
+            try self.append([ExecutionEvent(
+                eventId: UUID().uuidString.lowercased(),
+                eventType: .setStarted,
+                occurredAt: ServerClock.encodedISO(stamp),
+                planItemIndex: itemIndex,
+                localSetId: token,
+                payload: ["set_index": .number(Double(setIndex))]
+            )], to: &capture, workout: workout)
+        }
+    }
+
+    /// The lifter says the current exercise is finished. Nothing is sent when no exercise was
+    /// started, because there would be no start to pair with.
+    public func doneWithExercise() throws {
+        guard let workout, sessionRecord?.exerciseItemIndex != nil else { return }
+        let stamp = stampedNow()
+        try mutate { capture in
+            try self.closeRest(in: &capture, at: stamp, workout: workout)
+            try self.closeExercise(in: &capture, at: stamp, workout: workout)
+        }
     }
 
     /// Ends an open rest at this instant, because starting or logging the next set is what
     /// really ends recovery (contract §13; owner decision 2026-11-11).
     public func endRest() throws {
-        try closeRestIfOpen()
+        guard let workout else { return }
+        let stamp = stampedNow()
+        try mutate { capture in
+            try self.closeRest(in: &capture, at: stamp, workout: workout)
+        }
+    }
+
+    /// Persists the lifter's in-progress adjustments so a termination before logging loses
+    /// nothing.
+    public func updateActiveSetDraft(loadKg: Double?, reps: Int?) throws {
+        try mutate { capture in
+            guard var record = capture.session, var active = record.activeSet else { return }
+            active.loadKg = loadKg
+            active.reps = reps
+            record.activeSet = active
+            capture.session = record
+        }
     }
 
     /// Persists the set before any request and then attempts one flush pass. An open rest is
     /// closed first, at the same instant, so every rest has one deliberate terminal event.
     @discardableResult
-    public func logSet(_ entry: SetEntry, session: IOSSession) async -> WatchFlushStop {
-        guard let workoutId = workout?.workoutId, let snapshot = workout else {
-            return .conflict(code: "no_workout", message: "There is no active workout.")
+    public func logSet(_ entry: SetEntry, session: IOSSession) async -> CaptureResult {
+        guard let workout else {
+            return CaptureResult(
+                persisted: false,
+                stop: .conflict(code: "no_workout", message: "There is no active workout.")
+            )
         }
-        do {
-            try closeRestIfOpen()
-        } catch {
-            return .storage(message(for: error))
-        }
+        let stamp = stampedNow()
         let token = sessionRecord?.activeSet?.localSetID ?? UUID().uuidString.lowercased()
         let localSetID: Int
         do {
             localSetID = try store.nextLocalSetId()
         } catch {
-            return .storage(message(for: error))
+            return CaptureResult(persisted: false, stop: .storage(message(for: error)))
         }
         let request = AddSetRequest(
             exerciseId: entry.exerciseId,
@@ -258,35 +312,41 @@ public final class WatchExecutionEngine {
             velocityMps: nil,
             setIndex: entry.setIndex,
             planItemIndex: entry.planItemIndex,
-            performedAt: ServerClock.encodedISO(stampedNow())
-        )
-        let operation = OfflineOperation(
-            operationId: token,
-            workoutId: workoutId,
-            body: .addSet(request),
-            createdAt: now(),
-            localSetId: localSetID
+            performedAt: ServerClock.encodedISO(stamp)
         )
         do {
-            _ = try store.record(operation, activeWorkout: snapshot)
-            pending.append(operation)
-            if var record = sessionRecord {
-                record.activeSet = nil
-                _ = try store.setSession(record)
-                sessionRecord = record
+            try mutate { capture in
+                try self.closeRest(in: &capture, at: stamp, workout: workout)
+                if let planItemIndex = entry.planItemIndex {
+                    try self.touchExercise(
+                        in: &capture, itemIndex: planItemIndex, at: stamp, workout: workout
+                    )
+                }
+                if var record = capture.session {
+                    record.activeSet = nil
+                    capture.session = record
+                }
+                try self.appendOperation(OfflineOperation(
+                    operationId: token,
+                    workoutId: workout.workoutId,
+                    body: .addSet(request),
+                    createdAt: stamp,
+                    localSetId: localSetID
+                ), to: &capture)
+                try self.append([ExecutionEvent(
+                    eventId: UUID().uuidString.lowercased(),
+                    eventType: .setCompleted,
+                    occurredAt: ServerClock.encodedISO(stamp),
+                    planItemIndex: entry.planItemIndex,
+                    localSetId: token,
+                    payload: ["set_index": .number(Double(entry.setIndex))]
+                )], to: &capture, workout: workout)
             }
-            try enqueue([ExecutionEvent(
-                eventId: UUID().uuidString.lowercased(),
-                eventType: .setCompleted,
-                occurredAt: ServerClock.encodedISO(stampedNow()),
-                planItemIndex: entry.planItemIndex,
-                localSetId: token,
-                payload: ["set_index": .number(Double(entry.setIndex))]
-            )])
         } catch {
-            return .storage(message(for: error))
+            lastError = message(for: error)
+            return CaptureResult(persisted: false, stop: .storage(message(for: error)))
         }
-        return await flush(session: session)
+        return CaptureResult(persisted: true, stop: await flush(session: session))
     }
 
     /// Removes the newest set that has never been attempted, together with its queued events.
@@ -298,74 +358,67 @@ public final class WatchExecutionEngine {
             $0.kind == .addSet && $0.attemptedAt == nil
         }) else { return false }
         do {
-            _ = try store.cancel(operation.operationId)
-            _ = try store.removeExecutionEvents(localSetID: operation.operationId)
+            try mutate { capture in
+                capture.operations.removeAll { $0.operationId == operation.operationId }
+                self.dropEvents(localSetID: operation.operationId, from: &capture)
+            }
         } catch {
             return false
         }
-        pending.removeAll { $0.operationId == operation.operationId }
-        refreshPending()
         return true
     }
 
     // MARK: - Rest
 
     public func startRest(seconds: Int, planItemIndex: Int? = nil) throws {
-        guard seconds > 0, var record = sessionRecord else { return }
-        record.rest = RestInterval(
-            startedAt: now(),
-            prescribedSeconds: seconds,
-            planItemIndex: planItemIndex
-        )
-        _ = try store.setSession(record)
-        sessionRecord = record
-        try enqueue([ExecutionEvent(
-            eventId: UUID().uuidString.lowercased(),
-            eventType: .restStarted,
-            occurredAt: ServerClock.encodedISO(stampedNow()),
-            planItemIndex: planItemIndex,
-            payload: ["prescribed_rest_s": .number(Double(seconds))]
-        )])
+        guard seconds > 0, let workout else { return }
+        let stamp = stampedNow()
+        try mutate { capture in
+            guard var record = capture.session else { return }
+            record.rest = RestInterval(
+                startedAt: stamp,
+                prescribedSeconds: seconds,
+                planItemIndex: planItemIndex
+            )
+            capture.session = record
+            try self.append([ExecutionEvent(
+                eventId: UUID().uuidString.lowercased(),
+                eventType: .restStarted,
+                occurredAt: ServerClock.encodedISO(stamp),
+                planItemIndex: planItemIndex,
+                payload: ["prescribed_rest_s": .number(Double(seconds))]
+            )], to: &capture, workout: workout)
+        }
     }
 
     public func extendRest(by seconds: Int) throws {
-        guard seconds > 0, var record = sessionRecord, var rest = record.rest, rest.isOpen else {
-            return
+        guard seconds > 0, let workout else { return }
+        let stamp = stampedNow()
+        try mutate { capture in
+            guard var record = capture.session, var rest = record.rest, rest.isOpen else { return }
+            rest.extend(by: seconds)
+            record.rest = rest
+            capture.session = record
+            try self.append([ExecutionEvent(
+                eventId: UUID().uuidString.lowercased(),
+                eventType: .restExtended,
+                occurredAt: ServerClock.encodedISO(stamp),
+                planItemIndex: rest.planItemIndex,
+                payload: ["added_s": .number(Double(seconds))]
+            )], to: &capture, workout: workout)
         }
-        rest.extend(by: seconds)
-        record.rest = rest
-        _ = try store.setSession(record)
-        sessionRecord = record
-        try enqueue([ExecutionEvent(
-            eventId: UUID().uuidString.lowercased(),
-            eventType: .restExtended,
-            occurredAt: ServerClock.encodedISO(stampedNow()),
-            planItemIndex: rest.planItemIndex,
-            payload: ["added_s": .number(Double(seconds))]
-        )])
     }
 
     // MARK: - Finish
 
     @discardableResult
     public func finish(sessionRpe: Double?, session: IOSSession) async -> WatchFlushStop {
-        guard let workoutId = workout?.workoutId, var record = sessionRecord else {
+        guard let workoutId = workout?.workoutId, let workout, sessionRecord != nil else {
             return .conflict(code: "no_workout", message: "There is no active workout.")
         }
         let endedAt = stampedNow()
-        record.finish = FinishIntent(endedAt: endedAt, sessionRpe: sessionRpe)
-        record.rest = nil
-        record.activeSet = nil
-        do {
-            _ = try store.setSession(record)
-        } catch {
-            return .storage(message(for: error))
-        }
-        sessionRecord = record
-        phase = .finishing
-
         let operation = OfflineOperation(
-            operationId: "watch-finish-\(record.sessionUUID)",
+            operationId: "watch-finish-\(sessionRecord?.sessionUUID ?? workoutId)",
             workoutId: workoutId,
             body: .completeWorkout(CompleteWorkoutRequest(
                 sessionRpe: sessionRpe,
@@ -375,16 +428,30 @@ public final class WatchExecutionEngine {
                 endedAt: ServerClock.encodedISO(endedAt),
                 productivity: nil
             )),
-            createdAt: now()
+            createdAt: endedAt
         )
         do {
-            if !pending.contains(where: { $0.operationId == operation.operationId }) {
-                _ = try store.record(operation, activeWorkout: workout)
-                pending.append(operation)
+            // Finishing during a rest closes it; finishing during an unlogged set drops the start
+            // event for a set that never happened. Everything lands in one write.
+            try mutate { capture in
+                try self.closeRest(in: &capture, at: endedAt, workout: workout)
+                try self.closeExercise(in: &capture, at: endedAt, workout: workout)
+                if let active = capture.session?.activeSet {
+                    self.dropEvents(localSetID: active.localSetID, from: &capture)
+                }
+                guard var record = capture.session else { return }
+                record.finish = FinishIntent(endedAt: endedAt, sessionRpe: sessionRpe)
+                record.activeSet = nil
+                capture.session = record
+                if !capture.operations.contains(where: { $0.operationId == operation.operationId }) {
+                    try self.appendOperation(operation, to: &capture)
+                }
             }
         } catch {
+            lastError = message(for: error)
             return .storage(message(for: error))
         }
+        phase = .finishing
         return await flush(session: session)
     }
 
@@ -435,7 +502,7 @@ public final class WatchExecutionEngine {
         }
         let operations = capture.operations.filter { $0.isReplayable(now: now()) }
         guard !operations.isEmpty else {
-            pending = capture.operations.filter { $0.state == .pending }
+            apply(capture)
             ladder.succeeded()
             nextRetryAt = nil
             return .nothingToSend
@@ -460,11 +527,11 @@ public final class WatchExecutionEngine {
                 markOnline(session)
             } catch {
                 let stop = handle(error, operation: operation)
-                refreshPending()
+                refresh()
                 return stop
             }
         }
-        refreshPending()
+        refresh()
         return .allSent
     }
 
@@ -547,43 +614,19 @@ public final class WatchExecutionEngine {
         guard !mapping.values.contains(setId) else { return }
         mapping[operation.operationId] = setId
         record.eventSetIDs = mapping
-        _ = try? store.setSession(record)
-        sessionRecord = record
-    }
-
-    private func enqueue(_ events: [ExecutionEvent]) throws {
-        guard let workout, !events.isEmpty else { return }
-        _ = try store.appendExecutionEvents(
-            workoutId: workout.workoutId,
-            events: events,
-            activeWorkout: workout
-        )
-        refreshPending()
-    }
-
-    private func closeRestIfOpen() throws {
-        guard var record = sessionRecord, var rest = record.rest, rest.isOpen else { return }
-        let stamp = stampedNow()
-        rest.finish(at: stamp, outcome: .completed)
-        record.rest = rest
-        _ = try store.setSession(record)
-        sessionRecord = record
-        try enqueue([ExecutionEvent(
-            eventId: UUID().uuidString.lowercased(),
-            eventType: .restCompleted,
-            occurredAt: ServerClock.encodedISO(stamp),
-            planItemIndex: rest.planItemIndex,
-            payload: nil
-        )])
+        if let updated = try? store.setSession(record) {
+            apply(updated)
+        }
     }
 
     private func markFinishAcknowledged() {
         guard var record = sessionRecord, var finish = record.finish else { return }
         finish.serverAcked = true
         record.finish = finish
-        sessionRecord = record
+        if let updated = try? store.setSession(record) {
+            apply(updated)
+        }
         phase = .finished
-        _ = try? store.setSession(record)
     }
 
     private func handle(_ error: Error, operation: OfflineOperation) -> WatchFlushStop {
@@ -628,8 +671,135 @@ public final class WatchExecutionEngine {
         return .retry(at: next)
     }
 
-    private func refreshPending() {
-        pending = (try? store.load().operations.filter { $0.state == .pending }) ?? pending
+    private func mutate(_ body: (inout OfflineCapture) throws -> Void) throws {
+        let capture = try store.perform(body)
+        apply(capture)
+    }
+
+    private func refresh() {
+        if let capture = try? store.load() {
+            apply(capture)
+        }
+    }
+
+    private func apply(_ capture: OfflineCapture) {
+        workout = capture.activeWorkout
+        sessionRecord = capture.session
+        pending = capture.operations.filter { $0.state == .pending }
+    }
+
+    // MARK: - In-capture mutations
+
+    private func append(
+        _ events: [ExecutionEvent],
+        to capture: inout OfflineCapture,
+        workout: WorkoutDetail
+    ) throws {
+        try OfflineCaptureStore.appendExecutionEvents(
+            events,
+            workoutId: workout.workoutId,
+            activeWorkout: workout,
+            to: &capture,
+            now: now()
+        )
+    }
+
+    private func appendOperation(
+        _ operation: OfflineOperation,
+        to capture: inout OfflineCapture
+    ) throws {
+        guard !capture.operations.contains(where: {
+            $0.operationId == operation.operationId
+        }) else {
+            throw OfflineCaptureStoreError.invalidOperation(
+                "Operation \(operation.operationId) is already queued."
+            )
+        }
+        try OfflineCaptureStore.validateOperation(operation, against: capture)
+        guard capture.operations.count < OfflineCaptureStore.maxOperations else {
+            throw OfflineCaptureStoreError.full
+        }
+        capture.operations.append(operation)
+    }
+
+    private func dropEvents(localSetID: String, from capture: inout OfflineCapture) {
+        capture.operations = capture.operations.compactMap { operation in
+            guard operation.state == .pending, operation.attemptedAt == nil,
+                  case .executionEvents(let events) = operation.body,
+                  events.contains(where: { $0.localSetId == localSetID }) else {
+                return operation
+            }
+            let remaining = events.filter { $0.localSetId != localSetID }
+            guard !remaining.isEmpty else { return nil }
+            var updated = operation
+            updated.body = .executionEvents(remaining)
+            return updated
+        }
+    }
+
+    private func closeRest(
+        in capture: inout OfflineCapture,
+        at stamp: Date,
+        workout: WorkoutDetail
+    ) throws {
+        guard var record = capture.session, var rest = record.rest, rest.isOpen else { return }
+        rest.finish(at: stamp, outcome: .completed)
+        record.rest = rest
+        capture.session = record
+        try append([ExecutionEvent(
+            eventId: UUID().uuidString.lowercased(),
+            eventType: .restCompleted,
+            occurredAt: ServerClock.encodedISO(stamp),
+            planItemIndex: rest.planItemIndex,
+            payload: nil
+        )], to: &capture, workout: workout)
+    }
+
+    private func touchExercise(
+        in capture: inout OfflineCapture,
+        itemIndex: Int,
+        at stamp: Date,
+        workout: WorkoutDetail
+    ) throws {
+        guard var record = capture.session, record.exerciseItemIndex != itemIndex else { return }
+        if let previous = record.exerciseItemIndex {
+            record.exerciseItemIndex = nil
+            capture.session = record
+            try append([ExecutionEvent(
+                eventId: UUID().uuidString.lowercased(),
+                eventType: .exerciseCompleted,
+                occurredAt: ServerClock.encodedISO(stamp),
+                planItemIndex: previous,
+                payload: nil
+            )], to: &capture, workout: workout)
+            record = capture.session ?? record
+        }
+        record.exerciseItemIndex = itemIndex
+        capture.session = record
+        try append([ExecutionEvent(
+            eventId: UUID().uuidString.lowercased(),
+            eventType: .exerciseStarted,
+            occurredAt: ServerClock.encodedISO(stamp),
+            planItemIndex: itemIndex,
+            payload: nil
+        )], to: &capture, workout: workout)
+    }
+
+    private func closeExercise(
+        in capture: inout OfflineCapture,
+        at stamp: Date,
+        workout: WorkoutDetail
+    ) throws {
+        guard var record = capture.session, let itemIndex = record.exerciseItemIndex else { return }
+        record.exerciseItemIndex = nil
+        capture.session = record
+        try append([ExecutionEvent(
+            eventId: UUID().uuidString.lowercased(),
+            eventType: .exerciseCompleted,
+            occurredAt: ServerClock.encodedISO(stamp),
+            planItemIndex: itemIndex,
+            payload: nil
+        )], to: &capture, workout: workout)
     }
 
     private func stampedNow() -> Date {

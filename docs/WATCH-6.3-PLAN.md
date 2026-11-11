@@ -1,0 +1,105 @@
+# Watch Phase 6.3 — execution lifecycle slice plan
+
+**Status:** planned, not started (2026-11-11). The owner approved the approach in this document.
+
+**Authority:** the canonical requirements are the portfolio contract
+[iOS Phase 6 — watchOS companion](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
+(§8, §10.7, §11, §12.2, §12.3, §13, §17) and the 6.3 bullet of the
+[iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md).
+This document records slice boundaries, file-level work, tests and the approved decisions. It
+never overrides or restates the contract.
+
+## Decisions taken 2026-11-11
+
+1. **HealthKit anchor.** 6.3 starts and ends a real `HKWorkoutSession` for liveness and enforces
+   the workout-authorisation start gate, behind a `WatchLivenessAnchor` protocol. Heart rate,
+   `HKLiveWorkoutBuilder` collection, the external-UUID save and finalisation remain 6.5.
+   6.3 **saves no HealthKit workout**: until 6.5 a watch session leaves no HealthKit record, and
+   the acceptance script says so explicitly.
+2. **6.3/6.4 boundary.** 6.3 owns one durable queue for the current session: persist-first,
+   per-operation acknowledgement, ordered prefix flush, the 5s/15s/60s/5min ladder and the finish
+   queue. 6.4 adds relaunch reconciliation against `GET .../execution`, replay guarantees,
+   stale-revision application, `plan_item_mismatch`/off-plan preservation and the §11.5
+   recovery cards.
+3. **UI scope.** 6.3 ships the Set screen, a minimal Session screen (elapsed, sets done/total,
+   pending count) and the end flow with the sRPE Crown picker. The Plan screen, Refresh, the
+   "Plan updated" marker and tonnage-so-far arrive with 6.6, the slice that consumes revisions.
+4. **Telemetry in, form ratings out.** 6.3 emits `execution-events` with the original
+   `occurred_at` for every captured action. Form ratings stay with 6.6 and are a recorded gap:
+   until then a watch-owned session has no form rating and the phone mirror cannot add one.
+5. **Clock.** The watch reads `bootstrap` once when a session starts, derives the offset,
+   persists it with the session and clamps any stamp more than 60s ahead of adjusted server time.
+   No server change is needed, so 6.3 stays iOS-only.
+6. **Evidence.** 6.3 closes on package/unit tests plus the watch simulator build that
+   `scripts/ci.sh` already performs. Dim/background/termination/relaunch on hardware is
+   owner-run in 6.7; a simulator is not proof.
+7. **Slices.** Three reviewable chunks, each stopping for review (below).
+8. **Idle warning (3h) and abandonment surfacing** stay with 6.6.
+
+## 6.3a — StrengthCore execution primitives (no app wiring)
+
+Additive only: the phone keeps its current behaviour and its tests stay green.
+
+| File | Work |
+|---|---|
+| `Sources/StrengthCore/Execution/NetworkState.swift` | `HomeNetworkState` (`unknown`/`online(home)`/`offline`); only a successful Home call marks online; path change and foreground retry; cellular never counts. |
+| `Sources/StrengthCore/Execution/RetryLadder.swift` | 5s/15s/60s/300s ladder, reset on success, injected clock, next-attempt deadline. |
+| `Sources/StrengthCore/Execution/ServerClock.swift` | Offset from `server_time` plus receipt instant, adjusted stamping, 60s-future clamp. |
+| `Sources/StrengthCore/Execution/RestInterval.swift` | Persisted end date, remaining/expired, extend and skip. |
+| `Sources/StrengthCore/Execution/FinishIntent.swift` | `{endedAt, sRPE, hkState, serverAcked}` codable record. |
+| `Sources/StrengthCore/Offline/OfflineCapture.swift` | Additive fields: `planRevision`, `sessionUUID`, `startedAt`, `restEndsAt`, `finishIntent`; decode defaults keep existing files valid. |
+| `StrengthAppTests/WatchExecutionCoreTests.swift` | Ladder and reset, offset and clamp, rest across a reload, persist-before-send ordering, finish intent surviving reload, legacy capture file decoding. |
+
+## 6.3b — watch wiring, liveness and screens
+
+| File | Work |
+|---|---|
+| `StrengthWatch/WatchWorkoutStore.swift` | Atomic single-writer session record on disk (Application Support), injected URL, no partial writes. |
+| `StrengthWatch/WatchLivenessAnchor.swift` | Protocol plus a no-op anchor so the state machine runs in the simulator. |
+| `StrengthWatch/WatchHealthKitAnchor.swift` | Real `HKWorkoutSession` start/end, authorisation status, revoked-mid-session handling; no workout save. |
+| `StrengthWatch/WatchExecutionController.swift` | `idle → fetching → ready → starting → active(running/resting) → finishing → finished`, flush loop, scene-phase and path-change retries, duplicate-tap suppression. |
+| `StrengthWatch/WatchExecutionView.swift`, `WatchSetView.swift`, `WatchFinishView.swift` | Set screen, minimal Session screen, captured/pending confirmation, offline and pending banner, sRPE end flow. |
+| `StrengthWatch/WatchTodayView.swift` | Start for a watch-targeted plan with Health authorisation; phone-targeted plans stay read-only. |
+
+The project uses folder-based target membership (`project.xcproj` `"kind": "folder"`), so new
+files need no project-file edit. `scripts/ci.sh` already builds the watch scheme and asserts the
+embedded watch app.
+
+## 6.3c — finish, telemetry, documentation
+
+- Finish intent, offline finish queue and summary retry while visible; "finish saved on watch —
+  syncing" state; queue survives suspension and syncs on next open.
+- Execution events for set started/completed, rest started/completed/skipped/extended and
+  pause/resume, sent from the same durable queue with original timestamps.
+- `WATCH-ACCEPTANCE.md` 6.3 section (owner-run), documentation index entry, and a portfolio
+  plan status update on a separate portfolio branch at closure.
+
+## Verification
+
+```bash
+# narrowest first (either slice)
+xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
+  -destination 'platform=iOS Simulator,id=<simulator-id>' \
+  -only-testing:StrengthAppTests/WatchExecutionCoreTests 2>&1 | tail -40
+
+# full gate: watch scheme build + embed assertion + full unit suite
+./scripts/ci.sh
+```
+
+Toolchain and pseudo-terminal requirements are in `docs/AGENT-WORKFLOWS.md`; no build surprises
+are recorded yet for 6.3.
+
+## Not changed in 6.3
+
+- `strength-training-app/` (no route, schema, config or migration change).
+- The contract text and the portfolio plan's status table (portfolio branch at closure only).
+- HealthKit workout saving and finalisation (6.5), revision application and the phone mirror (6.6).
+
+## Risks
+
+- Extending `OfflineCapture` touches the phone's offline store; it is additive with decode
+  compatibility covered by a legacy-file test, and reverted alone if parity fails.
+- A liveness-only HealthKit session in 6.3 records no workout; during development a finished
+  session therefore looks incomplete in Health. This is expected and documented until 6.5.
+- A simulator cannot prove suspension behaviour, so 6.3 claims no lifecycle proof beyond unit
+  tests and the build.

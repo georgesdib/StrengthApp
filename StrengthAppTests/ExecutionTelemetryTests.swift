@@ -69,6 +69,25 @@ final class ExecutionTelemetryTests: XCTestCase {
         XCTAssertEqual(timer.startedAt, nil)
     }
 
+    func testUnplannedSetIndexStaysAboveThePlannedRange() {
+        XCTAssertEqual(
+            ExerciseWorkoutView.nextUnplannedSetIndex(planned: 3, existing: []),
+            4
+        )
+        XCTAssertEqual(
+            ExerciseWorkoutView.nextUnplannedSetIndex(planned: 3, existing: [1, 2]),
+            4
+        )
+        XCTAssertEqual(
+            ExerciseWorkoutView.nextUnplannedSetIndex(planned: 0, existing: []),
+            1
+        )
+        XCTAssertEqual(
+            ExerciseWorkoutView.nextUnplannedSetIndex(planned: 2, existing: [2]),
+            3
+        )
+    }
+
     @MainActor
     func testRestTimerAutoCompletesOnceAndClearsState() {
         let timer = RestTimerModel()

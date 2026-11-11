@@ -18,6 +18,7 @@ struct ExerciseWorkoutView: View {
     @State private var formOperation = OperationKey<FormRatingRequest>()
     @State private var formError: String?
     @State private var activeLocalSetID: String?
+    @State private var activeSetIndex: Int?
     @State private var recordedExerciseStart = false
     @State private var recordedExerciseCompletion = false
 
@@ -285,7 +286,14 @@ struct ExerciseWorkoutView: View {
         }
         let localSetID = UUID().uuidString.lowercased()
         activeLocalSetID = localSetID
-        let setIndex = planSetIndex ?? (performed.compactMap(\.setIndex).max() ?? 0) + 1
+        // Unplanned and warm-up sets always sit above the planned range. Using max+1 alone can
+        // collide with a later planned set (or with a warm-up logged first), and the server treats
+        // a repeated index as a retry, so the working set would never be recorded.
+        let setIndex = planSetIndex ?? Self.nextUnplannedSetIndex(
+            planned: item?.sets ?? 0,
+            existing: performed.compactMap(\.setIndex)
+        )
+        activeSetIndex = setIndex
         recordExecutionEvent(ExecutionEvent(
             eventType: .setStarted,
             planItemIndex: planIdentity,
@@ -341,7 +349,10 @@ struct ExerciseWorkoutView: View {
             addError = error.localizedDescription
             return
         }
-        let setIndex = logSetIndex ?? (performed.compactMap(\.setIndex).max() ?? 0) + 1
+        guard let setIndex = activeSetIndex else {
+            addError = "The set index is unavailable. Close the form and start the set again."
+            return
+        }
         let localSetID = activeLocalSetID
         let completedAt = ExecutionEvent.nowISO()
         let request = AddSetRequest(
@@ -374,6 +385,7 @@ struct ExerciseWorkoutView: View {
                 ]
             ))
             activeLocalSetID = nil
+            activeSetIndex = nil
             if rir != 6 {
                 let prescribed = item?.restS ?? 120
                 model.startRest(
@@ -450,6 +462,13 @@ struct ExerciseWorkoutView: View {
     private func parseInt(_ text: String) -> Int? {
         let value = text.trimmingCharacters(in: .whitespaces)
         return value.isEmpty ? nil : Int(value)
+    }
+
+    /// Unplanned and warm-up sets sit above the whole planned range. A plain max+1 can collide
+    /// with a later planned set (or a warm-up logged first), and the server treats a repeated
+    /// index as a retry, so the working set would never be recorded.
+    nonisolated static func nextUnplannedSetIndex(planned: Int, existing: [Int]) -> Int {
+        max(planned, existing.max() ?? 0) + 1
     }
 
     private static func label(_ value: String) -> String {

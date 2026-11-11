@@ -3,6 +3,7 @@ import StrengthCore
 
 struct WatchTodayView: View {
     @ObservedObject var today: WatchTodayController
+    @ObservedObject var execution: WatchExecutionController
 
     var body: some View {
         ScrollView {
@@ -94,9 +95,24 @@ struct WatchTodayView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
-            Text("Read-only preview")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            Button {
+                Task { await execution.start(issuedPlanID: plan.issuedPlanID) }
+            } label: {
+                if execution.isWorking {
+                    ProgressView()
+                } else {
+                    Text("Start on Apple Watch")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(execution.isWorking || plan.issuedPlanID.isEmpty)
+            .accessibilityIdentifier("watch-start")
+            if let error = execution.lastError {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

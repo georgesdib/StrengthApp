@@ -4,7 +4,7 @@ import SwiftUI
 struct StrengthWatchApp: App {
     @StateObject private var session: WatchSessionController
     @StateObject private var today: WatchTodayController
-    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var execution: WatchExecutionController
 
     init() {
         let session = WatchSessionController()
@@ -12,29 +12,14 @@ struct StrengthWatchApp: App {
         _today = StateObject(wrappedValue: WatchTodayController(
             onCredentialsMissing: { session.markCredentialsMissing() }
         ))
+        _execution = StateObject(wrappedValue: WatchExecutionController(
+            onCredentialsMissing: { session.markCredentialsMissing() }
+        ))
     }
 
     var body: some Scene {
         WindowGroup {
-            WatchTodayView(today: today)
-                .task {
-                    session.start()
-                    await today.refresh()
-                }
-                .onChange(of: scenePhase) { _, phase in
-                    guard phase == .active else { return }
-                    session.sceneBecameActive()
-                    if case .ready = session.state {
-                        Task { await today.refresh() }
-                    }
-                }
-                .onChange(of: session.state) { _, state in
-                    if case .ready = state {
-                        Task { await today.refresh() }
-                    } else if case .revoked = state {
-                        today.credentialsUnavailable()
-                    }
-                }
+            WatchRootView(session: session, today: today, execution: execution)
         }
     }
 }

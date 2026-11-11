@@ -97,17 +97,22 @@ public struct OfflineCapture: Codable {
     public var activeWorkout: WorkoutDetail?
     public var operations: [OfflineOperation]
     public var updatedAt: Date
+    /// The watch's execution record for the active session (Phase 6.3). Nil on the phone and in
+    /// files written before 6.3; optional so an older capture file still decodes at version 1.
+    public var session: WatchSessionRecord?
 
     public init(
         version: Int = OfflineCapture.currentVersion,
         activeWorkout: WorkoutDetail? = nil,
         operations: [OfflineOperation] = [],
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        session: WatchSessionRecord? = nil
     ) {
         self.version = version
         self.activeWorkout = activeWorkout
         self.operations = operations
         self.updatedAt = updatedAt
+        self.session = session
     }
 }
 
@@ -195,6 +200,100 @@ public final class OfflineCaptureStore {
         return try loadUnlocked()
     }
 
+    /// One atomic write: apply several related changes to the capture and persist it once, so a
+    /// termination cannot leave a half-updated session or outbox.
+    public func perform(
+        _ body: (inout OfflineCapture) throws -> Void
+    ) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        try body(&capture)
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Appends events inside a caller's capture mutation, merging only into the newest operation
+    /// so a completion can never overtake the set it describes.
+    public static func appendExecutionEvents(
+        _ events: [ExecutionEvent],
+        workoutId: String,
+        activeWorkout: WorkoutDetail?,
+        to capture: inout OfflineCapture,
+        now: Date
+    ) throws {
+        guard !events.isEmpty else { return }
+        if let activeWorkout {
+            if let current = capture.activeWorkout?.workoutId,
+               current != activeWorkout.workoutId,
+               !capture.operations.isEmpty {
+                throw OfflineCaptureStoreError.invalidOperation(
+                    "Resolve queued work before switching to a different active workout."
+                )
+            }
+            capture.activeWorkout = activeWorkout
+        }
+        if let index = capture.operations.indices.last,
+           capture.operations[index].workoutId == workoutId,
+           capture.operations[index].state == .pending,
+           capture.operations[index].attemptedAt == nil,
+           case .executionEvents(var queued) = capture.operations[index].body,
+           queued.count + events.count <= 100 {
+            queued.append(contentsOf: events)
+            capture.operations[index].body = .executionEvents(queued)
+        } else {
+            guard capture.operations.count < maxOperations else {
+                throw OfflineCaptureStoreError.full
+            }
+            capture.operations.append(OfflineOperation(
+                operationId: UUID().uuidString.lowercased(),
+                workoutId: workoutId,
+                body: .executionEvents(events),
+                createdAt: now
+            ))
+        }
+    }
+
+    /// Drops queued telemetry that belongs to a set whose capture was undone before it was ever
+    /// sent. Attempted batches are left alone so the server and the queue never disagree.
+    public func removeExecutionEvents(localSetID: String) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        var kept: [OfflineOperation] = []
+        var changed = false
+        for operation in capture.operations {
+            guard operation.state == .pending, operation.attemptedAt == nil,
+                  case .executionEvents(let events) = operation.body,
+                  events.contains(where: { $0.localSetId == localSetID }) else {
+                kept.append(operation)
+                continue
+            }
+            let remaining = events.filter { $0.localSetId != localSetID }
+            changed = true
+            guard !remaining.isEmpty else { continue }
+            var updated = operation
+            updated.body = .executionEvents(remaining)
+            kept.append(updated)
+        }
+        guard changed else { return capture }
+        capture.operations = kept
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Persists the watch session record without touching the operation queue or the active
+    /// workout snapshot. Passing nil clears it, for example after a finished summary is
+    /// acknowledged.
+    public func setSession(_ session: WatchSessionRecord?) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        capture.session = session
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
     public func record(_ operation: OfflineOperation) throws -> OfflineCapture {
         try record(operation, activeWorkout: nil)
     }
@@ -221,7 +320,7 @@ public final class OfflineCaptureStore {
                 "Operation \(operation.operationId) is already queued."
             )
         }
-        try validate(operation, against: capture)
+        try Self.validateOperation(operation, against: capture)
         guard capture.operations.count < Self.maxOperations else {
             throw OfflineCaptureStoreError.full
         }
@@ -251,12 +350,14 @@ public final class OfflineCaptureStore {
             }
             capture.activeWorkout = activeWorkout
         }
-        if let index = capture.operations.lastIndex(where: {
-            $0.workoutId == workoutId
-                && $0.state == .pending
-                && $0.attemptedAt == nil
-        }), case .executionEvents(var queued) = capture.operations[index].body,
-            queued.count + events.count <= 100 {
+        // Merge only into the newest operation: batching into an older batch would move these
+        // events ahead of a set queued after it, breaking original order and set-id enrichment.
+        if let index = capture.operations.indices.last,
+           capture.operations[index].workoutId == workoutId,
+           capture.operations[index].state == .pending,
+           capture.operations[index].attemptedAt == nil,
+           case .executionEvents(var queued) = capture.operations[index].body,
+           queued.count + events.count <= 100 {
             queued.append(contentsOf: events)
             capture.operations[index].body = .executionEvents(queued)
         } else {
@@ -374,7 +475,10 @@ public final class OfflineCaptureStore {
         return result
     }
 
-    private func validate(_ operation: OfflineOperation, against capture: OfflineCapture) throws {
+    public static func validateOperation(
+        _ operation: OfflineOperation,
+        against capture: OfflineCapture
+    ) throws {
         if let localSetId = operation.localSetId {
             guard operation.kind == .addSet, localSetId < 0 else {
                 throw OfflineCaptureStoreError.invalidOperation(

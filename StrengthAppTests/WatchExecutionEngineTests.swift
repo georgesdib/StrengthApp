@@ -89,6 +89,9 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/sets") == true {
                 return (200, Data(Fixtures.workoutWithSet.utf8))
             }
+            if request.url?.path.hasSuffix("/execution-events") == true {
+                return (200, Data(Self.eventsAccepted.utf8))
+            }
             return (200, Data(Fixtures.workoutInProgress.utf8))
         }
         let engine = makeEngine(transport: transport)
@@ -158,6 +161,108 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertFalse(engine.canUndoLastSet)
         XCTAssertFalse(engine.undoLastPendingSet())
         XCTAssertEqual(engine.pendingCount, 1)
+    }
+
+    // MARK: - Telemetry
+
+    func testBeginSetRecordsAnExplicitStartAndMarksTheActiveSet() async throws {
+        let transport = AsyncStubTransport { request in
+            (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        try engine.beginSet()
+
+        let active = try XCTUnwrap(engine.activeSet)
+        XCTAssertEqual(active.planItemIndex, 0)
+        XCTAssertEqual(active.setIndex, 1)
+        XCTAssertEqual(engine.pendingCount, 0, "a start event is not user-facing pending work")
+        XCTAssertEqual(engine.pendingEventCount, 1)
+
+        let capture = try store.load()
+        guard case .executionEvents(let events) = try XCTUnwrap(capture.operations.first).body else {
+            return XCTFail("expected a queued event batch")
+        }
+        XCTAssertEqual(events.map(\.eventType), [.setStarted])
+        XCTAssertEqual(events.first?.localSetId, active.localSetID)
+    }
+
+    func testLoggingASetClosesAnOpenRestWithOneDeliberateEvent() async throws {
+        // The set fails, so the queue keeps its order and nothing is acknowledged away.
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/sets") == true {
+                throw APIError.transport("offline")
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.startRest(seconds: 120, planItemIndex: 0)
+
+        _ = await engine.logSet(entry(setIndex: 1), session: session())
+
+        let capture = try store.load()
+        let types = capture.operations.flatMap { operation -> [ExecutionEventType] in
+            guard case .executionEvents(let events) = operation.body else { return [] }
+            return events.map(\.eventType)
+        }
+        XCTAssertEqual(types, [.restStarted, .restCompleted, .setCompleted])
+        XCTAssertFalse(types.contains(.restSkipped))
+        XCTAssertNotNil(capture.session?.rest?.endedAt, "the rest is closed, not left open")
+    }
+
+    func testSetCompletionCarriesTheAcknowledgedServerSetId() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/sets") == true {
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            }
+            if request.url?.path.hasSuffix("/execution-events") == true {
+                return (200, Data(Self.eventsAccepted.utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.beginSet()
+        let token = try XCTUnwrap(engine.activeSet?.localSetID)
+
+        _ = await engine.logSet(entry(setIndex: 1), session: session())
+
+        let eventsRequest = try XCTUnwrap(
+            transport.requests.last { $0.url?.path.hasSuffix("/execution-events") == true }
+        )
+        let body = try XCTUnwrap(eventsRequest.httpBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let events = try XCTUnwrap(object["events"] as? [[String: Any]])
+        let completed = try XCTUnwrap(events.first { ($0["event_type"] as? String) == "set_completed" })
+        XCTAssertEqual(completed["set_id"] as? Int, 1)
+        XCTAssertEqual(completed["local_set_id"] as? String, token)
+    }
+
+    func testExtendingARestRecordsTheAddedSeconds() async throws {
+        let transport = AsyncStubTransport { request in
+            (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.startRest(seconds: 120, planItemIndex: 0)
+
+        try engine.extendRest(by: 15)
+
+        let capture = try store.load()
+        let rest = try XCTUnwrap(capture.session?.rest)
+        XCTAssertEqual(rest.addedSeconds, 15)
+        let batches = capture.operations.compactMap { operation -> [ExecutionEvent]? in
+            guard case .executionEvents(let events) = operation.body else { return nil }
+            return events
+        }
+        let extended = try XCTUnwrap(batches.last?.last)
+        XCTAssertEqual(extended.eventType, .restExtended)
+        guard case .number(let added)? = extended.payload?["added_s"] else {
+            return XCTFail("expected added_s in the payload")
+        }
+        XCTAssertEqual(added, 15)
     }
 
     // MARK: - Finish and discard
@@ -241,6 +346,11 @@ final class WatchExecutionEngineTests: XCTestCase {
             now: { [unowned self] in self.clock }
         )
     }
+
+    private static let eventsAccepted = #"""
+    {"workout_id":"workout-1","accepted":[],"duplicates":[],
+     "received_at":"2026-11-07T16:00:01+00:00"}
+    """#
 
     private func session() -> IOSSession {
         IOSSession(baseURL: URL(string: "http://home.local:8000")!, token: "token", deviceID: "watch-1")

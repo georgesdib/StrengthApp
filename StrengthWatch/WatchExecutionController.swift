@@ -18,6 +18,7 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var isWorking = false
     @Published private(set) var authorization: LivenessAuthorization = .notDetermined
     @Published private(set) var canUndo = false
+    @Published private(set) var activeSet: ActiveSet?
 
     private let credentialStore: WatchCredentialStore
     private let engine: WatchExecutionEngine
@@ -128,7 +129,7 @@ final class WatchExecutionController: ObservableObject {
         defer { isWorking = false }
         let stop = await engine.logSet(entry, session: session)
         if engine.phase == .active, let seconds = item.restS, seconds > 0 {
-            try? engine.startRest(seconds: seconds)
+            try? engine.startRest(seconds: seconds, planItemIndex: item.orderIndex)
         }
         await handle(stop)
         sync()
@@ -143,18 +144,24 @@ final class WatchExecutionController: ObservableObject {
         engine.setsDone(planItemIndex: item.orderIndex ?? 0)
     }
 
+    /// Explicitly marks that the lifter began a set, so its start time is observed rather than
+    /// inferred. Logging without it is still allowed and simply records no start event.
+    func beginSet() {
+        do {
+            try engine.beginSet()
+        } catch {
+            lastError = "The set could not be started on the watch."
+        }
+        sync()
+    }
+
     func extendRest(by seconds: Int) {
         try? engine.extendRest(by: seconds)
         sync()
     }
 
     func endRest() {
-        try? engine.endRest(outcome: .completed)
-        sync()
-    }
-
-    func skipRest() {
-        try? engine.endRest(outcome: .skipped)
+        try? engine.endRest()
         sync()
     }
 
@@ -262,6 +269,7 @@ final class WatchExecutionController: ObservableObject {
         completedSetCount = engine.completedSetCount
         currentItem = engine.currentItem
         canUndo = engine.canUndoLastSet
+        activeSet = engine.activeSet
         isOffline = engine.network == .offline
         lastError = engine.lastError
     }

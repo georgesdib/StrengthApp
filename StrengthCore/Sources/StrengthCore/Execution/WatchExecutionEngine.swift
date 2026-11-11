@@ -82,7 +82,14 @@ public final class WatchExecutionEngine {
 
     // MARK: - Derived state
 
-    public var pendingCount: Int { pending.count }
+    /// User-facing work only: telemetry batches are durable but are not "pending sets".
+    public var pendingCount: Int {
+        pending.filter { $0.kind != .executionEvents }.count
+    }
+
+    public var pendingEventCount: Int {
+        pending.filter { $0.kind == .executionEvents }.count
+    }
 
     public var pendingSetCount: Int {
         pending.filter { $0.kind == .addSet }.count
@@ -186,14 +193,57 @@ public final class WatchExecutionEngine {
         }
     }
 
+    public var activeSet: ActiveSet? {
+        sessionRecord?.activeSet
+    }
+
     // MARK: - Sets
 
-    /// Persists the set before any request and then attempts one flush pass.
+    /// The lifter began a set. This is an explicit observation, never inferred from a screen.
+    public func beginSet() throws {
+        guard let item = currentItem else { return }
+        let itemIndex = item.orderIndex ?? 0
+        let setIndex = setsDone(planItemIndex: itemIndex) + 1
+        try closeRestIfOpen()
+        guard var record = sessionRecord else { return }
+        let token = UUID().uuidString.lowercased()
+        record.activeSet = ActiveSet(
+            localSetID: token,
+            planItemIndex: itemIndex,
+            setIndex: setIndex,
+            startedAt: now()
+        )
+        _ = try store.setSession(record)
+        sessionRecord = record
+        try enqueue([ExecutionEvent(
+            eventId: UUID().uuidString.lowercased(),
+            eventType: .setStarted,
+            occurredAt: ServerClock.encodedISO(stampedNow()),
+            planItemIndex: itemIndex,
+            localSetId: token,
+            payload: ["set_index": .number(Double(setIndex))]
+        )])
+    }
+
+    /// Ends an open rest at this instant, because starting or logging the next set is what
+    /// really ends recovery (contract §13; owner decision 2026-11-11).
+    public func endRest() throws {
+        try closeRestIfOpen()
+    }
+
+    /// Persists the set before any request and then attempts one flush pass. An open rest is
+    /// closed first, at the same instant, so every rest has one deliberate terminal event.
     @discardableResult
     public func logSet(_ entry: SetEntry, session: IOSSession) async -> WatchFlushStop {
         guard let workoutId = workout?.workoutId, let snapshot = workout else {
             return .conflict(code: "no_workout", message: "There is no active workout.")
         }
+        do {
+            try closeRestIfOpen()
+        } catch {
+            return .storage(message(for: error))
+        }
+        let token = sessionRecord?.activeSet?.localSetID ?? UUID().uuidString.lowercased()
         let localSetID: Int
         do {
             localSetID = try store.nextLocalSetId()
@@ -211,7 +261,7 @@ public final class WatchExecutionEngine {
             performedAt: ServerClock.encodedISO(stampedNow())
         )
         let operation = OfflineOperation(
-            operationId: UUID().uuidString.lowercased(),
+            operationId: token,
             workoutId: workoutId,
             body: .addSet(request),
             createdAt: now(),
@@ -220,14 +270,28 @@ public final class WatchExecutionEngine {
         do {
             _ = try store.record(operation, activeWorkout: snapshot)
             pending.append(operation)
+            if var record = sessionRecord {
+                record.activeSet = nil
+                _ = try store.setSession(record)
+                sessionRecord = record
+            }
+            try enqueue([ExecutionEvent(
+                eventId: UUID().uuidString.lowercased(),
+                eventType: .setCompleted,
+                occurredAt: ServerClock.encodedISO(stampedNow()),
+                planItemIndex: entry.planItemIndex,
+                localSetId: token,
+                payload: ["set_index": .number(Double(entry.setIndex))]
+            )])
         } catch {
             return .storage(message(for: error))
         }
         return await flush(session: session)
     }
 
-    /// Removes the newest set that has never been attempted. Once a request may have reached the
-    /// server the set is not cancellable locally (6.4 owns post-sync correction).
+    /// Removes the newest set that has never been attempted, together with its queued events.
+    /// Once a request may have reached the server the set is not cancellable locally (6.4 owns
+    /// post-sync correction).
     @discardableResult
     public func undoLastPendingSet() -> Bool {
         guard let operation = pending.last(where: {
@@ -235,36 +299,50 @@ public final class WatchExecutionEngine {
         }) else { return false }
         do {
             _ = try store.cancel(operation.operationId)
+            _ = try store.removeExecutionEvents(localSetID: operation.operationId)
         } catch {
             return false
         }
         pending.removeAll { $0.operationId == operation.operationId }
+        refreshPending()
         return true
     }
 
     // MARK: - Rest
 
-    public func startRest(seconds: Int) throws {
+    public func startRest(seconds: Int, planItemIndex: Int? = nil) throws {
         guard seconds > 0, var record = sessionRecord else { return }
-        record.rest = RestInterval(startedAt: now(), prescribedSeconds: seconds)
+        record.rest = RestInterval(
+            startedAt: now(),
+            prescribedSeconds: seconds,
+            planItemIndex: planItemIndex
+        )
         _ = try store.setSession(record)
         sessionRecord = record
+        try enqueue([ExecutionEvent(
+            eventId: UUID().uuidString.lowercased(),
+            eventType: .restStarted,
+            occurredAt: ServerClock.encodedISO(stampedNow()),
+            planItemIndex: planItemIndex,
+            payload: ["prescribed_rest_s": .number(Double(seconds))]
+        )])
     }
 
     public func extendRest(by seconds: Int) throws {
-        guard var record = sessionRecord, var rest = record.rest else { return }
+        guard seconds > 0, var record = sessionRecord, var rest = record.rest, rest.isOpen else {
+            return
+        }
         rest.extend(by: seconds)
         record.rest = rest
         _ = try store.setSession(record)
         sessionRecord = record
-    }
-
-    public func endRest(outcome: RestOutcome) throws {
-        guard var record = sessionRecord, var rest = record.rest else { return }
-        rest.finish(at: now(), outcome: outcome)
-        record.rest = rest
-        _ = try store.setSession(record)
-        sessionRecord = record
+        try enqueue([ExecutionEvent(
+            eventId: UUID().uuidString.lowercased(),
+            eventType: .restExtended,
+            occurredAt: ServerClock.encodedISO(stampedNow()),
+            planItemIndex: rest.planItemIndex,
+            payload: ["added_s": .number(Double(seconds))]
+        )])
     }
 
     // MARK: - Finish
@@ -277,6 +355,7 @@ public final class WatchExecutionEngine {
         let endedAt = stampedNow()
         record.finish = FinishIntent(endedAt: endedAt, sessionRpe: sessionRpe)
         record.rest = nil
+        record.activeSet = nil
         do {
             _ = try store.setSession(record)
         } catch {
@@ -369,6 +448,9 @@ public final class WatchExecutionEngine {
                 if let detail {
                     _ = try store.setActiveWorkout(detail)
                     workout = detail
+                    if operation.kind == .addSet {
+                        rememberSetID(for: operation, in: detail)
+                    }
                 }
                 if operation.kind == .completeWorkout {
                     markFinishAcknowledged()
@@ -416,9 +498,83 @@ public final class WatchExecutionEngine {
                 idempotencyKey: operation.operationId,
                 journaling: false
             )
-        case .rateForm, .executionEvents:
-            throw APIError.journal("This operation is not sent by the watch in Phase 6.3.")
+        case .executionEvents(let events):
+            _ = try await client.submitExecutionEvents(
+                workoutId: operation.workoutId,
+                events: events.map(enrich),
+                session: session,
+                idempotencyKey: operation.operationId
+            )
+            return nil
+        case .rateForm:
+            throw APIError.journal("Form ratings are not captured on the watch in Phase 6.3.")
         }
+    }
+
+    /// Attaches the acknowledged server set id to a completion event. A missing mapping sends
+    /// no set id rather than a guess.
+    private func enrich(_ event: ExecutionEvent) -> ExecutionEvent {
+        guard event.eventType == .setCompleted,
+              let local = event.localSetId,
+              let setId = sessionRecord?.eventSetIDs?[local] else {
+            return event
+        }
+        return ExecutionEvent(
+            eventId: event.eventId,
+            eventType: event.eventType,
+            occurredAt: event.occurredAt,
+            planItemIndex: event.planItemIndex,
+            setId: setId,
+            localSetId: local,
+            payload: event.payload
+        )
+    }
+
+    private func rememberSetID(for operation: OfflineOperation, in detail: WorkoutDetail) {
+        guard case .addSet(let body) = operation.body,
+              let setIndex = body.setIndex,
+              var record = sessionRecord else { return }
+        // The newest set with this exercise and index is the one just created. The plan-item
+        // match is preferred when the server reports it; otherwise exercise + index is used.
+        let candidates = (detail.sets ?? []).filter {
+            ($0.setIndex ?? -1) == setIndex && $0.exerciseId == body.exerciseId
+        }
+        let sameItem = candidates.filter { ($0.planItemIndex ?? -1) == (body.planItemIndex ?? -2) }
+        let pool = sameItem.isEmpty ? candidates : sameItem
+        guard let created = pool.max(by: { ($0.setId ?? 0) < ($1.setId ?? 0) }),
+              let setId = created.setId else { return }
+        var mapping = record.eventSetIDs ?? [:]
+        guard !mapping.values.contains(setId) else { return }
+        mapping[operation.operationId] = setId
+        record.eventSetIDs = mapping
+        _ = try? store.setSession(record)
+        sessionRecord = record
+    }
+
+    private func enqueue(_ events: [ExecutionEvent]) throws {
+        guard let workout, !events.isEmpty else { return }
+        _ = try store.appendExecutionEvents(
+            workoutId: workout.workoutId,
+            events: events,
+            activeWorkout: workout
+        )
+        refreshPending()
+    }
+
+    private func closeRestIfOpen() throws {
+        guard var record = sessionRecord, var rest = record.rest, rest.isOpen else { return }
+        let stamp = stampedNow()
+        rest.finish(at: stamp, outcome: .completed)
+        record.rest = rest
+        _ = try store.setSession(record)
+        sessionRecord = record
+        try enqueue([ExecutionEvent(
+            eventId: UUID().uuidString.lowercased(),
+            eventType: .restCompleted,
+            occurredAt: ServerClock.encodedISO(stamp),
+            planItemIndex: rest.planItemIndex,
+            payload: nil
+        )])
     }
 
     private func markFinishAcknowledged() {

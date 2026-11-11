@@ -14,14 +14,22 @@ public struct RestInterval: Codable, Equatable, Sendable {
     public private(set) var addedSeconds: Int
     public var endedAt: Date?
     public var outcome: RestOutcome?
+    /// The plan item this rest followed, so the telemetry event can stay attributable.
+    public var planItemIndex: Int?
 
-    public init(startedAt: Date, prescribedSeconds: Int, endsAt: Date? = nil) {
+    public init(
+        startedAt: Date,
+        prescribedSeconds: Int,
+        endsAt: Date? = nil,
+        planItemIndex: Int? = nil
+    ) {
         self.startedAt = startedAt
         self.prescribedSeconds = max(0, prescribedSeconds)
         self.endsAt = endsAt ?? startedAt.addingTimeInterval(TimeInterval(max(0, prescribedSeconds)))
         self.addedSeconds = 0
         self.endedAt = nil
         self.outcome = nil
+        self.planItemIndex = planItemIndex
     }
 
     public var prescribedEndsAt: Date {

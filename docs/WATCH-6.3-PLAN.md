@@ -86,14 +86,20 @@ The project uses folder-based target membership (`project.xcproj` `"kind": "fold
 files need no project-file edit. `scripts/ci.sh` already builds the watch scheme and asserts the
 embedded watch app.
 
-## 6.3c — finish, telemetry, documentation
+## 6.3c — telemetry and documentation — complete 2026-11-11
 
-- Finish intent, offline finish queue and summary retry while visible; "finish saved on watch —
-  syncing" state; queue survives suspension and syncs on next open.
-- Execution events for set started/completed, rest started/completed/skipped/extended and
-  pause/resume, sent from the same durable queue with original timestamps.
-- `WATCH-ACCEPTANCE.md` 6.3 section (owner-run), documentation index entry, and a portfolio
-  plan status update on a separate portfolio branch at closure.
+Observed events only, from the same durable queue and in original order: `set_started` (an
+explicit **Start set**), `set_completed`, `rest_started` (`prescribed_rest_s`),
+`rest_completed` and `rest_extended` (`added_s`). No `rest_skipped`: the watch has one
+deliberate way to end rest, and the server derives duration and deviation from the timestamps.
+No `workout_paused`/`workout_resumed`: the watch has no pause concept, so emitting them would
+invent state. `set_completed` is persisted with its `local_set_id` and given `set_id` only
+after the matching add-set is acknowledged; a missing mapping sends no set id rather than a
+guess. Telemetry batches merge only into the newest queued operation, so a completion can never
+move ahead of the set it describes. "Pending" in the UI counts user work, not telemetry batches.
+
+`WATCH-ACCEPTANCE.md` gained the owner-run 6.3 section. The portfolio plan status update stays
+open until this slice is reviewed.
 
 ## Verification
 

@@ -66,6 +66,15 @@ struct WatchSetPage: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
+                    if execution.activeSet == nil {
+                        Button("Start set") { execution.beginSet() }
+                            .font(.footnote)
+                    } else {
+                        Text("Set in progress")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
                     loadRow
                     repsRow
                     Button {
@@ -212,19 +221,17 @@ struct WatchRestBar: View {
             VStack(alignment: .leading, spacing: 4) {
                 if rest.isComplete(at: context.date) {
                     Text("Rest complete").font(.subheadline)
-                    Button("Done") { execution.endRest() }
-                        .font(.caption2)
                 } else {
                     let remaining = Int(rest.remaining(at: context.date).rounded(.up))
                     Text("Rest \(remaining / 60):\(String(format: "%02d", remaining % 60))")
                         .font(.subheadline)
                         .monospacedDigit()
-                    HStack {
-                        Button("+15s") { execution.extendRest(by: 15) }
-                        Button("Skip") { execution.skipRest() }
-                    }
-                    .font(.caption2)
                 }
+                HStack {
+                    Button("+15s") { execution.extendRest(by: 15) }
+                    Button("End rest") { execution.endRest() }
+                }
+                .font(.caption2)
             }
         }
     }

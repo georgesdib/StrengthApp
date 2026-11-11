@@ -118,3 +118,40 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
 - [ ] The watch token is in the watch Keychain only; non-secret metadata may be in UserDefaults.
 - [ ] Forget the iPhone device and revoke the disposable watch; stop and delete the disposable
       server/database.
+
+
+## Execution lifecycle (6.3) — owner-run
+
+**Status: not yet performed.** Requires the watch build; a simulator is not proof of liveness,
+suspension or the Digital Crown.
+
+- [ ] Request a plan for **Apple Watch**; the watch shows **Start on Apple Watch**.
+- [ ] The first start asks for Health access. Allowing it starts the session; denying it must
+      refuse to start and point to logging on the iPhone instead.
+- [ ] Start: the Set screen shows the first exercise, "Set 1 of n" and the target load × reps @ RIR.
+- [ ] Lower the wrist for a minute, then raise it. The screen wakes on the same set, elapsed time
+      has advanced, and nothing was lost.
+- [ ] **Start set**, adjust load with the Digital Crown (±2.5 kg) and reps with −/+, then
+      **Log set**. The RIR sheet defaults to the prescribed target and offers 0–6 and
+      *Not recorded*.
+- [ ] The set is captured/pending, then clears once the home server acknowledges it.
+- [ ] The rest countdown appears and survives a wrist drop. **+15s** extends it.
+- [ ] Let the countdown reach zero: it reads **Rest complete** and **End rest** is still there.
+      Nothing closes the rest by itself.
+- [ ] Tap **Log set** without ending the rest: the rest closes at that moment and the set is
+      logged. There is no rest-skipped state anywhere.
+- [ ] Background the app for several minutes mid-session, return, log a set: elapsed time and
+      rest state are correct.
+- [ ] Force-quit mid-session and relaunch: the session resumes with the same sets and pending
+      count, and nothing is duplicated.
+- [ ] Turn off Wi-Fi mid-session and log two sets: both are captured, the banner reads
+      offline · n pending, and nothing claims to be saved.
+- [ ] Re-enable Wi-Fi: pending work flushes in order (the set, then its events), once each.
+- [ ] Finish while offline with an sRPE. "Finish saved on watch — syncing" persists; reopen at
+      home and the server shows one completed session with the original end time.
+- [ ] **Discard session** on the finish screen asks for confirmation, abandons the server session
+      and clears the local record.
+- [ ] Server: `workout_execution_event` holds `set_started`, `set_completed`,
+      `rest_started`, `rest_completed` and any `rest_extended` rows with the original
+      `occurred_at`; no `rest_skipped`; a synced `set_completed` carries `set_id`.
+- [ ] HealthKit: **no workout is saved in 6.3** (that is 6.5); only the liveness session exists.

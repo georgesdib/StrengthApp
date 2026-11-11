@@ -7,7 +7,11 @@ closed 2026-11-08** — Phase 3A is unit/simulator/live-server and physical-iPho
 offline capture and replay are closed 2026-11-08 (snapshot/outbox, add set/form/finish, ordered
 sync, conflict handling and cancellation); physical offline acceptance was owner-confirmed. R1 durable pending-mutation journal, R3 explicit plan-item selection,
 R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
-closed.
+closed. Phase 6.0 (the shared watch core) and 6.1 (the server watch contract) are complete. Phase
+6.2 is complete and closed 2026-11-10: 6.2a embedded watch target and CI, 6.2b credential/config
+handoff and phone-side Pair/Status/Revoke, and 6.2c read-only Today from the Home server. Physical
+Apple Watch acceptance remains owner-run. The watch has no start, set logging, HealthKit or offline
+execution yet.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
@@ -17,13 +21,15 @@ bodyweight;
 manual readiness wins, Python remains the sole authority for readiness scores, prescriptions,
 loads, sets and training decisions, and the phone never supplies plan content.
 
-The server-side contracts live in the `strength-training-app` repository; the
-[client docs index](docs/README.md) lists them. The Phase 6 watchOS companion contract is
-[`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
-in that repository; 6.0 (the S1–S4 shared core) and 6.1 (the server contract) are complete, and
-6.2+ is planned, not started. The client plan is
-[iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md); start with
-[`docs/README.md`](docs/README.md) for the client documentation map.
+The shared iOS phase contracts and client plan are canonical in the portfolio repository; the
+[client docs index](docs/README.md) lists the client-specific documentation. The Phase 6 watchOS
+companion contract is
+[`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md);
+Phase 6.2 is complete and closed 2026-11-10 (6.0 shared core, 6.1 server contract, 6.2a watch
+target, 6.2b credential handoff and 6.2c read-only Today). Physical Apple Watch acceptance remains
+owner-run. The client plan is
+[the canonical iOS client phase plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md);
+start with [`docs/README.md`](docs/README.md) for the client documentation map.
 
 ## Agent documentation
 
@@ -82,7 +88,9 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 - **Workout ready** — once the server finishes building, Today shows a ready card with the
   session type, date, exercise count and warnings. Start workout starts by issued-plan id and
   opens the active workout screen directly; no preview sheet opens automatically. Request workout
-  can ask for server-decided, top-set/back-off or straight-set main-lift structure.
+  can ask for server-decided, top-set/back-off or straight-set main-lift structure and chooses
+  **iPhone** or **Apple Watch** as the execution target. A watch-targeted plan shows a notice on
+  the phone and is started on the watch; it never exposes the phone Start button.
 - **Workout** — exercise-first list with an exercise detail screen, prepopulated planned sets,
   performed-set logging with load/reps/RIR, optional mean velocity, optional per-rep velocity with
   comma/space-separated input, explicit Start set and set-completion timestamps, performed-set
@@ -100,8 +108,10 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 - **Progress** — the server dashboard: sRPE coverage, performance points, weekly volume, attendance
   and back-symptom summary over a 4/8/12/26/52-week window.
 - **Settings** — Home Server, Away Server, Prefer Home Server, active route, Exercise Library,
-  device id/label, app version, opt-in HealthKit readiness, Forget this device (local token only),
-  re-pair instructions.
+  Apple Watch Pair/Status/Revoke, device id/label, app version, opt-in HealthKit readiness, Forget
+  this device (local token only), re-pair instructions.
+- **Apple Watch** — credential status plus a read-only Today plan fetched from the Home server;
+  phone-targeted plans are hidden; no start, sets, forms, HealthKit or offline execution.
 - **Exercise Library** — searchable catalogue, read-only configuration, server-computed e1RM and
   paginated working-set history; catalogue/config cached for the app session, e1RM/history fetched
   on entry, explicit refresh.
@@ -131,12 +141,16 @@ the Phase 4 offline capture path; plan edits remain online-only.
   and a separate physical R1 pass was not performed.
 - 401/403 clears the local pairing and returns to the pairing screen. Other 4xx show the server
   message/code; 5xx shows a generic failure.
+- The watch has its own server device/token. The phone holds that token in memory only until the
+  watch acknowledges it; the watch stores it in its own Keychain. Non-secret watch metadata
+  (device id, epoch, configVersion, Home URL) is separate from the token. The watch never follows
+  the phone's Away route.
 - Plain HTTP on the trusted home LAN. No TLS, proxy, CA or remote access. No analytics, telemetry,
   advertising, cloud database or Internet fallback.
 
 ## Tests
 
-The unit-test target (`StrengthAppTests`, 102 tests) covers Keychain save/load/delete/replace, API
+The unit-test target (`StrengthAppTests`, 172 tests) covers Keychain save/load/delete/replace, API
 client decoding from fixtures, 401/403 mapping, bounded GET retries, no POST retry, base-URL/code/
 label validation, the AppModel pairing/forget/auth-failure flows, the same-origin redirect policy
 (cross-port, scheme-changing, host, userinfo and delegate rejection), Phase 2 request bodies and
@@ -153,12 +167,23 @@ non-blocking form-rating failure, R5 server-active/ended-elsewhere/consumed-pres
 Phase 3A Apple Watch classification, HRV/RHR/bodyweight selection/freshness, per-metric
 eligible/missing/stale states, coalesced authoritative refresh, import/refresh concurrency,
 HealthKit request encoding and indeterminate no-sample handling, plus optional per-rep velocity
-parsing and the refresh gate before import.
+parsing and the refresh gate before import. Watch tests cover credential payload validation,
+epoch/configVersion ordering, stale/revoked re-ack, config-only refresh without a token, the
+watch Keychain/metadata split, mint/list/revoke requests, the phone handoff state machine, a lost
+acknowledgement, re-mint on missing credentials, deliberate revoke suppression, cross-device
+revocation rejection, duplicate-revocation idempotence, tokenless-probe recovery from stale
+metadata, credential-lineage replacement, Home-only watch API routing, configuration-version
+re-baselining, and convergence to a fresh epoch or config without an acknowledgement loop. The
+read-only watch Today tests cover plan-state mapping, strict target filtering (including
+missing/unknown targets), plan item labels, bootstrap plus plan fetches over the supplied watch
+session, and authentication failure. AppModel integration tests cover watch-coordinator startup
+after initial pairing, existing-pair launch, re-pair reset, and execution-target forwarding.
 
 ### Building and testing from the command line
 
-Prerequisites: Xcode 27.x, an iOS 27.x simulator runtime, and the Xcode developer directory
-selected. If `xcode-select -p` prints `/Library/Developer/CommandLineTools`, every `xcodebuild`
+Prerequisites: Xcode 27.x, an iOS 27.x simulator runtime, a watchOS 27.x simulator runtime, and
+the Xcode developer directory selected. If `xcode-select -p` prints
+`/Library/Developer/CommandLineTools`, every `xcodebuild`
 call fails with "requires Xcode"; either select it once
 (`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`) or prefix each command with
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
@@ -167,12 +192,16 @@ The repository tracks `project.xcproj` rather than a `project.pbxproj`; Xcode 27
 `xcodebuild` reads it directly, so there is nothing to generate first.
 
 ```bash
-# What exists: three targets and one shared scheme.
+# What exists: four targets and two shared schemes.
 xcodebuild -list -project StrengthApp.xcodeproj
 
-# Build the app for a simulator.
+# Build the app for a simulator. This also builds and embeds StrengthWatch.app.
 xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
+
+# Build the watch app on its own (use an available watch simulator id).
+xcodebuild -project StrengthApp.xcodeproj -scheme StrengthWatch \
+  -destination 'platform=watchOS Simulator,id=<watch-simulator-id>' build
 
 # Run every unit test.
 xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
@@ -184,7 +213,8 @@ xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
   -only-testing:StrengthAppTests/Phase2AppModelTests/testIssueStartSetAndCompleteFlow
 ```
 
-`./scripts/ci.sh` wraps the build and unit-test commands above and is what CI runs.
+`./scripts/ci.sh` wraps the watch build, the app build and the unit-test command above and is
+what CI runs. Set `WATCH_DESTINATION` to override the first available Apple Watch simulator.
 
 Install and launch the built app by hand (the UI test does this itself when it is enabled):
 
@@ -203,9 +233,10 @@ Two failure modes that are environmental rather than code:
   command: `script -q /dev/null xcodebuild test …` (macOS). The build alone does not need it.
 
 The physical-device Phase 3A checklist and rollback steps are in
-[`DEVICE-ACCEPTANCE.md`](DEVICE-ACCEPTANCE.md); the server-side backup, migration and
-pairing-code runbook is in
-[iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.3.
+[`DEVICE-ACCEPTANCE.md`](DEVICE-ACCEPTANCE.md). The Phase 6.2 watch credential handshake,
+read-only Today and revocation script is in [`WATCH-ACCEPTANCE.md`](WATCH-ACCEPTANCE.md); it is
+owner-run and has not been performed. The server-side backup, migration and pairing-code runbook
+is in [the canonical iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.3.
 
 ### Running the live UI tests
 

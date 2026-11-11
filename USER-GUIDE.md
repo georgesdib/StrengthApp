@@ -66,13 +66,15 @@ raw 100.x address.
 ## 4. Daily workout flow
 
 1. Open **Today** and review readiness and the prescription.
-2. Start the workout. The server issues the plan; the phone never invents plan content.
-3. Open an exercise and tap **Start set** before the set.
-4. Enter load, reps, RIR, and optional mean/per-rep velocity, then save.
-5. A working set starts the rest timer automatically. Warm-up sets (RIR 6) do not.
-6. Repeat for the remaining sets and exercises.
-7. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
-8. Review the completed session in **History**.
+2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
+   is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
+3. Start the workout. The server issues the plan; the phone never invents plan content.
+4. Open an exercise and tap **Start set** before the set.
+5. Enter load, reps, RIR, and optional mean/per-rep velocity, then save.
+6. A working set starts the rest timer automatically. Warm-up sets (RIR 6) do not.
+7. Repeat for the remaining sets and exercises.
+8. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
+9. Review the completed session in **History**.
 
 ### Set controls
 
@@ -172,9 +174,33 @@ and HR is not used for readiness, fatigue, progression or prescriptions.
 
 - **Home/Away server** — addresses and preference.
 - **Exercise Library** — catalogue and history.
+- **Apple Watch** — pair, replace or revoke the watch credential.
 - **HealthKit** — opt-in readiness import.
 - **Forget this device** — removes the local token; the server-side device record is managed
   separately with the server CLI.
+
+### Apple Watch pairing
+
+The watch uses the **Home Server** only. Set a valid Home Server before pairing; the watch never
+follows the Away route.
+
+1. Install and open Strength on the Apple Watch once, then keep both apps open.
+2. On the iPhone, open **Settings → Apple Watch**.
+3. Tap **Pair Apple Watch**. The status changes from *Waiting for Apple Watch* to *Paired* when
+   the watch acknowledges the credential.
+4. If the status stays waiting, bring the watch near the phone, open both apps and try again.
+
+The watch receives its own server device token. The iPhone keeps that token only until the watch
+acknowledges it; the watch stores it in its own Keychain. **Replace Apple Watch** rotates the
+credential. **Revoke Apple Watch** revokes it on the server, clears the watch, and suppresses
+automatic re-pairing until you tap Pair again.
+
+Changing the Home Server and tapping **Save server settings** increments the watch configuration
+version. When the watch has no active session, it updates its Home address without receiving a new
+token.
+
+The current watch build shows pairing/credential status only. Workout and read-only Today screens
+arrive in later phases.
 
 If the server address changes, save the settings and let the app recheck. If you change to a
 different server/database, pair again.

@@ -79,6 +79,30 @@ final class ServerConfigurationTests: XCTestCase {
         XCTAssertTrue(store.preferHome)
     }
 
+    func testWatchConfigVersionStartsAtOneAndBumpsMonotonically() {
+        let suite = "ServerConfigurationTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        store.migrateServerConfigurationIfNeeded()
+        XCTAssertEqual(store.watchConfigVersion, 1)
+        XCTAssertEqual(store.bumpWatchConfigVersion(), 2)
+        XCTAssertEqual(store.watchConfigVersion, 2)
+        XCTAssertEqual(store.bumpWatchConfigVersion(), 3)
+        XCTAssertEqual(store.watchConfigVersion, 3)
+    }
+
+    func testLegacyServerMigrationStartsWatchConfigAtTwo() {
+        let suite = "ServerConfigurationTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        store.serverURL = "http://192.168.1.10:8000"
+        store.migrateServerConfigurationIfNeeded()
+        XCTAssertEqual(store.homeServerURL, "http://192.168.1.10:8000")
+        XCTAssertEqual(store.watchConfigVersion, 2)
+    }
+
     @MainActor
     func testAppModelUsesAwayAddressWhenHomeIsUnreachable() async {
         let suite = "ServerConfigurationTests-\(UUID().uuidString)"

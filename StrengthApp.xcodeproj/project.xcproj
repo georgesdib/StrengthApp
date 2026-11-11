@@ -23,6 +23,7 @@
       "name": "Products",
       "children": [
         { "path": "<PRODUCTS>/StrengthApp.app", "id": "000000000000000000000120", "type": "wrapper.application", "index": false },
+        { "path": "<PRODUCTS>/StrengthWatch.app", "id": "000000000000000000000121", "type": "wrapper.application", "index": false, "target-membership": [ { "build-phase": "StrengthApp/copy/Embed Watch Content", "code-sign-on-copy": true } ] },
         { "path": "<PRODUCTS>/StrengthAppTests.xctest", "id": "EAE4FAEC309F8DD500B7CC15", "type": "wrapper.cfbundle", "index": false },
         { "path": "<PRODUCTS>/StrengthAppUITests.xctest", "id": "EACD40A5309F8F500088B032", "type": "wrapper.cfbundle", "index": false },
       ],
@@ -31,10 +32,12 @@
       "path": "Support",
       "children": [
         { "path": "Info.plist" },
+        { "path": "WatchInfo.plist" },
       ],
     },
     { "kind": "folder", "path": "StrengthAppTests", "target-membership": [ "StrengthAppTests" ] },
     { "kind": "folder", "path": "StrengthAppUITests", "target-membership": [ "StrengthAppUITests" ] },
+    { "kind": "folder", "path": "StrengthWatch", "target-membership": [ "StrengthWatch" ] },
   ],
   "targets": [
     {
@@ -44,11 +47,18 @@
       "product-type": "application",
       "dependencies": [
         { "kind": "package", "package": "StrengthCore", "product-name": "StrengthCore" },
+        "StrengthWatch",
       ],
       "build-phases": [
         "compile-sources",
         "frameworks",
         "resources",
+        {
+          "kind": "copy",
+          "name": "Embed Watch Content",
+          "bundle-base-path": "root",
+          "relative-path": "Watch",
+        },
       ],
       "package-product-members": [
         {
@@ -146,6 +156,47 @@
         "SWIFT_VERSION": "5.0",
         "TARGETED_DEVICE_FAMILY": "1,2",
         "TEST_TARGET_NAME": "StrengthApp",
+      },
+    }, {
+      "name": "StrengthWatch",
+      "id": "000000000000000200000000",
+      "product": "Products/StrengthWatch.app",
+      "product-type": "application",
+      "dependencies": [
+        { "kind": "package", "package": "StrengthCore", "product-name": "StrengthCore" },
+      ],
+      "build-phases": [
+        "compile-sources",
+        "frameworks",
+        "resources",
+      ],
+      "package-product-members": [
+        {
+          "package": "StrengthCore",
+          "product-name": "StrengthCore",
+          "build-phase": { "build-phase": "frameworks" },
+        },
+      ],
+      "build-settings": {
+        "CODE_SIGN_STYLE": "Automatic",
+        "CURRENT_PROJECT_VERSION": "1",
+        "ENABLE_PREVIEWS": "YES",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "INFOPLIST_FILE": "Support/WatchInfo.plist",
+        "INFOPLIST_KEY_CFBundleDisplayName": "Strength",
+        "INFOPLIST_KEY_WKApplication": "YES",
+        "INFOPLIST_KEY_WKCompanionAppBundleIdentifier": "com.georgesdibpersonalteam.StrengthApp",
+        "LD_RUNPATH_SEARCH_PATHS": "@executable_path/Frameworks",
+        "MARKETING_VERSION": "1.0",
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.georgesdibpersonalteam.StrengthApp.watchkitapp",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SDKROOT": "watchos",
+        "SKIP_INSTALL": "YES",
+        "SUPPORTED_PLATFORMS": "watchsimulator watchos",
+        "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
+        "SWIFT_VERSION": "5.0",
+        "TARGETED_DEVICE_FAMILY": "4",
+        "WATCHOS_DEPLOYMENT_TARGET": "27.0",
       },
     },
   ],

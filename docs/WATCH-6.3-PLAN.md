@@ -35,6 +35,10 @@ never overrides or restates the contract.
    owner-run in 6.7; a simulator is not proof.
 7. **Slices.** Three reviewable chunks, each stopping for review (below).
 8. **Idle warning (3h) and abandonment surfacing** stay with 6.6.
+9. **Retry window.** Automatic flush retries stop after 15 minutes from the first failure of a
+   burst, with the final wait clamped to the boundary; a new burst starts only on foreground, a
+   network-path change or an explicit retry. Authentication failures are not retried — they clear
+   to "credentials missing" and leave the queue intact.
 
 ## 6.3a — StrengthCore execution primitives (no app wiring)
 

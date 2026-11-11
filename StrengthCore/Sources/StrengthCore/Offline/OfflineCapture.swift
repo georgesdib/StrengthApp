@@ -97,17 +97,22 @@ public struct OfflineCapture: Codable {
     public var activeWorkout: WorkoutDetail?
     public var operations: [OfflineOperation]
     public var updatedAt: Date
+    /// The watch's execution record for the active session (Phase 6.3). Nil on the phone and in
+    /// files written before 6.3; optional so an older capture file still decodes at version 1.
+    public var session: WatchSessionRecord?
 
     public init(
         version: Int = OfflineCapture.currentVersion,
         activeWorkout: WorkoutDetail? = nil,
         operations: [OfflineOperation] = [],
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        session: WatchSessionRecord? = nil
     ) {
         self.version = version
         self.activeWorkout = activeWorkout
         self.operations = operations
         self.updatedAt = updatedAt
+        self.session = session
     }
 }
 
@@ -191,6 +196,18 @@ public final class OfflineCaptureStore {
             )
         }
         capture.activeWorkout = workout
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Persists the watch session record without touching the operation queue or the active
+    /// workout snapshot. Passing nil clears it, for example after a finished summary is
+    /// acknowledged.
+    public func setSession(_ session: WatchSessionRecord?) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        capture.session = session
         try saveUnlocked(capture)
         return try loadUnlocked()
     }

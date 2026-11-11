@@ -69,6 +69,19 @@ final class ExecutionTelemetryTests: XCTestCase {
         XCTAssertEqual(timer.startedAt, nil)
     }
 
+    @MainActor
+    func testRestTimerAutoCompletesOnceAndClearsState() {
+        let timer = RestTimerModel()
+        var results: [RestTimerResult] = []
+        timer.onFinish = { results.append($0) }
+        timer.start(seconds: 1)
+        timer.refresh(now: Date().addingTimeInterval(2))
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results.first?.outcome, "completed")
+        XCTAssertNil(timer.startedAt)
+        XCTAssertNil(timer.endDate)
+    }
+
     func testExecutionAnalyticsDecodesServerShape() throws {
         let json = """
         {"workout_id":"w","status":"completed",

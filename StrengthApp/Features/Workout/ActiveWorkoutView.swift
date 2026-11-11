@@ -36,7 +36,6 @@ struct ActiveWorkoutView: View {
     @State private var planPicker: PlanPickerMode?
     @State private var pendingRemoval: PlanRemoval?
     @State private var planEditError: String?
-    @StateObject private var restTimer = RestTimerModel()
     @StateObject private var drafts = WorkoutDraftStore()
     @State private var otherExerciseId: String?
     @State private var showingOtherExercisePicker = false
@@ -183,7 +182,6 @@ struct ActiveWorkoutView: View {
                                             model: model,
                                             exerciseId: exercise,
                                             planIndex: index,
-                                            restTimer: restTimer,
                                             drafts: drafts
                                         )
                                     } label: {
@@ -410,19 +408,11 @@ struct ActiveWorkoutView: View {
                 }
             }
             .navigationTitle("Workout")
-            .safeAreaInset(edge: .bottom) {
-                RestTimerBar(
-                    timer: restTimer,
-                    onFinish: { recordRestResult($0) },
-                    onExtended: { recordRestExtension($0) }
-                )
-            }
             .navigationDestination(item: $otherExerciseId) { id in
                 ExerciseWorkoutView(
                     model: model,
                     exerciseId: id,
                     planIndex: nil,
-                    restTimer: restTimer,
                     drafts: drafts
                 )
             }
@@ -572,12 +562,11 @@ struct ActiveWorkoutView: View {
                 ($0.orderIndex ?? -1) == planIndex
             }?.restS ?? 120
             if rir != 6 {
-                restTimer.start(seconds: plannedRest)
-                model.recordExecutionEvent(ExecutionEvent(
-                    eventType: .restStarted,
+                model.startRest(
+                    seconds: plannedRest,
                     planItemIndex: planIndex,
-                    payload: ["prescribed_rest_s": .number(Double(plannedRest))]
-                ))
+                    exerciseId: exerciseId
+                )
             }
             loadText = ""
             repsText = ""
@@ -739,31 +728,6 @@ struct ActiveWorkoutView: View {
             .filter { $0.exerciseId == exercise }
             .compactMap(\.setIndex)
         return (indexes.max() ?? 0) + 1
-    }
-
-    private func recordRestResult(_ result: RestTimerResult) {
-        model.recordExecutionEvent(ExecutionEvent(
-            eventType: result.outcome == "completed" ? .restCompleted : .restSkipped,
-            occurredAt: iso(result.endedAt),
-            payload: [
-                "prescribed_rest_s": .number(Double(result.prescribedSeconds)),
-                "actual_rest_s": .number(Double(result.actualSeconds)),
-                "outcome": .string(result.outcome),
-            ]
-        ))
-    }
-
-    private func recordRestExtension(_ seconds: Int) {
-        model.recordExecutionEvent(ExecutionEvent(
-            eventType: .restExtended,
-            payload: ["added_s": .number(Double(seconds))]
-        ))
-    }
-
-    private func iso(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: date)
     }
 
     private func parseDouble(_ text: String) -> Double? {

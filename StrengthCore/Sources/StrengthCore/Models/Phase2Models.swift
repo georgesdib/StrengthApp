@@ -96,6 +96,24 @@ public struct PrescriptionPlan: Codable {
     }
 }
 
+public struct WarmupSet: Codable, Equatable, Identifiable {
+    public let percent: Double
+    public let reps: Int
+    public let loadKg: Double
+
+    public init(percent: Double, reps: Int, loadKg: Double) {
+        self.percent = percent
+        self.reps = reps
+        self.loadKg = loadKg
+    }
+
+    public var id: String { "\(percent)-\(reps)-\(loadKg)" }
+
+    public var loadLabel: String {
+        loadKg > 0 ? String(format: "%.1f kg", loadKg) : "bodyweight"
+    }
+}
+
 public struct PrescriptionItem: Codable, Identifiable {
     public let orderIndex: Int?
     public let exerciseId: String?
@@ -109,6 +127,7 @@ public struct PrescriptionItem: Codable, Identifiable {
     public let refs: [String]?
     public let restS: Int?
     public let essential: Bool?
+    public let warmup: [WarmupSet]?
 
     public init(
         orderIndex: Int?,
@@ -122,7 +141,8 @@ public struct PrescriptionItem: Codable, Identifiable {
         effortModel: String?,
         refs: [String]?,
         restS: Int?,
-        essential: Bool?
+        essential: Bool?,
+        warmup: [WarmupSet]? = nil
     ) {
         self.orderIndex = orderIndex
         self.exerciseId = exerciseId
@@ -136,6 +156,7 @@ public struct PrescriptionItem: Codable, Identifiable {
         self.refs = refs
         self.restS = restS
         self.essential = essential
+        self.warmup = warmup
     }
 
     public var id: String { "\(orderIndex ?? 0)-\(exerciseId ?? "")" }
@@ -690,10 +711,16 @@ public struct EmptyRequest: Encodable {
 
 // MARK: - Exercise catalogue and plan edits (R8)
 
-public struct ExerciseOption: Decodable, Identifiable, Equatable {
+public struct ExerciseOption: Codable, Identifiable, Equatable {
     public let id: String
     public let display: String
     public let pattern: String?
+
+    public init(id: String, display: String, pattern: String?) {
+        self.id = id
+        self.display = display
+        self.pattern = pattern
+    }
 }
 
 public struct ExerciseCatalogueResponse: Decodable {

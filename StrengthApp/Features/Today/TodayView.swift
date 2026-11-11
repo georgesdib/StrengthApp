@@ -13,8 +13,8 @@ struct TodayView: View {
     @State private var draftTarget: PrescriptionExecutionTarget = .phone
     @State private var showingPlanSettings = false
     @State private var showingWorkout = false
-    @State private var startKey = UUID().uuidString.lowercased()
-    @State private var startError: String?
+    @State private var showingReview = false
+    @State private var startAfterReview = false
     @State private var confirmingDiscardOffline = false
 
     var body: some View {
@@ -321,10 +321,6 @@ struct TodayView: View {
             .navigationDestination(isPresented: $showingWorkout) {
                 ActiveWorkoutView(model: model)
             }
-            .onChange(of: currentIssuedPlanId) { _, _ in
-                startKey = UUID().uuidString.lowercased()
-                startError = nil
-            }
             .sheet(isPresented: $showingPlanSettings) {
                 PlanSettingsView(
                     settings: $draftSettings,
@@ -332,6 +328,17 @@ struct TodayView: View {
                 ) {
                     showingPlanSettings = false
                     beginPrescription(with: draftSettings, target: draftTarget)
+                }
+            }
+            .sheet(isPresented: $showingReview, onDismiss: {
+                if startAfterReview {
+                    startAfterReview = false
+                    showingWorkout = true
+                }
+            }) {
+                PrescriptionPreviewView(model: model) {
+                    startAfterReview = true
+                    showingReview = false
                 }
             }
             .alert("Discard all offline capture?", isPresented: $confirmingDiscardOffline) {
@@ -430,13 +437,6 @@ struct TodayView: View {
         }
     }
 
-    private var currentIssuedPlanId: String? {
-        if case .issued(let issued) = model.prescriptionState {
-            return issued.issuedPlanId
-        }
-        return nil
-    }
-
     @ViewBuilder
     private func readyCard(_ issued: IssuedPlanResponse) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -455,51 +455,18 @@ struct TodayView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
-            if let startError {
-                Text(startError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
             if issued.executionTarget == "watch" {
-                Text("Requested for Apple Watch. Start this workout on the watch.")
+                Text("Requested for Apple Watch. Review it here; start it on the watch.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("watch-targeted-plan")
-            } else {
-                Button {
-                    startReadyWorkout()
-                } label: {
-                    HStack {
-                        Spacer()
-                        if model.isSaving {
-                            ProgressView()
-                        } else {
-                            Text("Start workout")
-                        }
-                        Spacer()
-                    }
-                }
-                .accessibilityIdentifier("start-ready-workout")
-                .disabled(model.isSaving || model.isOffline || model.hasPendingOfflineCapture)
-                if model.isOffline || model.hasPendingOfflineCapture {
-                    Text("Starting requires the server.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
-        }
-    }
-
-    private func startReadyWorkout() {
-        guard case .issued = model.prescriptionState else { return }
-        startError = nil
-        Task {
-            if await model.startWorkout(idempotencyKey: startKey) {
-                startKey = UUID().uuidString.lowercased()
-                showingWorkout = true
-            } else {
-                startError = model.mutationError
+            Button {
+                showingReview = true
+            } label: {
+                Label("Review workout", systemImage: "list.bullet.clipboard")
             }
+            .accessibilityIdentifier("review-workout")
         }
     }
 

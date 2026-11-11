@@ -51,5 +51,8 @@ struct MainTabView: View {
             SettingsView(model: model)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
+        .safeAreaInset(edge: .bottom) {
+            RestTimerBar(timer: model.restTimer)
+        }
     }
 }

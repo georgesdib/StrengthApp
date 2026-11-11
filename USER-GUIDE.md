@@ -68,10 +68,15 @@ raw 100.x address.
 1. Open **Today** and review readiness and the prescription.
 2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
    is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
-3. Start the workout. The server issues the plan; the phone never invents plan content.
+3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
+   load, RIR, rest and any warnings. **Start workout** is on that screen, so the plan is always
+   visible before it is consumed. The server issues the plan; the phone never invents plan content.
 4. Open an exercise and tap **Start set** before the set.
 5. Enter load, reps, RIR, and optional mean/per-rep velocity, then save.
-6. A working set starts the rest timer automatically. Warm-up sets (RIR 6) do not.
+6. Each main lift lists its warm-up ramp, starting with the empty bar (the first rung is capped
+   at 20 kg, or the first warm-up when that is lighter). Warm-up rows are optional: skipping them
+   and logging the working sets is valid. To record one, use **Start another set** with RIR 6.
+   A working set starts the rest timer automatically; logged warm-ups (RIR 6) do not.
 7. Repeat for the remaining sets and exercises.
 8. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
 9. Review the completed session in **History**.
@@ -88,11 +93,12 @@ raw 100.x address.
 
 The timer uses the prescription's rest seconds when available.
 
-- It displays prescribed rest and counts down.
+- It displays prescribed rest and counts down above the tab bar, on Today and every other tab,
+  so leaving the workout does not hide it.
 - **Skip** ends the rest early.
 - **+15 s** extends the timer.
 - Starting the next set also ends the current rest.
-- When rest finishes, the app records the actual rest interval.
+- When rest finishes, the timer dismisses itself and the app records the actual interval.
 
 The timer is descriptive. It does not change the next prescription or declare the session
 compliant.
@@ -103,7 +109,8 @@ The first rest timer asks for notification permission. If allowed, the app sched
 notification for the rest end:
 
 - the notification plays the system sound and follows the phone's vibration/silent settings;
-- tapping it opens the app (it does not yet deep-link directly into the active workout);
+- it carries a **Done** action; tapping either the action or the notification opens the app and
+  clears the alert (it does not yet deep-link directly into the active workout);
 - extension reschedules the notification;
 - skip/finish cancels it.
 
@@ -116,6 +123,9 @@ rest-completion event is fabricated.
 The app keeps the active workout and pending operations on the phone before acknowledging them.
 
 - Sets, form ratings, finish operations and execution events can be queued.
+- The exercise catalogue is cached on the phone: the library and exercise pickers remain usable
+  offline for browsing and logging an exercise outside the plan. Plan edits still require the
+  server and are not queued.
 - Queued work survives app termination and reloads on the next launch.
 - Replay preserves the original occurrence time.
 - The app shows pending, offline and conflict states rather than claiming server acceptance.
@@ -264,6 +274,8 @@ missing rather than being estimated.
 - Exercise completion is based on leaving the exercise screen, so its boundary can be
   approximate.
 - No workout heart-rate observations.
+- Warm-up rows are a guide; only working sets count toward the plan's set completion. Logging a
+  warm-up uses **Start another set** with RIR 6.
 - The notification/vibration path and all timing behaviour require physical-iPhone acceptance;
   simulator builds are not proof of those behaviours.
 

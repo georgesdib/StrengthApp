@@ -5,7 +5,6 @@ struct ExerciseWorkoutView: View {
     @ObservedObject var model: AppModel
     let exerciseId: String
     let planIndex: Int?
-    @ObservedObject var restTimer: RestTimerModel
     @ObservedObject var drafts: WorkoutDraftStore
 
     @Environment(\.dismiss) private var dismiss
@@ -15,6 +14,9 @@ struct ExerciseWorkoutView: View {
     @State private var addError: String?
     @State private var pendingRemoval: WorkoutSet?
     @State private var removeError: String?
+    @State private var rating = 4
+    @State private var formOperation = OperationKey<FormRatingRequest>()
+    @State private var formError: String?
     @State private var activeLocalSetID: String?
     @State private var recordedExerciseStart = false
     @State private var recordedExerciseCompletion = false
@@ -86,6 +88,63 @@ struct ExerciseWorkoutView: View {
                 if let last = performed.last {
                     LabeledContent("Last set", value: last.summary)
                 }
+            }
+
+            if let warmups = item?.warmup, !warmups.isEmpty {
+                Section("Warm-ups") {
+                    ForEach(Array(warmups.enumerated()), id: \.offset) { index, warmup in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(warmupTitle(index: index, warmup: warmup))
+                                    .font(.subheadline)
+                                Text("\(warmup.reps) reps @ \(warmup.loadLabel)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .accessibilityIdentifier("warmup-\(index)")
+                    }
+                    Text("Optional. Log the working sets; skipping a warm-up does not block them.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Form rating") {
+                if let existing = workout?.formRating(for: exerciseId) {
+                    LabeledContent("Current rating", value: "\(existing.rating) / 5")
+                        .accessibilityIdentifier("exercise-form-current")
+                    Text("Saving again records a correction. The earlier rating is retained; the latest is shown here.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Picker("Rating", selection: $rating) {
+                    ForEach(1...5, id: \.self) { value in
+                        Text("\(value)").tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("exercise-form-rating")
+                if let formError {
+                    Text(formError).foregroundStyle(.red)
+                }
+                Button {
+                    Task { await saveForm() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if model.isSaving {
+                            ProgressView()
+                        } else {
+                            Text(workout?.formRating(for: exerciseId) == nil
+                                 ? "Save form rating" : "Save correction")
+                        }
+                        Spacer()
+                    }
+                }
+                .accessibilityIdentifier("exercise-save-form")
+                .disabled(model.isSaving)
             }
 
             if plannedSets > 0 {
@@ -174,17 +233,11 @@ struct ExerciseWorkoutView: View {
             }
         }
         .navigationTitle(Self.label(exerciseId))
-        .safeAreaInset(edge: .bottom) {
-            RestTimerBar(
-                timer: restTimer,
-                onFinish: { recordRestResult($0) },
-                onExtended: { recordRestExtension($0) }
-            )
-        }
         .onAppear {
             if drafts.drafts[draftKey] == nil {
                 drafts.drafts[draftKey] = initialDraft
             }
+            rating = workout?.formRating(for: exerciseId)?.rating ?? 4
             if !recordedExerciseStart {
                 recordedExerciseStart = true
                 recordExerciseEvent(.exerciseStarted)
@@ -227,10 +280,8 @@ struct ExerciseWorkoutView: View {
 
     private func beginLog(planSetIndex: Int?) {
         addError = nil
-        if restTimer.startedAt != nil {
-            if let result = restTimer.finish(outcome: "interrupted") {
-                recordRestResult(result, reason: "interrupted by next set")
-            }
+        if model.restTimer.startedAt != nil {
+            model.interruptRest()
         }
         let localSetID = UUID().uuidString.lowercased()
         activeLocalSetID = localSetID
@@ -325,12 +376,11 @@ struct ExerciseWorkoutView: View {
             activeLocalSetID = nil
             if rir != 6 {
                 let prescribed = item?.restS ?? 120
-                restTimer.start(seconds: prescribed)
-                recordExecutionEvent(ExecutionEvent(
-                    eventType: .restStarted,
+                model.startRest(
+                    seconds: prescribed,
                     planItemIndex: planIdentity,
-                    payload: ["prescribed_rest_s": .number(Double(prescribed))]
-                ))
+                    exerciseId: exerciseId
+                )
             }
             showingLog = false
         } else {
@@ -357,6 +407,28 @@ struct ExerciseWorkoutView: View {
         }
     }
 
+    private func warmupTitle(index: Int, warmup: WarmupSet) -> String {
+        if index == 0, warmup.loadKg == 20 {
+            return "Empty bar"
+        }
+        return "Warm-up \(index + 1)"
+    }
+
+    private func saveForm() async {
+        formError = nil
+        let request = FormRatingRequest(
+            exerciseId: exerciseId,
+            rating: rating,
+            note: nil
+        )
+        let key = formOperation.use(request)
+        if await model.rateForm(request, idempotencyKey: key) {
+            formOperation.acknowledged()
+        } else {
+            formError = model.mutationError
+        }
+    }
+
     private func recordExerciseEvent(_ type: ExecutionEventType) {
         recordExecutionEvent(ExecutionEvent(
             eventType: type,
@@ -365,37 +437,8 @@ struct ExerciseWorkoutView: View {
         ))
     }
 
-    private func recordRestResult(_ result: RestTimerResult, reason: String? = nil) {
-        var payload: [String: JSONValue] = [
-            "prescribed_rest_s": .number(Double(result.prescribedSeconds)),
-            "actual_rest_s": .number(Double(result.actualSeconds)),
-            "outcome": .string(result.outcome),
-        ]
-        if let reason { payload["reason"] = .string(reason) }
-        recordExecutionEvent(ExecutionEvent(
-            eventType: result.outcome == "completed" ? .restCompleted : .restSkipped,
-            occurredAt: iso(result.endedAt),
-            planItemIndex: planIdentity,
-            payload: payload
-        ))
-    }
-
-    private func recordRestExtension(_ seconds: Int) {
-        recordExecutionEvent(ExecutionEvent(
-            eventType: .restExtended,
-            planItemIndex: planIdentity,
-            payload: ["added_s": .number(Double(seconds))]
-        ))
-    }
-
     private func recordExecutionEvent(_ event: ExecutionEvent) {
         model.recordExecutionEvent(event)
-    }
-
-    private func iso(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: date)
     }
 
     private func parseDouble(_ text: String) -> Double? {

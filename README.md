@@ -86,8 +86,9 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   wearable and legacy labels, optional note; HealthKit HRV/RHR/bodyweight values/source/age are
   shown on the same form with manual override; missing fields stay missing; errors stay visible.
 - **Workout ready** — once the server finishes building, Today shows a ready card with the
-  session type, date, exercise count and warnings. Start workout starts by issued-plan id and
-  opens the active workout screen directly; no preview sheet opens automatically. Request workout
+  session type, date, exercise count and warnings. **Review workout** opens the full plan, and
+  **Start workout** on that screen starts by issued-plan id and opens the active workout directly;
+  start is never offered before the exercises are visible. Request workout
   can ask for server-decided, top-set/back-off or straight-set main-lift structure and chooses
   **iPhone** or **Apple Watch** as the execution target. A watch-targeted plan shows a notice on
   the phone and is started on the watch; it never exposes the phone Start button.
@@ -96,9 +97,11 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   comma/space-separated input, explicit Start set and set-completion timestamps, performed-set
   add/remove, outside-plan exercise logging through the authenticated catalogue, a working-set
   rest timer using the plan’s `rest_s` with prescribed/actual comparison, observable skip and
-  extension, an optional local notification at rest end (with in-app haptic/sound while active;
-  tapping the notification opens the app), an explicit prescription-item picker when the exercise appears more than once, and
-  form ratings that show the current value and label a later save as a correction, additive plan
+  extension, one app-level timer that stays visible above the tab bar on Today and every tab, a
+  local notification at rest end with a **Done** action (and an in-app haptic/sound while active),
+  warm-up rows including an empty-bar first set, an explicit prescription-item picker when the
+  exercise appears more than once, and form ratings on the exercise screen that show the current
+  value and label a later save as a correction, additive plan
   editing (add/swap/remove and set count), finish with one sRPE picker (Not recorded or 1–10),
   optional productivity (Not recorded or 1–5), abandon with confirmation.
 - **History** — paginated sessions with sets, tonnage, duration, main lifts and review state;
@@ -113,8 +116,9 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 - **Apple Watch** — credential status plus a read-only Today plan fetched from the Home server;
   phone-targeted plans are hidden; no start, sets, forms, HealthKit or offline execution.
 - **Exercise Library** — searchable catalogue, read-only configuration, server-computed e1RM and
-  paginated working-set history; catalogue/config cached for the app session, e1RM/history fetched
-  on entry, explicit refresh.
+  paginated working-set history; the catalogue is cached on disk so browsing and exercise choice
+  work offline, configuration is cached for the app session, e1RM/history are fetched on entry,
+  with explicit refresh.
 
 HealthKit is read-only, off by default and limited to HRV, resting heart rate and bodyweight. There is no
 workout-HR import, review/rubric or Apple Intelligence/PCC UI. Execution telemetry is queued through

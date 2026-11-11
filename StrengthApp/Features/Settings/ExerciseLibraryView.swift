@@ -65,7 +65,13 @@ struct ExerciseLibraryView: View {
                         .accessibilityIdentifier("exercise-library-\(option.id)")
                     }
                 } footer: {
-                    Text("\(filtered.count) exercises. The catalogue is cached for this app session; use Refresh to reload it.")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(filtered.count) exercises. The catalogue is cached on this phone; use Refresh to reload it.")
+                        if let cachedAt = model.exerciseCatalogueCachedAt {
+                            Text("Offline cache from \(cachedAt.formatted(date: .abbreviated, time: .shortened)). Refresh when online.")
+                                .foregroundStyle(.orange)
+                        }
+                    }
                 }
             }
         }

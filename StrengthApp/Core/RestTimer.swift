@@ -10,8 +10,35 @@ struct RestTimerResult: Equatable {
     let actualSeconds: Int
     let addedSeconds: Int
     let outcome: String
+    let planItemIndex: Int?
+    let exerciseId: String?
+    let reason: String?
+
+    init(
+        startedAt: Date,
+        endedAt: Date,
+        prescribedSeconds: Int,
+        actualSeconds: Int,
+        addedSeconds: Int,
+        outcome: String,
+        planItemIndex: Int? = nil,
+        exerciseId: String? = nil,
+        reason: String? = nil
+    ) {
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.prescribedSeconds = prescribedSeconds
+        self.actualSeconds = actualSeconds
+        self.addedSeconds = addedSeconds
+        self.outcome = outcome
+        self.planItemIndex = planItemIndex
+        self.exerciseId = exerciseId
+        self.reason = reason
+    }
 }
 
+/// One rest interval for the whole app. The timer is owned by AppModel so it survives navigation
+/// to Today and can be shown from the tab shell; it never depends on a workout screen being alive.
 @MainActor
 final class RestTimerModel: ObservableObject {
     @Published private(set) var endDate: Date?
@@ -20,12 +47,19 @@ final class RestTimerModel: ObservableObject {
     @Published private(set) var startedAt: Date?
     @Published private(set) var prescribedSeconds: Int?
     @Published private(set) var addedSeconds = 0
+    @Published private(set) var planItemIndex: Int?
+    @Published private(set) var exerciseId: String?
+
+    /// Called exactly once when an interval ends, whichever path ended it. AppModel records the
+    /// execution event from here so completion does not depend on the visible screen.
+    var onFinish: ((RestTimerResult) -> Void)?
+    var onExtend: ((Int) -> Void)?
 
     private var ticker: Task<Void, Never>?
 
     var isRunning: Bool { endDate != nil && !isComplete }
 
-    func start(seconds: Int) {
+    func start(seconds: Int, planItemIndex: Int? = nil, exerciseId: String? = nil) {
         guard seconds > 0 else { return }
         ticker?.cancel()
         let now = Date()
@@ -35,6 +69,8 @@ final class RestTimerModel: ObservableObject {
         endDate = now.addingTimeInterval(TimeInterval(seconds))
         remainingSeconds = seconds
         isComplete = false
+        self.planItemIndex = planItemIndex
+        self.exerciseId = exerciseId
         RestNotificationManager.shared.scheduleRestEnd(after: seconds)
         ticker = Task { [weak self] in
             while !Task.isCancelled {
@@ -46,16 +82,17 @@ final class RestTimerModel: ObservableObject {
     }
 
     func extend(by seconds: Int) {
-        guard let endDate else { return }
+        guard let endDate, seconds > 0 else { return }
         self.endDate = endDate.addingTimeInterval(TimeInterval(seconds))
         remainingSeconds = max(0, remainingSeconds + seconds)
         addedSeconds += seconds
         isComplete = false
         RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
+        onExtend?(seconds)
     }
 
     /// Ends the current rest and returns the observed interval. nil means no rest was running.
-    func finish(outcome: String = "completed") -> RestTimerResult? {
+    func finish(outcome: String = "completed", reason: String? = nil) -> RestTimerResult? {
         guard let startedAt, let prescribedSeconds else { return nil }
         let result = RestTimerResult(
             startedAt: startedAt,
@@ -63,9 +100,13 @@ final class RestTimerModel: ObservableObject {
             prescribedSeconds: prescribedSeconds,
             actualSeconds: max(0, Int(Date().timeIntervalSince(startedAt))),
             addedSeconds: addedSeconds,
-            outcome: outcome
+            outcome: outcome,
+            planItemIndex: planItemIndex,
+            exerciseId: exerciseId,
+            reason: reason
         )
         dismiss()
+        onFinish?(result)
         return result
     }
 
@@ -79,17 +120,27 @@ final class RestTimerModel: ObservableObject {
         startedAt = nil
         prescribedSeconds = nil
         addedSeconds = 0
+        planItemIndex = nil
+        exerciseId = nil
     }
 
     private func tick() {
+        refresh()
+    }
+
+    /// Recomputes the countdown at `now` and finishes centrally when it has elapsed. Exposed for
+    /// deterministic tests; the ticker calls it once per second.
+    func refresh(now: Date = Date()) {
         guard let endDate else { return }
-        let remaining = Int(endDate.timeIntervalSinceNow.rounded(.up))
+        let remaining = Int(endDate.timeIntervalSince(now).rounded(.up))
         if remaining <= 0 {
             remainingSeconds = 0
             isComplete = true
             ticker?.cancel()
             ticker = nil
             RestNotificationManager.shared.completeInApp()
+            // Finish centrally so a rest that ends on Today is recorded and dismissed too.
+            _ = finish(outcome: "completed")
         } else {
             remainingSeconds = remaining
         }
@@ -98,9 +149,6 @@ final class RestTimerModel: ObservableObject {
 
 struct RestTimerBar: View {
     @ObservedObject var timer: RestTimerModel
-    var onFinish: ((RestTimerResult) -> Void)?
-    var onExtended: ((Int) -> Void)?
-    @State private var reportedCompletion = false
 
     var body: some View {
         if timer.endDate != nil {
@@ -114,12 +162,11 @@ struct RestTimerBar: View {
                     if !timer.isComplete {
                         Button("+15s") {
                             timer.extend(by: 15)
-                            onExtended?(15)
                         }
                         .font(.footnote)
                     }
                     Button(timer.isComplete ? "Done" : "Skip") {
-                        finish(outcome: timer.isComplete ? "completed" : "skipped")
+                        _ = timer.finish(outcome: timer.isComplete ? "completed" : "skipped")
                     }
                     .font(.footnote)
                 }
@@ -136,20 +183,7 @@ struct RestTimerBar: View {
             .background(.regularMaterial)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("rest-timer")
-            .onChange(of: timer.isComplete) { _, complete in
-                if complete { finish(outcome: "completed") }
-            }
-            .onChange(of: timer.startedAt) { _, started in
-                if started != nil { reportedCompletion = false }
-            }
         }
-    }
-
-    private func finish(outcome: String) {
-        guard !reportedCompletion,
-              let result = timer.finish(outcome: outcome) else { return }
-        reportedCompletion = true
-        onFinish?(result)
     }
 
     private static func format(_ seconds: Int) -> String {

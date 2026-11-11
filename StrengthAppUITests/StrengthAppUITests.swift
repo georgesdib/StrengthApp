@@ -140,7 +140,11 @@ final class StrengthAppUITests: XCTestCase {
         }
         XCTAssertTrue(app.staticTexts["Workout ready"].waitForExistence(timeout: 60))
         attachScreenshot(app, name: "10-workout-ready")
-        let readyStart = app.buttons["start-ready-workout"]
+        let review = app.buttons["review-workout"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        review.tap()
+        XCTAssertTrue(app.navigationBars["Review workout"].waitForExistence(timeout: 10))
+        let readyStart = app.buttons["preview-start"]
         XCTAssertTrue(readyStart.waitForExistence(timeout: 10))
         readyStart.tap()
         XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 25))

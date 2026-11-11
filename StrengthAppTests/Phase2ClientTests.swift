@@ -719,6 +719,25 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertEqual(set.exerciseId, "competition_squat")
     }
 
+    func testPrescriptionWarmupDecodes() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let item = try decoder.decode(
+            PrescriptionItem.self,
+            from: Data(#"""
+            {"order_index":0,"exercise_id":"competition_squat","sets":3,
+             "warmup":[
+               {"percent":0.126,"reps":10,"load_kg":20.0},
+               {"percent":0.5,"reps":5,"load_kg":80.0}
+             ]}
+            """#.utf8)
+        )
+        XCTAssertEqual(item.warmup?.count, 2)
+        XCTAssertEqual(item.warmup?.first?.reps, 10)
+        XCTAssertEqual(item.warmup?.first?.loadKg, 20.0)
+        XCTAssertEqual(item.warmup?.last?.percent, 0.5)
+    }
+
     func testPlanIdentityUsesStableOrderIndexAfterRemoval() throws {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase

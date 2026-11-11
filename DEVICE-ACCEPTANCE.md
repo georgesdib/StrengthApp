@@ -143,14 +143,16 @@ record of what was exercised.
 - [ ] When the server asks for a scheduled deload or drop confirmation, the app shows the choice;
       Accept and Proceed without both produce a plan, and Cancel creates none.
 - [ ] When the server finishes building, Today shows **Workout ready** with the session type,
-      date, exercise count and any warnings; no preview sheet opens automatically.
+      date, exercise count and any warnings. **Review workout** opens the full plan; no sheet opens
+      automatically, and Start is only on the review screen.
 - [ ] The plan is server-issued: the ready card and active workout show no editable load/set/RIR
       controls before logging.
 - [ ] Issuing a second plan supersedes the first; starting the older plan is rejected.
 
 ## Start, workout and finish
 
-- [ ] Start workout opens the active workout directly and shows the plan and logged sets.
+- [ ] Start workout on the review screen opens the active workout directly and shows the plan and
+      logged sets.
 - [ ] Force-quit and relaunch with an active workout; Resume workout returns to the same workout
       and logged sets.
 - [ ] Add a set with load, reps and RIR; the logged set appears with the same values.
@@ -175,6 +177,16 @@ record of what was exercised.
       cannot later be completed.
 - [ ] Attempting to start while another workout is active shows a clear workout-active error and
       offers the active workout instead.
+- [ ] The exercise screen shows the warm-up ramp including the empty-bar first set; a working set
+      can be logged without logging any warm-up.
+- [ ] Rate form on the exercise screen; the current rating and correction label behave as on the
+      workout screen.
+- [ ] Start a rest, return to Today: the countdown stays visible above the tab bar, then dismisses
+      itself at zero.
+- [ ] Lock the phone during a rest: the rest-end notification appears; **Done** clears it and
+      returns to the app.
+- [ ] With Wi-Fi off, open Exercise Library and an exercise picker: the cached catalogue still lists
+      and selects exercises; plan editing still reports that it needs the server.
 
 ## Progress and settings
 

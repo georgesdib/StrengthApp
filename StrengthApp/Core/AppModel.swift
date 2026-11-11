@@ -68,6 +68,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var exerciseCatalogue: [ExerciseOption] = []
     @Published private(set) var isLoadingExerciseCatalogue = false
     @Published private(set) var exerciseCatalogueError: String?
+    @Published private(set) var exerciseCatalogueCachedAt: Date?
     @Published private(set) var exerciseDetail: ExerciseDetailResponse?
     @Published private(set) var isLoadingExerciseDetail = false
     @Published private(set) var exerciseDetailError: String?
@@ -87,6 +88,8 @@ final class AppModel: ObservableObject {
     private var planPollFailures = 0
     private static let maxPlanPollFailures = 10
     @Published private(set) var isSaving = false
+    /// One rest interval for the whole app; the tab shell renders it on every screen.
+    let restTimer = RestTimerModel()
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
     @Published private(set) var mutationFailureAmbiguous = false
@@ -125,8 +128,11 @@ final class AppModel: ObservableObject {
     private var healthKitOperation = OperationKey<HealthKitReadinessRequest>()
     private var healthKitFollowUp = false
     private var networkMonitor: NetworkMonitor?
+    private var restDoneCancellable: AnyCancellable?
     private var offlineRetryTask: Task<Void, Never>?
     private var offlineRetryAttempt = 0
+    private let exerciseCatalogueCache: ExerciseCatalogueCache
+    private var exerciseCatalogueLoadedServerURL: String?
     private var exerciseDetailCache: [String: ExerciseDetailResponse] = [:]
     private var exerciseHistoryExerciseId: String?
     private var refreshInFlight = false
@@ -142,7 +148,8 @@ final class AppModel: ObservableObject {
         healthKit: (any HealthKitReadinessProviding)? = nil,
         healthKitDefaults: UserDefaults = .standard,
         offlineStore: OfflineCaptureStore? = nil,
-        watchConnectivity: WatchConnectivitySession? = nil
+        watchConnectivity: WatchConnectivitySession? = nil,
+        exerciseCatalogueCache: ExerciseCatalogueCache? = nil
     ) {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
@@ -173,6 +180,7 @@ final class AppModel: ObservableObject {
         self.healthKit = readiness
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
+        self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
         self.healthKitEnabled = enabled
         self.healthKitState = enabled
             ? (readiness.isAvailable ? .enabled : .unavailable)
@@ -185,6 +193,20 @@ final class AppModel: ObservableObject {
         self.offlineCapture = initialCapture
         self.offlineRecoveryError = initialRecoveryError
         self.activeWorkout = initialCapture?.activeWorkout
+        restTimer.onFinish = { [weak self] result in
+            self?.recordRestResult(result)
+        }
+        restTimer.onExtend = { [weak self] seconds in
+            self?.recordRestExtension(seconds)
+        }
+        restDoneCancellable = NotificationCenter.default
+            .publisher(for: .restNotificationDone)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.handleRestNotificationDone()
+                }
+            }
     }
 
     var hasMoreHistory: Bool {
@@ -883,6 +905,72 @@ final class AppModel: ObservableObject {
         recordExecutionEvents([event])
     }
 
+    // MARK: Rest timer
+
+    /// Starts the single app-level rest interval and records its telemetry in one place, so a
+    /// rest that finishes on Today is indistinguishable from one that finishes in the workout.
+    func startRest(seconds: Int, planItemIndex: Int?, exerciseId: String?) {
+        guard seconds > 0 else { return }
+        restTimer.start(
+            seconds: seconds,
+            planItemIndex: planItemIndex,
+            exerciseId: exerciseId
+        )
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .restStarted,
+            planItemIndex: planItemIndex,
+            payload: [
+                "prescribed_rest_s": .number(Double(seconds)),
+            ]
+        ))
+    }
+
+    func interruptRest() {
+        _ = restTimer.finish(
+            outcome: "interrupted",
+            reason: "interrupted by next set"
+        )
+    }
+
+    private func recordRestResult(_ result: RestTimerResult) {
+        var payload: [String: JSONValue] = [
+            "prescribed_rest_s": .number(Double(result.prescribedSeconds)),
+            "actual_rest_s": .number(Double(result.actualSeconds)),
+            "outcome": .string(result.outcome),
+        ]
+        if let reason = result.reason {
+            payload["reason"] = .string(reason)
+        }
+        recordExecutionEvent(ExecutionEvent(
+            eventType: result.outcome == "completed" ? .restCompleted : .restSkipped,
+            occurredAt: restISO(result.endedAt),
+            planItemIndex: result.planItemIndex,
+            payload: payload
+        ))
+    }
+
+    private func recordRestExtension(_ seconds: Int) {
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .restExtended,
+            planItemIndex: restTimer.planItemIndex,
+            payload: ["added_s": .number(Double(seconds))]
+        ))
+    }
+
+    private func handleRestNotificationDone() {
+        if restTimer.startedAt != nil {
+            _ = restTimer.finish(outcome: "completed")
+        } else {
+            RestNotificationManager.shared.acknowledgeDelivered()
+        }
+    }
+
+    private func restISO(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
     // MARK: Phase 2 mutations
 
     func saveReadiness(
@@ -1269,6 +1357,7 @@ final class AppModel: ObservableObject {
             // The plan is consumed by the start. Clear the ready state after reconciliation so a
             // stale fake/current plan read cannot put the start affordance back on Today.
             prescriptionState = .idle
+            RestNotificationManager.shared.requestAuthorizationIfNeeded()
             return true
         } catch {
             if let api = error as? APIError, api.isAuthenticationFailure {
@@ -1401,20 +1490,34 @@ final class AppModel: ObservableObject {
 
     func loadExerciseCatalogue(force: Bool = false) async {
         guard let session else { return }
+        let server = session.baseURL.absoluteString
         if !force && !exerciseCatalogue.isEmpty { return }
-        guard !isLoadingExerciseCatalogue else { return }
         if force {
             // Configuration is cached in memory for the session; an explicit catalogue
             // refresh invalidates it so detail screens do not keep showing old taxonomy.
             exerciseDetailCache.removeAll()
         }
+        if exerciseCatalogue.isEmpty, exerciseCatalogueLoadedServerURL != server {
+            if let cached = exerciseCatalogueCache.load(serverURL: server) {
+                exerciseCatalogue = cached.exercises
+                exerciseCatalogueCachedAt = cached.fetchedAt
+            }
+            exerciseCatalogueLoadedServerURL = server
+        }
+        guard !isLoadingExerciseCatalogue else { return }
         isLoadingExerciseCatalogue = true
         exerciseCatalogueError = nil
         defer { isLoadingExerciseCatalogue = false }
         do {
-            exerciseCatalogue = try await client.exerciseCatalogue(session: session).exercises
+            let exercises = try await client.exerciseCatalogue(session: session).exercises
+            exerciseCatalogue = exercises
+            exerciseCatalogueCachedAt = nil
+            exerciseCatalogueLoadedServerURL = server
+            try? exerciseCatalogueCache.save(serverURL: server, exercises: exercises)
         } catch {
-            exerciseCatalogueError = message(for: error)
+            if exerciseCatalogue.isEmpty {
+                exerciseCatalogueError = message(for: error)
+            }
             if let api = error as? APIError, api.isAuthenticationFailure {
                 forgetLocally(message: api.errorDescription)
             }
@@ -1610,6 +1713,7 @@ final class AppModel: ObservableObject {
             await syncOfflineCapture()
         }
         if offlineCaptureActive {
+            restTimer.dismiss()
             return queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
         }
         guard permitsMutation(kind: .completeWorkout, operationId: idempotencyKey) else {
@@ -1627,6 +1731,7 @@ final class AppModel: ObservableObject {
             _ = apply(.operationSucceeded(updated))
             recoveryIssue = nil
             workoutRefreshGrace = false
+            restTimer.dismiss()
             clearOfflineCaptureAfterServerCompletion()
             await refresh()
             await loadHistory(reset: true)
@@ -1665,6 +1770,7 @@ final class AppModel: ObservableObject {
             clearOfflineCaptureAfterServerCompletion()
             recoveryIssue = nil
             workoutRefreshGrace = false
+            restTimer.dismiss()
             await refresh()
             return true
         } catch {
@@ -2352,6 +2458,9 @@ final class AppModel: ObservableObject {
         exerciseCatalogue = []
         isLoadingExerciseCatalogue = false
         exerciseCatalogueError = nil
+        exerciseCatalogueCachedAt = nil
+        exerciseCatalogueLoadedServerURL = nil
+        exerciseCatalogueCache.clear()
         exerciseDetail = nil
         isLoadingExerciseDetail = false
         exerciseDetailError = nil

@@ -1,6 +1,7 @@
 # Watch Phase 6.3 — execution lifecycle slice plan
 
-**Status:** planned, not started (2026-11-11). The owner approved the approach in this document.
+**Status:** 6.3a and 6.3b complete (2026-11-11); 6.3c not started. The owner approved the
+approach in this document.
 
 **Authority:** the canonical requirements are the portfolio contract
 [iOS Phase 6 — watchOS companion](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
@@ -40,7 +41,7 @@ never overrides or restates the contract.
    network-path change or an explicit retry. Authentication failures are not retried — they clear
    to "credentials missing" and leave the queue intact.
 
-## 6.3a — StrengthCore execution primitives (no app wiring)
+## 6.3a — StrengthCore execution primitives (no app wiring) — complete 2026-11-11
 
 Additive only: the phone keeps its current behaviour and its tests stay green.
 
@@ -54,7 +55,23 @@ Additive only: the phone keeps its current behaviour and its tests stay green.
 | `Sources/StrengthCore/Offline/OfflineCapture.swift` | Additive fields: `planRevision`, `sessionUUID`, `startedAt`, `restEndsAt`, `finishIntent`; decode defaults keep existing files valid. |
 | `StrengthAppTests/WatchExecutionCoreTests.swift` | Ladder and reset, offset and clamp, rest across a reload, persist-before-send ordering, finish intent surviving reload, legacy capture file decoding. |
 
-## 6.3b — watch wiring, liveness and screens
+## 6.3b — watch wiring, liveness and screens — complete 2026-11-11
+
+What shipped: `WatchExecutionEngine` (state machine, persist-first queue, start, set capture,
+rest, finish, discard, restore) in `StrengthCore`; `WatchExecutionController` plus the root,
+set/session, finish and RIR views in the watch target; a `WatchLivenessAnchor` protocol with
+the real `HKWorkoutSession` implementation and a no-op for simulators.
+
+Decisions taken while implementing: the clock offset is derived from `started_at` in the start
+response, so no separate `bootstrap` call is needed; start already returns the full snapshot, so
+a "started but plan unavailable" state is unreachable and logging is gated only by start success;
+sets are logged as prescribed and adjusted on the Set screen (Crown load, ± reps) with RIR chosen
+on completion (0–6 or not recorded); "Undo last set" cancels only a set that was never sent;
+`Discard session` sits behind a confirmation on the finish screens. The watch gained HealthKit
+usage strings, the `workout-processing` background mode and a HealthKit entitlement; a device
+build needs the HealthKit capability on the signing team.
+
+## 6.3b (original file plan)
 
 | File | Work |
 |---|---|

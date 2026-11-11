@@ -8,5 +8,13 @@
     <true/>
     <key>WKCompanionAppBundleIdentifier</key>
     <string>com.georgesdibpersonalteam.StrengthApp</string>
+    <key>WKBackgroundModes</key>
+    <array>
+        <string>workout-processing</string>
+    </array>
+    <key>NSHealthShareUsageDescription</key>
+    <string>Strength reads your heart rate during a watch workout so the screen stays awake while you log sets.</string>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>Strength saves one strength-training workout for the session you log on the watch.</string>
 </dict>
 </plist>

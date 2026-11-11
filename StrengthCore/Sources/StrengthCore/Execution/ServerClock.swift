@@ -24,6 +24,23 @@ public struct ServerClock: Equatable, Sendable {
         self.offset = serverTime.timeIntervalSince(receivedAt)
     }
 
+    /// Derives the offset from any server timestamp (for example a workout's `started_at`),
+    /// so a start response is enough and no extra clock call is required.
+    public init?(serverTimestamp: String, receivedAt: Date) {
+        guard let parsed = Self.parse(serverTimestamp) else { return nil }
+        self.init(serverTime: parsed, receivedAt: receivedAt)
+    }
+
+    /// Parses the server's ISO-8601 timestamps with or without fractional seconds.
+    public static func parse(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: value)
+    }
+
     public var isPlausible: Bool {
         abs(offset) <= Self.maximumPlausibleOffset
     }

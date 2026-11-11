@@ -18,9 +18,9 @@ final class OfflineRecoveryTests: XCTestCase {
         return (OfflineCaptureStore(fileURL: url), url)
     }
 
-    private func workout() -> WorkoutDetail {
+    private func workout(id: String = "workout-1") -> WorkoutDetail {
         WorkoutDetail(
-            workoutId: "workout-1",
+            workoutId: id,
             prescriptionId: "rx-1",
             forDate: "2026-11-08",
             sessionType: "squat",
@@ -56,10 +56,13 @@ final class OfflineRecoveryTests: XCTestCase {
         )
     }
 
-    private func operation() -> OfflineOperation {
+    private func operation(
+        workoutId: String = "workout-1",
+        id: String = "op-add"
+    ) -> OfflineOperation {
         OfflineOperation(
-            operationId: "op-add",
-            workoutId: "workout-1",
+            operationId: id,
+            workoutId: workoutId,
             body: .addSet(
                 AddSetRequest(
                     exerciseId: "competition_squat",
@@ -74,6 +77,26 @@ final class OfflineRecoveryTests: XCTestCase {
             createdAt: Date(),
             localSetId: -1
         )
+    }
+
+    private func activeToday() -> String {
+        Fixtures.today.replacingOccurrences(
+            of: "\"active_workout\": null",
+            with: "\"active_workout\": " + Fixtures.workoutInProgress
+        )
+    }
+
+    private func activeTodayTransport() -> StubTransport {
+        StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrap.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(self.activeToday().utf8))
+            default:
+                return (404, Data())
+            }
+        }
     }
 
     private func makeModel(
@@ -207,6 +230,89 @@ final class OfflineRecoveryTests: XCTestCase {
 
         XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
         XCTAssertEqual(try captureStore.load().activeWorkout?.workoutId, "workout-1")
+    }
+
+    func testWriteFailureIsSurfacedSeparatelyFromRecoveryReadFailure() async throws {
+        let parent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("offline-recovery-parent-\(UUID().uuidString)")
+        try Data("not-a-directory".utf8).write(to: parent)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let captureStore = OfflineCaptureStore(
+            fileURL: parent.appendingPathComponent("capture.json")
+        )
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let paired = PairedStore(defaults: defaults)
+        paired.serverURL = "http://127.0.0.1:8000"
+        paired.homeServerURL = "http://127.0.0.1:8000"
+        paired.device = PairingDevice(deviceID: "device-1", label: "iPhone")
+        let model = makeModel(
+            captureStore: captureStore,
+            pairedStore: paired,
+            transport: activeTodayTransport(),
+            tokens: InMemoryTokenStore(token: "token-abc")
+        )
+
+        await model.onLaunch()
+
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+        XCTAssertNil(model.offlineRecoveryError)
+        XCTAssertNotNil(model.offlinePersistenceError)
+    }
+
+    func testRecoveryConflictRequiresExplicitResolution() async throws {
+        let (captureStore, url) = makeStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("{not-json".utf8).write(to: url)
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let paired = PairedStore(defaults: defaults)
+        paired.serverURL = "http://127.0.0.1:8000"
+        paired.homeServerURL = "http://127.0.0.1:8000"
+        paired.device = PairingDevice(deviceID: "device-1", label: "iPhone")
+        let model = makeModel(
+            captureStore: captureStore,
+            pairedStore: paired,
+            transport: activeTodayTransport(),
+            tokens: InMemoryTokenStore(token: "token-abc")
+        )
+        await model.onLaunch()
+        XCTAssertNotNil(model.offlineRecoveryError)
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+
+        try FileManager.default.removeItem(at: url)
+        let repaired = OfflineCaptureStore(fileURL: url)
+        _ = try repaired.setActiveWorkout(workout(id: "workout-2"))
+        _ = try repaired.record(operation(workoutId: "workout-2"))
+
+        XCTAssertTrue(model.retryOfflineRecovery())
+        XCTAssertNil(model.offlineRecoveryError)
+        XCTAssertNotNil(model.offlineRecoveryConflict)
+        XCTAssertEqual(model.offlineCapture?.operations.count, 1)
+
+        let resolved = await model.keepCurrentWorkoutAndDiscardRecoveredWork()
+
+        XCTAssertTrue(resolved)
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+        XCTAssertNil(model.offlineRecoveryConflict)
+        XCTAssertEqual(try repaired.load().activeWorkout?.workoutId, "workout-1")
+        XCTAssertTrue(try repaired.load().operations.isEmpty)
+    }
+
+    func testTelemetryDropIsSurfacedWhileRecoveryIsUnavailable() throws {
+        let (captureStore, url) = makeStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("{not-json".utf8).write(to: url)
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = makeModel(
+            captureStore: captureStore,
+            pairedStore: PairedStore(defaults: defaults)
+        )
+
+        model.recordExecutionEvents([])
+
+        XCTAssertNotNil(model.offlineTelemetryError)
     }
 
     func testExternalCompletionDoesNotResurrectCachedWorkout() async throws {

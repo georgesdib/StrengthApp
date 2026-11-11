@@ -156,6 +156,39 @@ struct TodayView: View {
                     }
                 }
 
+                if let conflict = model.offlineRecoveryConflict {
+                    Section("Offline recovery conflict") {
+                        Text("The active workout is \(conflict.currentWorkoutID), but the recovered capture belongs to \(conflict.recoveredWorkoutID) with \(conflict.pendingOperationCount) pending operation(s).")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                        Text("Choose which work to keep. The other side is discarded explicitly.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Keep current workout and discard recovered work", role: .destructive) {
+                            Task { _ = await model.keepCurrentWorkoutAndDiscardRecoveredWork() }
+                        }
+                        Button("Use recovered workout") {
+                            _ = model.useRecoveredWorkoutAfterConflict()
+                        }
+                    }
+                }
+
+                if let error = model.offlinePersistenceError {
+                    Section("Offline capture write failed") {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if let error = model.offlineTelemetryError {
+                    Section("Execution timing") {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
                 if model.hasPendingOfflineCapture {
                     Section("Offline capture") {
                         Label(

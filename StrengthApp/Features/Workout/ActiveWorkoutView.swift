@@ -81,6 +81,21 @@ struct ActiveWorkoutView: View {
                             }
                         }
 
+                        if let error = model.offlinePersistenceError {
+                            Section("Offline capture write failed") {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        if let error = model.offlineTelemetryError {
+                            Section("Execution timing") {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+
                         Section("Workout") {
                             LabeledContent("Session", value: Self.label(workout.sessionType ?? "workout"))
                             LabeledContent("Date", value: workout.forDate ?? "—")

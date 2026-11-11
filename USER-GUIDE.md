@@ -124,6 +124,12 @@ The app keeps the active workout and pending operations on the phone before ackn
 - Unresolved work remains visible; it is not silently discarded or attached to another workout.
 - If the local recovery file cannot be read, Today shows **Offline recovery** with a retry action.
   Offline writes are paused and the file is preserved until you retry or explicitly discard it.
+- If recovered work belongs to a different active workout, **Offline recovery conflict** asks you
+  to keep the current workout and discard the recovered work, or use the recovered workout.
+- A failed local capture write is shown as **Offline capture write failed**; it is not reported as
+  a network error.
+- If execution timing could not be recorded while recovery was unavailable, Today and the workout
+  screen show **Execution timing** rather than silently dropping it.
 
 Fresh readiness scoring, prescription generation and server authority are not available offline.
 Offline records are performed-work capture, not a new prescription.

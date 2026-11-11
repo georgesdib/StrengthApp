@@ -1,0 +1,269 @@
+import StrengthCore
+import SwiftUI
+
+/// One exercise at a time: Start set → perform → End set (RIR) → rest → next set.
+struct WatchExerciseView: View {
+    @ObservedObject var execution: WatchExecutionController
+    @Binding var showingSession: Bool
+
+    @State private var loadKg = 0.0
+    @State private var reps = 5
+    @State private var showingRIR = false
+    @State private var preparedFor: String?
+    @State private var logging = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                if let item = execution.selectedItem {
+                    header(item)
+                    if execution.activeSet != nil {
+                        runningSet(item)
+                    } else {
+                        idle(item)
+                    }
+                }
+
+                if let rest = execution.rest, rest.isOpen {
+                    WatchRestBar(execution: execution, rest: rest)
+                }
+
+                if execution.pendingCount > 0 || execution.isOffline {
+                    Text(banner)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+                if let liveness = execution.liveness.banner {
+                    Text(liveness)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+                if let error = execution.lastError {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .onAppear { prepare() }
+        .onChange(of: execution.selectedItem?.orderIndex) { _, _ in prepare() }
+        .onChange(of: loadKg) { _, value in execution.draftChanged(loadKg: value, reps: reps) }
+        .onChange(of: reps) { _, value in execution.draftChanged(loadKg: loadKg, reps: value) }
+        .sheet(isPresented: $showingRIR) { completionSheet }
+    }
+
+    // MARK: - Sections
+
+    private func header(_ item: PrescriptionItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Button {
+                    execution.backToList()
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .accessibilityIdentifier("watch-back-to-list")
+                Text(exerciseName(item))
+                    .font(.headline)
+                Spacer()
+                Button {
+                    showingSession = true
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+            Text("Set \(setNumber(item)) of \(item.sets ?? 0)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("\(item.loadLabel) × \(item.repsLabel)")
+                .font(.title3)
+            Text(item.effortLabel)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func idle(_ item: PrescriptionItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            loadRow
+            repsRow
+            Button {
+                execution.beginSet(loadKg: loadKg, reps: reps)
+            } label: {
+                Text("Start set").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("watch-start-set")
+
+            if onLastPrescribedSet(item) {
+                Button("Add set") {
+                    execution.beginSet(loadKg: loadKg, reps: reps)
+                }
+                .font(.footnote)
+                .accessibilityIdentifier("watch-add-set")
+            }
+            Button("End exercise") {
+                execution.doneWithExercise()
+            }
+            .font(.footnote)
+            .accessibilityIdentifier("watch-end-exercise")
+        }
+    }
+
+    private func runningSet(_ item: PrescriptionItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text("Set time \(setDuration(enteredAt: context.date))")
+                    .font(.subheadline)
+                    .monospacedDigit()
+            }
+            loadRow
+            repsRow
+            Button {
+                showingRIR = true
+            } label: {
+                Text("End set").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(logging || execution.isWorking)
+            .accessibilityIdentifier("watch-end-set")
+        }
+    }
+
+    private var loadRow: some View {
+        HStack {
+            Text("\(formatted(loadKg)) kg").font(.body).monospacedDigit()
+            Spacer()
+            Button("−") { loadKg = max(0, loadKg - 2.5) }
+            Button("+") { loadKg += 2.5 }
+        }
+        .focusable()
+        .digitalCrownRotation(
+            $loadKg,
+            from: 0,
+            through: 400,
+            by: 2.5,
+            sensitivity: .medium,
+            isContinuous: false,
+            isHapticFeedbackEnabled: true
+        )
+        .accessibilityIdentifier("watch-load")
+    }
+
+    private var repsRow: some View {
+        HStack {
+            Text("\(reps) reps").font(.body).monospacedDigit()
+            Spacer()
+            Button("−") { reps = max(0, reps - 1) }
+            Button("+") { reps += 1 }
+        }
+        .accessibilityIdentifier("watch-reps")
+    }
+
+    private var completionSheet: some View {
+        ScrollView {
+            VStack(spacing: 4) {
+                Text("Reps in reserve").font(.headline)
+                Text("\(formatted(loadKg)) kg × \(reps)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(0...6, id: \.self) { value in
+                    Button("\(value)") { save(rir: value) }
+                }
+                Button("Not recorded") { save(rir: nil) }
+                Button("Cancel") { showingRIR = false }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func save(rir: Int?) {
+        showingRIR = false
+        logging = true
+        Task {
+            await execution.logSet(loadKg: loadKg, reps: reps, rir: rir)
+            logging = false
+            prepare()
+        }
+    }
+
+    private func prepare() {
+        guard let item = execution.selectedItem else { return }
+        let itemIndex = item.orderIndex ?? -1
+        if let active = execution.activeSet, active.planItemIndex == itemIndex {
+            loadKg = active.loadKg ?? loadKg
+            reps = active.reps ?? reps
+            preparedFor = "\(itemIndex)-draft"
+            return
+        }
+        let key = "\(itemIndex)-\(item.exerciseId ?? "")"
+        guard preparedFor != key else { return }
+        preparedFor = key
+        loadKg = item.loadKg ?? loadKg
+        reps = item.repsLow ?? item.repsHigh ?? reps
+    }
+
+    // MARK: - Helpers
+
+    private var banner: String {
+        execution.isOffline
+            ? "Offline · \(execution.pendingCount) pending"
+            : "\(execution.pendingCount) pending"
+    }
+
+    private func onLastPrescribedSet(_ item: PrescriptionItem) -> Bool {
+        execution.completedSetCount(for: item) >= max(0, (item.sets ?? 0) - 1)
+    }
+
+    private func setNumber(_ item: PrescriptionItem) -> Int {
+        execution.completedSetCount(for: item) + 1
+    }
+
+    private func setDuration(enteredAt date: Date) -> String {
+        guard let started = execution.activeSet?.startedAt else { return "0:00" }
+        let seconds = max(0, Int(date.timeIntervalSince(started)))
+        return "\(seconds / 60):\(String(format: "%02d", seconds % 60))"
+    }
+
+    private func formatted(_ value: Double) -> String {
+        value == value.rounded()
+            ? String(Int(value))
+            : String(format: "%.1f", value)
+    }
+
+    private func exerciseName(_ item: PrescriptionItem) -> String {
+        guard let id = item.exerciseId, !id.isEmpty else { return "Exercise" }
+        return id
+            .split(separator: "_")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
+}
+
+struct WatchRestBar: View {
+    @ObservedObject var execution: WatchExecutionController
+    var rest: RestInterval
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(alignment: .leading, spacing: 4) {
+                if rest.isComplete(at: context.date) {
+                    Text("Rest complete").font(.subheadline)
+                } else {
+                    let remaining = Int(rest.remaining(at: context.date).rounded(.up))
+                    Text("Rest \(remaining / 60):\(String(format: "%02d", remaining % 60))")
+                        .font(.subheadline)
+                        .monospacedDigit()
+                }
+                HStack {
+                    Button("+15s") { execution.extendRest(by: 15) }
+                    Button("End rest") { execution.endRest() }
+                }
+                .font(.caption2)
+            }
+        }
+    }
+}

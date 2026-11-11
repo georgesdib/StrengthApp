@@ -128,19 +128,29 @@ suspension or the Digital Crown.
 - [ ] Request a plan for **Apple Watch**; the watch shows **Start on Apple Watch**.
 - [ ] The first start asks for Health access. Allowing it starts the session; denying it must
       refuse to start and point to logging on the iPhone instead.
-- [ ] Start: the Set screen shows the first exercise, "Set 1 of n" and the target load × reps @ RIR.
+- [ ] Start: the watch shows the **exercise list** with every prescribed exercise and its
+      "0 of n" progress.
+- [ ] Tap an exercise: its screen shows "Set 1 of n" and the target load × reps @ RIR, with
+      **Start set**, **End exercise**, and **Add set** only once you are on the last prescribed set.
 - [ ] Lower the wrist for a minute, then raise it. The screen wakes on the same set, elapsed time
       has advanced, and nothing was lost.
-- [ ] With Wi-Fi off, **Start set** and adjust load, then force-quit before logging. Relaunch:
-      the active set returns with the same load and reps, not the prescription's.
-- [ ] **Start set**, adjust load with the Digital Crown (±2.5 kg) and reps with −/+, then
-      **Log set**. The RIR sheet defaults to the prescribed target and offers 0–6 and
-      *Not recorded*.
-- [ ] The set is captured/pending, then clears once the home server acknowledges it.
-- [ ] The rest countdown appears and survives a wrist drop. **+15s** extends it.
+- [ ] With Wi-Fi off, **Start set** and adjust load, then force-quit before ending the set.
+      Relaunch: the running set returns with the same load and reps, not the prescription's.
+- [ ] **Start set**: the screen becomes the running set with a set timer; adjust load with the
+      Digital Crown (±2.5 kg) and reps with −/+.
+- [ ] **End set** opens the RIR sheet (prescribed default, 0–6, *Not recorded*). Saving captures
+      the set as pending, then clears once the home server acknowledges it.
+- [ ] The rest bar appears and survives a wrist drop. **+15s** extends it and **End rest** closes
+      it; it stays until tapped.
+- [ ] **Add set** on the last prescribed set starts an extra set prefilled with the previous
+      values; the list counts it without changing the prescription.
+- [ ] **End exercise** returns to the list with the completed sets; starting exercise 2 before
+      exercise 1 works and the server's telemetry shows both blocks separately.
+- [ ] The phone adds or removes an exercise: the watch's list does not change (read-only until
+      6.6), and nothing on the watch breaks.
 - [ ] Let the countdown reach zero: it reads **Rest complete** and **End rest** is still there.
       Nothing closes the rest by itself.
-- [ ] Tap **Log set** without ending the rest: the rest closes at that moment and the set is
+- [ ] Start the next set without ending the rest: the rest closes at that moment and the set is
       logged. There is no rest-skipped state anywhere.
 - [ ] Background the app for several minutes mid-session, return, log a set: elapsed time and
       rest state are correct.

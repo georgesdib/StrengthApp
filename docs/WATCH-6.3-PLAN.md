@@ -129,6 +129,23 @@ work):
   finish. **Done** on an item that never started emits nothing, and wasted time between exercises
   is the gap between a completion and the next start.
 
+## 6.3 UI follow-up — gated flow and the exercise list
+
+Owner decision 2026-11-11: the watch selects an exercise and gates each set behind **Start set**;
+it never edits the plan. Shipped as:
+
+- **Read-only exercise list** as the main screen, with per-exercise progress, chosen out of order.
+  The selection is persisted, so a relaunch returns to the same exercise.
+- **One exercise at a time**: Start set → running set with its own timer and adjustable load/reps →
+  **End set** opens the RIR sheet and saves. **Add set** appears only on the last prescribed set and
+  starts an extra set from the previous values. **End exercise** closes the exercise early.
+- **The separate Log set control is gone**, so the unpaired "set without a start" path is no longer
+  reachable from the UI (the engine still tolerates it defensively).
+- Session details — elapsed, sets, pending, retry, undo, finish — moved to a Session sheet, which
+  leaves three controls plus the rest bar on the exercise screen.
+- Selecting an exercise emits nothing; `exercise_started` belongs to the first set. Switching
+  exercises, End exercise and finish all close the started exercise.
+
 ## Verification
 
 ```bash

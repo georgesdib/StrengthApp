@@ -175,6 +175,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
 
         try engine.beginSet()
 
@@ -228,6 +229,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
         try engine.beginSet()
         let token = try XCTUnwrap(engine.activeSet?.localSetID)
 
@@ -269,6 +271,60 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertEqual(added, 15)
     }
 
+    // MARK: - Selection
+
+    func testSelectingAnExerciseEmitsNothingUntilASetStarts() async throws {
+        let transport = AsyncStubTransport { request in
+            (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        try engine.selectItem(0)
+
+        XCTAssertEqual(engine.selectedItem?.orderIndex, 0)
+        XCTAssertEqual(engine.pendingEventCount, 0)
+        XCTAssertNil(engine.exerciseItemIndex)
+    }
+
+    func testSwitchingExerciseClosesTheOneThatStarted() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Self.twoItemWorkout.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet(loadKg: 140, reps: 5)
+
+        try engine.selectItem(1)
+
+        XCTAssertEqual(engine.selectedItem?.orderIndex, 1)
+        XCTAssertNil(engine.exerciseItemIndex, "left the first exercise")
+        let capture = try store.load()
+        let types = capture.operations.flatMap { operation -> [ExecutionEventType] in
+            guard case .executionEvents(let events) = operation.body else { return [] }
+            return events.map(\.eventType)
+        }
+        XCTAssertEqual(types, [.exerciseStarted, .setStarted, .exerciseCompleted])
+    }
+
+    func testBackToListClearsTheSelection() async throws {
+        let transport = AsyncStubTransport { request in
+            (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+
+        try engine.clearSelection()
+
+        XCTAssertNil(engine.selectedItem)
+        XCTAssertNil(try store.load().session?.selectedItemIndex)
+    }
+
     // MARK: - Fixups: rest at finish, drafts, exercise lifecycle
 
     func testFinishClosesAnOpenRestWithATerminalEvent() async throws {
@@ -302,6 +358,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
         try engine.beginSet(loadKg: 140, reps: 5)
         let token = try XCTUnwrap(engine.activeSet?.localSetID)
 
@@ -322,6 +379,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
         try engine.beginSet(loadKg: 140, reps: 5)
         try engine.updateActiveSetDraft(loadKg: 142.5, reps: 4)
 
@@ -355,6 +413,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
 
+        try engine.selectItem(0)
         try engine.beginSet(loadKg: 140, reps: 5)
         _ = await engine.logSet(
             WatchExecutionEngine.SetEntry(
@@ -367,6 +426,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             ),
             session: session()
         )
+        try engine.selectItem(1)
         try engine.beginSet(loadKg: 100, reps: 8)
         try engine.doneWithExercise()
 

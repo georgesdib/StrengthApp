@@ -13,7 +13,7 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var rest: RestInterval?
     @Published private(set) var pendingCount = 0
     @Published private(set) var completedSetCount = 0
-    @Published private(set) var currentItem: PrescriptionItem?
+    @Published private(set) var selectedItem: PrescriptionItem?
     @Published private(set) var lastError: String?
     @Published private(set) var isOffline = false
     @Published private(set) var isWorking = false
@@ -130,7 +130,7 @@ final class WatchExecutionController: ObservableObject {
     // MARK: - Sets and rest
 
     func logSet(loadKg: Double?, reps: Int, rir: Int?) async {
-        guard let session = currentSession(), let item = engine.currentItem else { return }
+        guard let session = currentSession(), let item = engine.selectedItem else { return }
         let itemIndex = item.orderIndex ?? 0
         let entry = WatchExecutionEngine.SetEntry(
             exerciseId: item.exerciseId ?? "",
@@ -159,6 +159,29 @@ final class WatchExecutionController: ObservableObject {
 
     func completedSetCount(for item: PrescriptionItem) -> Int {
         engine.setsDone(planItemIndex: item.orderIndex ?? 0)
+    }
+
+    var planItems: [PrescriptionItem] {
+        engine.planItems
+    }
+
+    /// Opens an exercise from the list. Telemetry starts with the first set, not the tap.
+    func select(_ item: PrescriptionItem) {
+        do {
+            try engine.selectItem(item.orderIndex ?? 0)
+        } catch {
+            lastError = "The exercise could not be opened."
+        }
+        sync()
+    }
+
+    func backToList() {
+        do {
+            try engine.clearSelection()
+        } catch {
+            lastError = "The exercise could not be closed."
+        }
+        sync()
     }
 
     /// Explicitly marks that the lifter began a set, so its start time is observed rather than
@@ -343,7 +366,7 @@ final class WatchExecutionController: ObservableObject {
         rest = engine.sessionRecord?.rest
         pendingCount = engine.pendingCount
         completedSetCount = engine.completedSetCount
-        currentItem = engine.currentItem
+        selectedItem = engine.selectedItem
         canUndo = engine.canUndoLastSet
         activeSet = engine.activeSet
         exerciseItemIndex = engine.exerciseItemIndex

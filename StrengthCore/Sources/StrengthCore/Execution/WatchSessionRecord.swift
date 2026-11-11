@@ -43,6 +43,8 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
     public var finish: FinishIntent?
     /// The set the lifter explicitly began, before it is logged.
     public var activeSet: ActiveSet?
+    /// The exercise the lifter selected from the list, persisted so a relaunch returns to it.
+    public var selectedItemIndex: Int?
     /// The plan item whose exercise is currently in progress, for exercise telemetry.
     public var exerciseItemIndex: Int?
     /// local set id -> server set id, learned when the add-set is acknowledged. Used only to
@@ -58,6 +60,7 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         finish: FinishIntent? = nil,
         activeSet: ActiveSet? = nil,
         eventSetIDs: [String: Int]? = nil,
+        selectedItemIndex: Int? = nil,
         exerciseItemIndex: Int? = nil
     ) {
         self.sessionUUID = sessionUUID
@@ -68,6 +71,7 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         self.finish = finish
         self.activeSet = activeSet
         self.eventSetIDs = eventSetIDs
+        self.selectedItemIndex = selectedItemIndex
         self.exerciseItemIndex = exerciseItemIndex
     }
 

@@ -125,12 +125,46 @@ public final class WatchExecutionEngine {
         sessionRecord?.exerciseItemIndex
     }
 
-    /// The item still short of its prescribed sets, or the last item once everything is done so
-    /// an extra set can still be logged against something real.
-    public var currentItem: PrescriptionItem? {
-        planItems.first { item in
-            setsDone(planItemIndex: item.orderIndex ?? 0) < (item.sets ?? 0)
-        } ?? planItems.last
+    /// The exercise the lifter picked from the list. Nothing can be started or logged without
+    /// one, which is what keeps every set paired with an exercise.
+    public var selectedItem: PrescriptionItem? {
+        guard let index = sessionRecord?.selectedItemIndex else { return nil }
+        return planItems.first { ($0.orderIndex ?? -1) == index }
+    }
+
+    public func plannedSets(for item: PrescriptionItem) -> Int {
+        item.sets ?? 0
+    }
+
+    /// Picks an exercise. This emits nothing by itself: `exercise_started` belongs to the first
+    /// set that actually starts. Leaving a started exercise closes it at that instant.
+    public func selectItem(_ itemIndex: Int) throws {
+        guard let workout, planItems.contains(where: { ($0.orderIndex ?? -1) == itemIndex }) else {
+            return
+        }
+        let stamp = stampedNow()
+        try mutate { capture in
+            guard var record = capture.session else { return }
+            if record.exerciseItemIndex != nil, record.exerciseItemIndex != itemIndex {
+                try self.closeExercise(in: &capture, at: stamp, workout: workout)
+                record = capture.session ?? record
+            }
+            record.selectedItemIndex = itemIndex
+            capture.session = record
+        }
+    }
+
+    /// Returns to the exercise list without ending the exercise; the next Start set still counts
+    /// for the same exercise if it is selected again.
+    public func clearSelection() throws {
+        guard let workout, sessionRecord?.selectedItemIndex != nil else { return }
+        let stamp = stampedNow()
+        try mutate { capture in
+            guard var record = capture.session else { return }
+            record.selectedItemIndex = nil
+            capture.session = record
+            try self.closeExercise(in: &capture, at: stamp, workout: workout)
+        }
     }
 
     public func setsDone(planItemIndex: Int) -> Int {
@@ -224,7 +258,7 @@ public final class WatchExecutionEngine {
 
     /// The lifter began a set. This is an explicit observation, never inferred from a screen.
     public func beginSet(loadKg: Double? = nil, reps: Int? = nil) throws {
-        guard let item = currentItem, let workout else { return }
+        guard let item = selectedItem, let workout else { return }
         let itemIndex = item.orderIndex ?? 0
         let setIndex = setsDone(planItemIndex: itemIndex) + 1
         let stamp = stampedNow()
@@ -256,11 +290,14 @@ public final class WatchExecutionEngine {
     /// The lifter says the current exercise is finished. Nothing is sent when no exercise was
     /// started, because there would be no start to pair with.
     public func doneWithExercise() throws {
-        guard let workout, sessionRecord?.exerciseItemIndex != nil else { return }
+        guard let workout else { return }
         let stamp = stampedNow()
         try mutate { capture in
             try self.closeRest(in: &capture, at: stamp, workout: workout)
             try self.closeExercise(in: &capture, at: stamp, workout: workout)
+            guard var record = capture.session else { return }
+            record.selectedItemIndex = nil
+            capture.session = record
         }
     }
 
@@ -442,6 +479,7 @@ public final class WatchExecutionEngine {
                 guard var record = capture.session else { return }
                 record.finish = FinishIntent(endedAt: endedAt, sessionRpe: sessionRpe)
                 record.activeSet = nil
+                record.selectedItemIndex = nil
                 capture.session = record
                 if !capture.operations.contains(where: { $0.operationId == operation.operationId }) {
                     try self.appendOperation(operation, to: &capture)

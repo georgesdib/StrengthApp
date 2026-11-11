@@ -34,12 +34,25 @@ Tailscale Serve. Do not expose the unauthenticated web server to the public Inte
 
 ### Pairing
 
-On the server:
+On the server, run from the server checkout (the default database is `data/coach.db`):
 
-    strength-coach --db /path/to/coach.db ios pair --label "iPhone"
+    strength-coach ios pair --label "iPhone"
 
-Enter the one-use code in the app's pairing screen, choose a label and pair. The token is stored
-in the iPhone Keychain. The code is not reusable and expires after five minutes by default.
+Use `--db` for another database, e.g. `strength-coach --db /path/to/coach.db ios pair`; if the
+tool is not on `PATH`, call it as `.venv/bin/strength-coach`. It prints the code once, grouped
+as 4+4 digits, with its expiry:
+
+    pairing code: 1234 5678
+    expires at:   2026-11-11T23:15:00+00:00 (300s)
+    device label: iPhone (enter it in the app if it differs)
+
+Enter the code in the app's pairing screen, choose a label and pair. The token is stored in the
+iPhone Keychain and the server keeps only its SHA-256 digest. The code is single-use and expires
+after five minutes; `--ttl 60-3600` changes the lifetime.
+
+Manage credentials with `strength-coach ios devices` (device ids, last-seen times) and
+`strength-coach ios revoke <device-id>`. Revoking a device also revokes the watches that paired
+through it.
 
 If pairing fails:
 

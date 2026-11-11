@@ -139,6 +139,23 @@ struct TodayView: View {
                     }
                 }
 
+                if let message = model.offlineRecoveryMessage {
+                    Section("Offline recovery") {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                        Text("The local recovery file could not be read. Offline capture is paused; retry or explicitly discard the unreadable file.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Retry recovery load") {
+                            _ = model.retryOfflineRecovery()
+                        }
+                        Button("Discard unreadable recovery data", role: .destructive) {
+                            confirmingDiscardOffline = true
+                        }
+                    }
+                }
+
                 if model.hasPendingOfflineCapture {
                     Section("Offline capture") {
                         Label(

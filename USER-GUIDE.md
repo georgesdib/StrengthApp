@@ -122,6 +122,8 @@ The app keeps the active workout and pending operations on the phone before ackn
 - A workout with pending work cannot silently switch to another server address.
 - Finish flushes pending execution events first.
 - Unresolved work remains visible; it is not silently discarded or attached to another workout.
+- If the local recovery file cannot be read, Today shows **Offline recovery** with a retry action.
+  Offline writes are paused and the file is preserved until you retry or explicitly discard it.
 
 Fresh readiness scoring, prescription generation and server authority are not available offline.
 Offline records are performed-work capture, not a new prescription.

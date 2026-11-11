@@ -52,6 +52,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var pairingError: String?
     @Published private(set) var activeWorkout: WorkoutDetail?
     @Published private(set) var offlineCapture: OfflineCapture?
+    @Published private(set) var offlineRecoveryError: OfflineCaptureStoreError?
     @Published private(set) var isOffline = false
     @Published private(set) var isSyncingOffline = false
     @Published private(set) var offlineSyncError: String?
@@ -139,7 +140,18 @@ final class AppModel: ObservableObject {
         let readiness = healthKit ?? HealthKitReadinessService()
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
-        let initialCapture = try? captureStore.load()
+        let initialCapture: OfflineCapture?
+        let initialRecoveryError: OfflineCaptureStoreError?
+        do {
+            initialCapture = try captureStore.load()
+            initialRecoveryError = nil
+        } catch let error as OfflineCaptureStoreError {
+            initialCapture = nil
+            initialRecoveryError = error
+        } catch {
+            initialCapture = nil
+            initialRecoveryError = .io(error.localizedDescription)
+        }
         let apiClient = client ?? IOSAPIClient(journal: MutationJournal())
         self.client = apiClient
         self.tokens = tokens ?? KeychainTokenStore()
@@ -162,6 +174,7 @@ final class AppModel: ObservableObject {
         self.preferHome = store.preferHome
         self.pairingLabelText = store.device?.label ?? "iPhone"
         self.offlineCapture = initialCapture
+        self.offlineRecoveryError = initialRecoveryError
         self.activeWorkout = initialCapture?.activeWorkout
     }
 
@@ -184,6 +197,10 @@ final class AppModel: ObservableObject {
     var pendingOfflineCount: Int { pendingOfflineOperations.count }
 
     var hasPendingOfflineCapture: Bool { !pendingOfflineOperations.isEmpty }
+
+    var offlineRecoveryUnavailable: Bool { offlineRecoveryError != nil }
+
+    var offlineRecoveryMessage: String? { offlineRecoveryError?.errorDescription }
 
     var offlineFinishPending: Bool {
         pendingOfflineOperations.contains {
@@ -624,9 +641,49 @@ final class AppModel: ObservableObject {
     }
 
     private func persistActiveWorkout() {
-        guard activeWorkout != nil || offlineCapture == nil else { return }
+        guard offlineRecoveryError == nil else { return }
+        guard activeWorkout != nil
+                || offlineCapture?.activeWorkout != nil
+                || !(offlineCapture?.operations.isEmpty ?? true) else {
+            return
+        }
         if let updated = try? offlineStore.setActiveWorkout(activeWorkout) {
             offlineCapture = updated
+        }
+    }
+
+    /// Retry a failed initial recovery read. A successful read adopts the capture, but never
+    /// replaces an active workout that is already authoritative in memory.
+    @discardableResult
+    func retryOfflineRecovery() -> Bool {
+        do {
+            let recovered = try offlineStore.load()
+            offlineCapture = recovered
+            offlineRecoveryError = nil
+            if activeWorkout == nil {
+                activeWorkout = recovered.activeWorkout
+            }
+            return true
+        } catch let error as OfflineCaptureStoreError {
+            offlineRecoveryError = error
+            return false
+        } catch {
+            offlineRecoveryError = .io(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Server-confirmed start/complete/abandon may clear the local capture only when recovery is
+    /// healthy. An unreadable file must not be overwritten by an automatic completion path.
+    private func clearOfflineCaptureAfterServerCompletion() {
+        guard offlineRecoveryError == nil else { return }
+        do {
+            try offlineStore.clear()
+            offlineCapture = try offlineStore.load()
+        } catch let error as OfflineCaptureStoreError {
+            offlineRecoveryError = error
+        } catch {
+            offlineRecoveryError = .io(error.localizedDescription)
         }
     }
 
@@ -710,6 +767,7 @@ final class AppModel: ObservableObject {
     /// Persist execution telemetry before the UI acknowledges the action. The existing Phase 4
     /// outbox owns delivery, ordering and retry; this method never waits for the network.
     func recordExecutionEvents(_ events: [ExecutionEvent]) {
+        guard offlineRecoveryError == nil else { return }
         guard !events.isEmpty, let activeWorkout else { return }
         do {
             offlineCapture = try offlineStore.appendExecutionEvents(
@@ -1106,8 +1164,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(workout))
-            try? offlineStore.clear()
-            offlineCapture = try? offlineStore.load()
+            clearOfflineCaptureAfterServerCompletion()
             persistActiveWorkout()
             recoveryIssue = nil
             workoutRefreshGrace = true
@@ -1473,8 +1530,7 @@ final class AppModel: ObservableObject {
             _ = apply(.operationSucceeded(updated))
             recoveryIssue = nil
             workoutRefreshGrace = false
-            try? offlineStore.clear()
-            offlineCapture = try? offlineStore.load()
+            clearOfflineCaptureAfterServerCompletion()
             await refresh()
             await loadHistory(reset: true)
             return true
@@ -1509,8 +1565,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(updated))
-            try? offlineStore.clear()
-            offlineCapture = try? offlineStore.load()
+            clearOfflineCaptureAfterServerCompletion()
             recoveryIssue = nil
             workoutRefreshGrace = false
             await refresh()
@@ -1631,6 +1686,7 @@ final class AppModel: ObservableObject {
         recoveryIssue = nil
         workoutRefreshGrace = false
         mutationError = nil
+        persistActiveWorkout()
     }
 
     func abandonRecoveredWorkout() async {
@@ -1699,11 +1755,18 @@ final class AppModel: ObservableObject {
         return formatter.string(from: Date())
     }
 
+    private func offlineRecoveryBlocksWrites() -> Bool {
+        guard offlineRecoveryError != nil else { return false }
+        mutationError = "Offline recovery data could not be read. Retry recovery or discard the local capture before adding offline work."
+        return true
+    }
+
     private func queueAddSet(
         _ body: AddSetRequest,
         idempotencyKey: String,
         workout: WorkoutDetail
     ) -> Bool {
+        guard !offlineRecoveryBlocksWrites() else { return false }
         guard !offlineFinishPending else {
             mutationError = "This workout is already queued for finish."
             return false
@@ -1758,6 +1821,7 @@ final class AppModel: ObservableObject {
         idempotencyKey: String,
         workout: WorkoutDetail
     ) -> Bool {
+        guard !offlineRecoveryBlocksWrites() else { return false }
         guard !offlineFinishPending else {
             mutationError = "This workout is already queued for finish."
             return false
@@ -1798,6 +1862,7 @@ final class AppModel: ObservableObject {
         idempotencyKey: String,
         workout: WorkoutDetail
     ) -> Bool {
+        guard !offlineRecoveryBlocksWrites() else { return false }
         guard !offlineFinishPending else {
             mutationError = "This workout is already queued for finish."
             return false
@@ -1834,6 +1899,7 @@ final class AppModel: ObservableObject {
     }
 
     func syncOfflineCapture() async {
+        guard offlineRecoveryError == nil else { return }
         guard !isSaving, !isSyncingOffline,
               let session, let cached = activeWorkout,
               hasPendingOfflineCapture else { return }
@@ -1918,8 +1984,7 @@ final class AppModel: ObservableObject {
                         if hasPendingOfflineCapture {
                             offlineSyncError = "The workout finished on the server, but some local operations still need attention."
                         } else {
-                            try? offlineStore.clear()
-                            offlineCapture = try? offlineStore.load()
+                            clearOfflineCaptureAfterServerCompletion()
                         }
                         await refresh()
                         await loadHistory(reset: true)
@@ -2042,12 +2107,18 @@ final class AppModel: ObservableObject {
         do {
             try offlineStore.clear()
             offlineCapture = try offlineStore.load()
+            offlineRecoveryError = nil
             activeWorkout = nil
             offlineSyncError = nil
             isOffline = false
             await refresh()
             return true
+        } catch let error as OfflineCaptureStoreError {
+            offlineRecoveryError = error
+            mutationError = message(for: error)
+            return false
         } catch {
+            offlineRecoveryError = .io(error.localizedDescription)
             mutationError = message(for: error)
             return false
         }
@@ -2137,8 +2208,15 @@ final class AppModel: ObservableObject {
         historyOffset = 0
         hasLoadedHistory = false
         activeWorkout = nil
-        try? offlineStore.clear()
-        offlineCapture = try? offlineStore.load()
+        do {
+            try offlineStore.clear()
+            offlineCapture = try offlineStore.load()
+            offlineRecoveryError = nil
+        } catch let error as OfflineCaptureStoreError {
+            offlineRecoveryError = error
+        } catch {
+            offlineRecoveryError = .io(error.localizedDescription)
+        }
         isOffline = false
         exerciseCatalogue = []
         isLoadingExerciseCatalogue = false

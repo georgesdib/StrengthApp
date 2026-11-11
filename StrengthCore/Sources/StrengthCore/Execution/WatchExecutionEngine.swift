@@ -218,7 +218,7 @@ public final class WatchExecutionEngine {
             let detail = try await client.startWorkout(
                 issuedPlanId: issuedPlanID,
                 session: session,
-                idempotencyKey: "watch-start-\(issuedPlanID)"
+                idempotencyKey: OperationID.derived("start:" + issuedPlanID)
             )
             // A derived offset larger than a day means the watch clock is wrong, not the server:
             // applying it would push every capture outside the replay window and the workout.
@@ -502,7 +502,7 @@ public final class WatchExecutionEngine {
             _ = try? await client.abandonWorkout(
                 workoutId: workout.workoutId,
                 session: session,
-                idempotencyKey: "watch-abandon-\(workout.workoutId)"
+                idempotencyKey: OperationID.derived("abandon:" + workout.workoutId)
             )
         }
         try? store.clear()

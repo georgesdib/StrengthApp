@@ -46,7 +46,6 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "000000000000000200000000"
             BuildableName = "StrengthWatch.app"
-            BlueprintName = "StrengthWatch"
             ReferencedContainer = "container:StrengthApp.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -63,7 +62,6 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "000000000000000200000000"
             BuildableName = "StrengthWatch.app"
-            BlueprintName = "StrengthWatch"
             ReferencedContainer = "container:StrengthApp.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

@@ -102,6 +102,11 @@ struct WatchSetPage: View {
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
+                if let liveness = execution.liveness.banner {
+                    Text(liveness)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
                 if let error = execution.lastError {
                     Text(error)
                         .font(.caption2)

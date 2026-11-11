@@ -21,13 +21,13 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var canUndo = false
     @Published private(set) var activeSet: ActiveSet?
     @Published private(set) var exerciseItemIndex: Int?
+    @Published private(set) var liveness = WatchLivenessPolicy()
 
     private let credentialStore: WatchCredentialStore
     private let engine: WatchExecutionEngine
     private let anchor: WatchLivenessAnchor
     private let onCredentialsMissing: @MainActor () -> Void
     private var retryTask: Task<Void, Never>?
-    private var livenessStarted = false
     private let pathMonitor = NWPathMonitor()
     private var pathMonitorStarted = false
     private var draftTask: Task<Void, Never>?
@@ -114,8 +114,9 @@ final class WatchExecutionController: ObservableObject {
         }
         do {
             try await anchor.begin(at: Date())
-            livenessStarted = true
+            liveness.started()
         } catch {
+            liveness.failed((error as? LocalizedError)?.errorDescription)
             lastError = LivenessError.unavailable.errorDescription
             return
         }
@@ -311,20 +312,29 @@ final class WatchExecutionController: ObservableObject {
         await flushNow()
     }
 
+    /// A restored or recovered session asks HealthKit again, but claims liveness only when the
+    /// anchor actually started. Otherwise the app is foreground-only and says so (contract §11.2).
     private func beginLivenessIfNeeded() async {
-        guard !livenessStarted else { return }
+        guard !liveness.isRunning else { return }
         let status = await anchor.authorizationStatus()
         authorization = status
-        guard status == .authorized else { return }
-        let startedAt = engine.sessionRecord?.startedAt ?? Date()
-        try? await anchor.begin(at: startedAt)
-        livenessStarted = true
+        guard status == .authorized else {
+            liveness.authorizationUnavailable()
+            return
+        }
+        do {
+            // The resumed segment starts now; the saved workout keeps the original dates in 6.5.
+            try await anchor.begin(at: Date())
+            liveness.started()
+        } catch {
+            liveness.failed((error as? LocalizedError)?.errorDescription)
+        }
     }
 
     private func endLiveness() async {
-        guard livenessStarted else { return }
+        guard liveness.isRunning else { return }
         await anchor.end(at: Date())
-        livenessStarted = false
+        liveness.reset()
     }
 
     private func sync() {

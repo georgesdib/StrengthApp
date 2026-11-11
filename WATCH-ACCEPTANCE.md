@@ -149,6 +149,9 @@ suspension or the Digital Crown.
 - [ ] Turn off Wi-Fi mid-session and log two sets: both are captured, the banner reads
       offline · n pending, and nothing claims to be saved.
 - [ ] Re-enable Wi-Fi: pending work flushes in order (the set, then its events), once each.
+- [ ] While a session is running, turn Health access off for the watch app, then foreground it:
+      the Set screen shows **Logging may stop when the screen locks.**, and logging a set still
+      persists. Turn access back on and foreground again: the message clears.
 - [ ] **Done with exercise** while resting: the rest closes and the next exercise's start is
       later; the server shows one `exercise_completed` and a gap before the next
       `exercise_started`.

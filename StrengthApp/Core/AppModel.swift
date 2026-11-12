@@ -1837,7 +1837,7 @@ final class AppModel: ObservableObject {
                     let ack: PlanAckEnvelope = try await client.replay(entry, session: session)
                     _ = ack
                     await reconcilePlanState()
-                case .startWorkout, .addSet, .removeSet, .rateForm, .planEdit:
+                case .startWorkout, .addSet, .removeSet, .rateForm, .planEdit, .takeover:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = true
                 case .completeWorkout, .abandonWorkout:

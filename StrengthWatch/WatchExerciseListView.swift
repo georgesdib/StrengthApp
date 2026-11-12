@@ -13,6 +13,12 @@ struct WatchExerciseListView: View {
                     Text("Exercises").font(.headline)
                     Spacer()
                     Button {
+                        Task { await execution.reconcileNow() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .accessibilityIdentifier("watch-refresh-plan")
+                    Button {
                         showingSession = true
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -52,6 +58,11 @@ struct WatchExerciseListView: View {
                     .buttonStyle(.plain)
                 }
 
+                if execution.isStale {
+                    Text("No activity for 3h — the server may abandon this session.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
                 if execution.planUpdated {
                     Text("Plan updated")
                         .font(.caption2)

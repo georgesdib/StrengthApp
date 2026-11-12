@@ -85,6 +85,20 @@ public final class WatchExecutionEngine {
     public private(set) var planUpdated = false
     /// Why the last HealthKit save attempt failed, if it did.
     public private(set) var healthKitFailure: String?
+    /// The server considers this session idle (contract §16 idle warning); display only.
+    public private(set) var isStale = false
+
+    /// Descriptive tonnage of acknowledged plus queued sets. Not a training decision.
+    public var tonnageKg: Double {
+        let acknowledged = (workout?.sets ?? []).reduce(0.0) { total, set in
+            total + (set.loadKg ?? 0) * Double(set.reps ?? 0)
+        }
+        let queued = pending.reduce(0.0) { total, operation in
+            guard case .addSet(let body) = operation.body else { return total }
+            return total + (body.loadKg ?? 0) * Double(body.reps)
+        }
+        return acknowledged + queued
+    }
 
     private let client: IOSAPIClient
     private let store: OfflineCaptureStore
@@ -262,6 +276,54 @@ public final class WatchExecutionEngine {
         }
     }
 
+    /// Applies a phone-pushed execution payload: newer only, idle point only, and never when the
+    /// phone owns the session (contract §10.2/§10.5).
+    @discardableResult
+    public func applyRemote(_ payload: RemoteExecutionPayload, deviceID: String?) -> Bool {
+        guard let workout, payload.workoutId == workout.workoutId else { return false }
+        if let owner = payload.ownerDeviceId, !owner.isEmpty,
+           let deviceID, !deviceID.isEmpty, owner != deviceID {
+            phase = .readOnly
+            return true
+        }
+        guard payload.planRevision > (sessionRecord?.planRevision ?? 0) else { return false }
+        guard activeSet == nil else {
+            deferredPlan = (payload.planRevision, payload.plan)
+            planUpdated = true
+            return true
+        }
+        apply(plan: payload.plan, revision: payload.planRevision)
+        return true
+    }
+
+    /// Records a form rating for the exercise just finished, queued like any other capture.
+    @discardableResult
+    public func rateForm(
+        exerciseId: String,
+        rating: Int,
+        session: IOSSession
+    ) async -> WatchFlushStop {
+        guard phase == .active, let workout, (1...5).contains(rating) else {
+            return .conflict(code: "not_active", message: "This session cannot take a rating.")
+        }
+        let operation = OfflineOperation(
+            operationId: UUID().uuidString.lowercased(),
+            workoutId: workout.workoutId,
+            body: .rateForm(FormRatingRequest(
+                exerciseId: exerciseId, rating: rating, note: nil
+            )),
+            createdAt: now()
+        )
+        do {
+            try mutate { capture in
+                try self.appendOperation(operation, to: &capture)
+            }
+        } catch {
+            return .storage(message(for: error))
+        }
+        return await flush(session: session)
+    }
+
     /// Drops the local record without touching the server. Used when the session belongs to the
     /// phone or has already ended.
     public func clearLocal() {
@@ -302,6 +364,7 @@ public final class WatchExecutionEngine {
             phase = .active
             lastError = nil
         }
+        isStale = envelope.stale ?? false
         applyRevisionIfNeeded(envelope)
         markOnline(session)
         return .allSent
@@ -945,8 +1008,15 @@ public final class WatchExecutionEngine {
                 idempotencyKey: operation.operationId
             )
             return nil
-        case .rateForm:
-            throw APIError.journal("Form ratings are not captured on the watch in Phase 6.3.")
+        case .rateForm(let body):
+            _ = try await client.rateForm(
+                workoutId: operation.workoutId,
+                body: body,
+                session: session,
+                idempotencyKey: operation.operationId,
+                journaling: false
+            )
+            return nil
         }
     }
 

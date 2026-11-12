@@ -18,6 +18,8 @@ final class WatchSessionController: NSObject, ObservableObject {
     /// The app decides when a configuration change may be applied (contract §7.8: not while a
     /// session is active or work is queued).
     var canApplyConfig: () -> Bool = { true }
+    /// A plan revision pushed by the phone over WatchConnectivity.
+    var onExecutionPayload: (([String: Any]) -> Void)?
 
     private let store: WatchCredentialStore
     private var session: WCSession?
@@ -163,6 +165,15 @@ extension WatchSessionController: WCSessionDelegate {
         Task { @MainActor in
             self.process(applicationContext)
             self.sendAcknowledgement()
+        }
+    }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveUserInfo userInfo: [String: Any] = [:]
+    ) {
+        Task { @MainActor [weak self] in
+            self?.onExecutionPayload?(userInfo)
         }
     }
 

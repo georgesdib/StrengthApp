@@ -638,6 +638,22 @@ public final class IOSAPIClient {
         )
     }
 
+    /// Transfers ownership of an in-progress workout to the calling device (contract §9).
+    public func takeover(
+        workoutId: String,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/takeover",
+            body: EmptyRequest(),
+            kind: .takeover,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     public func abandonWorkout(
         workoutId: String,
         session: IOSSession,

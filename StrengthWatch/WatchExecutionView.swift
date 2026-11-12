@@ -67,6 +67,9 @@ struct WatchSessionSheet: View {
                 }
                 Text("Sets \(execution.completedSetCount) of \(plannedSets)")
                     .font(.caption)
+                Text("Volume \(Int(execution.tonnageKg)) kg\(execution.pendingCount > 0 ? " (provisional)" : "")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 if execution.pendingCount > 0 {
                     Text("\(execution.pendingCount) pending")
                         .font(.caption2)

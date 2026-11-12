@@ -30,6 +30,8 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var healthKitNoticeDismissed = false
     @Published private(set) var healthKitFailure: String?
     @Published private(set) var effortState: EffortDeliveryState?
+    @Published private(set) var tonnageKg = 0.0
+    @Published private(set) var isStale = false
 
     private let credentialStore: WatchCredentialStore
     private let engine: WatchExecutionEngine
@@ -420,6 +422,28 @@ final class WatchExecutionController: ObservableObject {
         sync()
     }
 
+    /// Applies a plan revision pushed by the phone; older payloads and an active set are handled by
+    /// the engine, so this only decodes and reports.
+    func applyRemotePayload(_ userInfo: [String: Any]) {
+        guard let json = userInfo["execution"] as? String,
+              let payload = RemoteExecutionPayload.decode(json),
+              let session = currentSession() else { return }
+        _ = engine.applyRemote(payload, deviceID: session.deviceID)
+        sync()
+    }
+
+    /// Optional form rating for the exercise just finished, queued and replayed like a set.
+    func rateForm(exerciseId: String, rating: Int) async {
+        guard let session = currentSession() else { return }
+        isWorking = true
+        defer { isWorking = false }
+        let stop = await engine.rateForm(
+            exerciseId: exerciseId, rating: rating, session: session
+        )
+        await handle(stop)
+        sync()
+    }
+
     // MARK: - Flush and retry
 
     func flushNow() async {
@@ -532,6 +556,8 @@ final class WatchExecutionController: ObservableObject {
         healthKitNoticeDismissed = engine.sessionRecord?.finish?.hkNoticeDismissed ?? false
         healthKitFailure = engine.healthKitFailure
         effortState = engine.sessionRecord?.finish?.effortState
+        tonnageKg = engine.tonnageKg
+        isStale = engine.isStale
         isOffline = engine.network == .offline
         lastError = engine.lastError
     }

@@ -17,6 +17,9 @@ struct StrengthWatchApp: App {
         ))
         _execution = StateObject(wrappedValue: execution)
         // §7.8: a home-server change waits until the session is finished and the outbox empty.
+        session.onExecutionPayload = { [weak execution] in
+            execution?.applyRemotePayload($0)
+        }
         session.canApplyConfig = { [weak execution] in
             guard let execution else { return false }
             return execution.phase == .ready && execution.pendingCount == 0

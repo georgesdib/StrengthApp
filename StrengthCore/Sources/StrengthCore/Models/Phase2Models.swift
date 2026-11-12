@@ -315,6 +315,10 @@ public struct WorkoutDetail: Codable, Identifiable {
     /// Who owns this session. Missing means ownership cannot be confirmed, which is never
     /// permission to write.
     public let ownerDeviceId: String?
+    /// The session's plan revision, as returned by the server on reads and plan edits.
+    public let planRevision: Int?
+    /// Last recorded activity, for a descriptive idle warning.
+    public let lastActivityAt: String?
 
     public init(
         workoutId: String,
@@ -328,7 +332,9 @@ public struct WorkoutDetail: Codable, Identifiable {
         elapsedSeconds: Int?,
         sessionRpe: Double?,
         startedAt: String?,
-        ownerDeviceId: String? = nil
+        ownerDeviceId: String? = nil,
+        planRevision: Int? = nil,
+        lastActivityAt: String? = nil
     ) {
         self.workoutId = workoutId
         self.prescriptionId = prescriptionId
@@ -342,6 +348,8 @@ public struct WorkoutDetail: Codable, Identifiable {
         self.sessionRpe = sessionRpe
         self.startedAt = startedAt
         self.ownerDeviceId = ownerDeviceId
+        self.planRevision = planRevision
+        self.lastActivityAt = lastActivityAt
     }
 
     public var id: String { workoutId }

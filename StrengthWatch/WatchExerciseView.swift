@@ -11,6 +11,7 @@ struct WatchExerciseView: View {
     @State private var showingRIR = false
     @State private var preparedFor: String?
     @State private var logging = false
+    @State private var showingForm = false
 
     var body: some View {
         ScrollView {
@@ -55,6 +56,7 @@ struct WatchExerciseView: View {
         .onChange(of: loadKg) { _, value in execution.draftChanged(loadKg: value, reps: reps) }
         .onChange(of: reps) { _, value in execution.draftChanged(loadKg: loadKg, reps: value) }
         .sheet(isPresented: $showingRIR) { completionSheet }
+        .sheet(isPresented: $showingForm) { formSheet }
     }
 
     // MARK: - Sections
@@ -115,7 +117,11 @@ struct WatchExerciseView: View {
                 .accessibilityIdentifier("watch-add-set")
             }
             Button("End exercise") {
-                execution.doneWithExercise()
+                if execution.completedSetCount(for: item) > 0 {
+                    showingForm = true
+                } else {
+                    execution.doneWithExercise()
+                }
             }
             .font(.footnote)
             .accessibilityIdentifier("watch-end-exercise")
@@ -188,6 +194,36 @@ struct WatchExerciseView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var formSheet: some View {
+        ScrollView {
+            VStack(spacing: 4) {
+                Text("Form rating").font(.headline)
+                Text("How well did this exercise move?").font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(1...5, id: \.self) { value in
+                    Button("\(value)") { saveForm(rating: value) }
+                }
+                Button("Skip") { endExercise() }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func saveForm(rating: Int) {
+        showingForm = false
+        let exerciseId = execution.selectedItem?.exerciseId ?? ""
+        Task {
+            await execution.rateForm(exerciseId: exerciseId, rating: rating)
+            endExercise()
+        }
+    }
+
+    private func endExercise() {
+        showingForm = false
+        execution.doneWithExercise()
     }
 
     // MARK: - Actions

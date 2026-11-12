@@ -45,6 +45,8 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
     public var activeSet: ActiveSet?
     /// The exercise the lifter selected from the list, persisted so a relaunch returns to it.
     public var selectedItemIndex: Int?
+    /// Set when a set was preserved off-plan because the phone changed the item while offline.
+    public var offPlanNoted: Bool?
     /// The plan item whose exercise is currently in progress, for exercise telemetry.
     public var exerciseItemIndex: Int?
     /// local set id -> server set id, learned when the add-set is acknowledged. Used only to
@@ -61,7 +63,8 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         activeSet: ActiveSet? = nil,
         eventSetIDs: [String: Int]? = nil,
         selectedItemIndex: Int? = nil,
-        exerciseItemIndex: Int? = nil
+        exerciseItemIndex: Int? = nil,
+        offPlanNoted: Bool? = nil
     ) {
         self.sessionUUID = sessionUUID
         self.startedAt = startedAt
@@ -73,6 +76,7 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         self.eventSetIDs = eventSetIDs
         self.selectedItemIndex = selectedItemIndex
         self.exerciseItemIndex = exerciseItemIndex
+        self.offPlanNoted = offPlanNoted
     }
 
     public var clock: ServerClock? {

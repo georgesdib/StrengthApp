@@ -52,6 +52,11 @@ struct WatchExerciseListView: View {
                     .buttonStyle(.plain)
                 }
 
+                if execution.planUpdated {
+                    Text("Plan updated")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                }
                 if execution.pendingCount > 0 || execution.isOffline {
                     Text(banner)
                         .font(.caption2)

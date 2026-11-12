@@ -341,6 +341,118 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
     }
 
+    // MARK: - Revision and mismatch
+
+    func testANewerRevisionIsAppliedWhenIdle() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(revision: 1, loadKg: 150).utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 150)
+        XCTAssertEqual(engine.sessionRecord?.planRevision, 1)
+        XCTAssertFalse(engine.planUpdated)
+        XCTAssertFalse(try store.load().operations.contains { $0.kind == .executionEvents })
+    }
+
+    func testANewerRevisionWaitsForAnIdlePoint() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(revision: 1, loadKg: 150).utf8))
+            }
+            if request.url?.path.hasSuffix("/execution-events") == true {
+                return (200, Data(Self.eventsAccepted.utf8))
+            }
+            if request.url?.path.hasSuffix("/sets") == true {
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet(loadKg: 140, reps: 5)
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 140, "not under the lifter's hands")
+        XCTAssertTrue(engine.planUpdated)
+
+        _ = await engine.logSet(entry(setIndex: 1), session: session())
+
+        XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 150)
+        XCTAssertFalse(engine.planUpdated)
+    }
+
+    func testAnOlderRevisionIsIgnored() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(revision: 0, loadKg: 999).utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 140)
+        XCTAssertNotEqual(engine.workout?.plan?.items.first?.loadKg, 999)
+    }
+
+    func testPlanItemMismatchRetriesOffPlanAndKeepsTheSet() async throws {
+        final class SetCounter { var attempts = 0 }
+        let counter = SetCounter()
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/sets") == true {
+                counter.attempts += 1
+                if counter.attempts == 1 {
+                    let body = "{\"error\":\"the plan item changed\",\"code\":\"plan_item_mismatch\"}"
+                    return (409, Data(body.utf8))
+                }
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            }
+            if request.url?.path.hasSuffix("/execution-events") == true {
+                return (200, Data(Self.eventsAccepted.utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+
+        let result = await engine.logSet(entry(setIndex: 1), session: session())
+
+        XCTAssertTrue(result.persisted)
+        XCTAssertEqual(result.stop, .allSent)
+        XCTAssertEqual(counter.attempts, 2, "exactly one off-plan retry")
+        XCTAssertEqual(engine.workout?.sets?.count, 1, "the set is preserved")
+        XCTAssertEqual(engine.sessionRecord?.offPlanNoted, true)
+        XCTAssertEqual(engine.pendingCount, 0)
+
+        let eventsRequest = try XCTUnwrap(
+            transport.requests.last { $0.url?.path.hasSuffix("/execution-events") == true }
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(eventsRequest.httpBody))
+                as? [String: Any]
+        )
+        let events = try XCTUnwrap(object["events"] as? [[String: Any]])
+        let completed = try XCTUnwrap(
+            events.first { ($0["event_type"] as? String) == "set_completed" }
+        )
+        XCTAssertNil(completed["plan_item_index"])
+        let payload = try XCTUnwrap(completed["payload"] as? [String: Any])
+        XCTAssertEqual(payload["original_plan_item_index"] as? Int, 0)
+    }
+
     // MARK: - Selection
 
     func testSelectingAnExerciseEmitsNothingUntilASetStarts() async throws {
@@ -620,7 +732,8 @@ final class WatchExecutionEngineTests: XCTestCase {
     private static func executionPayload(
         status: String = "in_progress",
         owner: String? = "watch-1",
-        revision: Int? = 0
+        revision: Int? = 0,
+        loadKg: Double = 140
     ) -> String {
         let ownerJSON = owner.map { "\"\($0)\"" } ?? "null"
         let revisionJSON = revision.map(String.init) ?? "null"
@@ -637,7 +750,7 @@ final class WatchExecutionEngineTests: XCTestCase {
          "last_activity_at":"2026-11-07T16:00:00+00:00","stale":false,
          "plan":{"for_date":"2026-11-07","session_type":"squat",
            "items":[{"order_index":0,"exercise_id":"competition_squat","sets":3,
-             "reps_low":5,"load_kg":140.0,"rir_target":2}]}}
+             "reps_low":5,"load_kg":\(loadKg),"rir_target":2}]}}
         """
     }
 

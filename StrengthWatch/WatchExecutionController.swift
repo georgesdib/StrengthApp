@@ -22,6 +22,8 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var activeSet: ActiveSet?
     @Published private(set) var exerciseItemIndex: Int?
     @Published private(set) var liveness = WatchLivenessPolicy()
+    @Published private(set) var planUpdated = false
+    @Published private(set) var offPlanNoted = false
 
     private let credentialStore: WatchCredentialStore
     private let engine: WatchExecutionEngine
@@ -391,6 +393,8 @@ final class WatchExecutionController: ObservableObject {
         canUndo = engine.canUndoLastSet
         activeSet = engine.activeSet
         exerciseItemIndex = engine.exerciseItemIndex
+        planUpdated = engine.planUpdated
+        offPlanNoted = engine.sessionRecord?.offPlanNoted ?? false
         isOffline = engine.network == .offline
         lastError = engine.lastError
     }

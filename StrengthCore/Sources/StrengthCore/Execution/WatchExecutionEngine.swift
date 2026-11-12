@@ -81,11 +81,14 @@ public final class WatchExecutionEngine {
     public private(set) var lastError: String?
     public private(set) var network: HomeNetworkState = .unknown
     public private(set) var nextRetryAt: Date?
+    /// A newer plan arrived while the watch was busy; it is applied at the next idle point.
+    public private(set) var planUpdated = false
 
     private let client: IOSAPIClient
     private let store: OfflineCaptureStore
     private var ladder = RetryLadder()
     private var networkPolicy = HomeNetworkPolicy()
+    private var deferredPlan: (revision: Int, plan: PrescriptionPlan)?
     private let now: () -> Date
 
     public init(
@@ -253,8 +256,59 @@ public final class WatchExecutionEngine {
             phase = .readOnly
             return .nothingToSend
         }
+        applyRevisionIfNeeded(envelope)
         markOnline(session)
         return .allSent
+    }
+
+    private func applyRevisionIfNeeded(_ envelope: ExecutionAnalyticsResponse) {
+        guard let revision = envelope.planRevision,
+              let plan = envelope.plan,
+              revision > (sessionRecord?.planRevision ?? 0) else { return }
+        guard activeSet == nil, pendingCount == 0 else {
+            deferredPlan = (revision, plan)
+            planUpdated = true
+            return
+        }
+        apply(plan: plan, revision: revision)
+    }
+
+    /// Applies a deferred revision once the watch is idle again (contract §10.5).
+    private func applyDeferredPlanIfIdle() {
+        guard let deferred = deferredPlan, activeSet == nil, pendingCount == 0 else { return }
+        deferredPlan = nil
+        apply(plan: deferred.plan, revision: deferred.revision)
+    }
+
+    private func apply(plan: PrescriptionPlan, revision: Int) {
+        guard let workout, var record = sessionRecord else { return }
+        let updated = WorkoutDetail(
+            workoutId: workout.workoutId,
+            prescriptionId: workout.prescriptionId,
+            forDate: workout.forDate,
+            sessionType: workout.sessionType,
+            status: workout.status,
+            plan: plan,
+            sets: workout.sets,
+            forms: workout.forms,
+            elapsedSeconds: workout.elapsedSeconds,
+            sessionRpe: workout.sessionRpe,
+            startedAt: workout.startedAt
+        )
+        record.planRevision = revision
+        if let selected = record.selectedItemIndex,
+           !plan.items.contains(where: { ($0.orderIndex ?? -1) == selected }) {
+            record.selectedItemIndex = nil
+        }
+        do {
+            try mutate { capture in
+                capture.activeWorkout = updated
+                capture.session = record
+            }
+            planUpdated = false
+        } catch {
+            planUpdated = true
+        }
     }
 
     /// Relaunches from the durable record without contacting the server (contract §11.5 is 6.4).
@@ -368,6 +422,7 @@ public final class WatchExecutionEngine {
             record.selectedItemIndex = nil
             capture.session = record
         }
+        applyDeferredPlanIfIdle()
     }
 
     /// Ends an open rest at this instant, because starting or logging the next set is what
@@ -378,6 +433,7 @@ public final class WatchExecutionEngine {
         try mutate { capture in
             try self.closeRest(in: &capture, at: stamp, workout: workout)
         }
+        applyDeferredPlanIfIdle()
     }
 
     /// Persists the lifter's in-progress adjustments so a termination before logging loses
@@ -458,7 +514,9 @@ public final class WatchExecutionEngine {
             lastError = message(for: error)
             return CaptureResult(persisted: false, stop: .storage(message(for: error)))
         }
-        return CaptureResult(persisted: true, stop: await flush(session: session))
+        let stop = await flush(session: session)
+        applyDeferredPlanIfIdle()
+        return CaptureResult(persisted: true, stop: stop)
     }
 
     /// Removes the newest set that has never been attempted, together with its queued events.
@@ -477,6 +535,7 @@ public final class WatchExecutionEngine {
         } catch {
             return false
         }
+        applyDeferredPlanIfIdle()
         return true
     }
 
@@ -618,14 +677,26 @@ public final class WatchExecutionEngine {
         } catch {
             return .storage(message(for: error))
         }
-        let operations = capture.operations.filter { $0.isReplayable(now: now()) }
-        guard !operations.isEmpty else {
-            apply(capture)
-            ladder.succeeded()
-            nextRetryAt = nil
-            return .nothingToSend
-        }
-        for operation in operations {
+        apply(capture)
+        var sentAny = false
+        var offPlanRetried: Set<String> = []
+        // Each pass reloads the queue so an off-plan rewrite is what gets sent, and so work added
+        // while this loop is awaiting cannot be skipped or reordered.
+        while true {
+            let current: OfflineCapture
+            do {
+                current = try store.load()
+            } catch {
+                return .storage(message(for: error))
+            }
+            apply(current)
+            guard let operation = current.operations.first(where: {
+                $0.isReplayable(now: now())
+            }) else {
+                ladder.succeeded()
+                nextRetryAt = nil
+                return sentAny ? .allSent : .nothingToSend
+            }
             do {
                 _ = try store.markAttempted(operation.operationId)
                 let detail = try await send(operation, session: session)
@@ -640,17 +711,31 @@ public final class WatchExecutionEngine {
                 if operation.kind == .completeWorkout {
                     markFinishAcknowledged()
                 }
+                sentAny = true
                 ladder.succeeded()
                 nextRetryAt = nil
                 markOnline(session)
             } catch {
+                if !offPlanRetried.contains(operation.operationId),
+                   isPlanItemMismatch(error),
+                   case .addSet(let body) = operation.body,
+                   let original = body.planItemIndex {
+                    do {
+                        try applyOffPlanRewrite(
+                            operationId: operation.operationId,
+                            originalIndex: original
+                        )
+                    } catch {
+                        return .storage(message(for: error))
+                    }
+                    offPlanRetried.insert(operation.operationId)
+                    continue
+                }
                 let stop = handle(error, operation: operation)
                 refresh()
                 return stop
             }
         }
-        refresh()
-        return .allSent
     }
 
     /// A foreground, network-path change or explicit retry starts a new retry burst.
@@ -857,6 +942,56 @@ public final class WatchExecutionEngine {
             var updated = operation
             updated.body = .executionEvents(remaining)
             return updated
+        }
+    }
+
+    private func isPlanItemMismatch(_ error: Error) -> Bool {
+        guard case .server(_, let code, _, _, _)? = error as? APIError else { return false }
+        return code == "plan_item_mismatch"
+    }
+
+    /// Preserves the set off-plan: the accounting link is cleared, the performed data and the
+    /// original index survive as provenance, and the user is told (contract §10.4).
+    private func applyOffPlanRewrite(operationId: String, originalIndex: Int) throws {
+        try mutate { capture in
+            guard let index = capture.operations.firstIndex(where: {
+                $0.operationId == operationId
+            }), case .addSet(let body) = capture.operations[index].body else { return }
+            capture.operations[index].body = .addSet(AddSetRequest(
+                exerciseId: body.exerciseId,
+                loadKg: body.loadKg,
+                reps: body.reps,
+                rir: body.rir,
+                velocityMps: body.velocityMps,
+                setIndex: body.setIndex,
+                planItemIndex: nil,
+                repVelocities: body.repVelocities,
+                performedAt: body.performedAt
+            ))
+            capture.operations = capture.operations.map { operation in
+                guard case .executionEvents(let events) = operation.body else { return operation }
+                let updated = events.map { event -> ExecutionEvent in
+                    guard event.localSetId == operationId,
+                          event.eventType == .setCompleted else { return event }
+                    var payload = event.payload ?? [:]
+                    payload["original_plan_item_index"] = .number(Double(originalIndex))
+                    return ExecutionEvent(
+                        eventId: event.eventId,
+                        eventType: event.eventType,
+                        occurredAt: event.occurredAt,
+                        planItemIndex: nil,
+                        setId: event.setId,
+                        localSetId: event.localSetId,
+                        payload: payload
+                    )
+                }
+                var copy = operation
+                copy.body = .executionEvents(updated)
+                return copy
+            }
+            guard var record = capture.session else { return }
+            record.offPlanNoted = true
+            capture.session = record
         }
     }
 

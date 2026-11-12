@@ -146,6 +146,26 @@ it never edits the plan. Shipped as:
 - Selecting an exercise emits nothing; `exercise_started` belongs to the first set. Switching
   exercises, End exercise and finish all close the started exercise.
 
+## Phase 6.4 — reconciliation, revision and conflicts
+
+Completed 2026-11-12 (client) against the new execution envelope.
+
+- **Reconciliation** on launch and foreground: flush first, then compare status and ownership;
+  in-progress and owned by this watch resumes, the phone's session becomes read-only, and a
+  completed, abandoned or missing workout becomes an ended state with the local snapshot kept.
+- **Recovery states**: `readOnly` ("Logging moved to the phone") and `ended(reason)`; both stop
+  writes and flushes, and clearing the local record never abandons the server session.
+- **Revision**: the envelope carries `plan_revision` and the current plan; a newer one is applied
+  only when idle, held as **Plan updated** while a set is in progress, and an older one is ignored.
+- **Off-plan preservation**: `409 plan_item_mismatch` triggers exactly one retry with
+  `plan_item_index = null`, the same operation id, and unchanged performed data; the original
+  index rides in the `set_completed` payload as `original_plan_item_index`, and the summary
+  shows the note.
+- **Queue**: one flush pass at a time, reloaded each iteration so a rewritten operation is what
+  gets sent, no cross-session mixing, and no flushing into a session the server has ended.
+- **Config deferral**: a home-server change waits while a session is active or work is queued
+  (contract §7.8) and is retried when the watch is free.
+
 ## Verification
 
 ```bash

@@ -176,3 +176,27 @@ suspension or the Digital Crown.
       `rest_started`, `rest_completed` and any `rest_extended` rows with the original
       `occurred_at`; no `rest_skipped`; a synced `set_completed` carries `set_id`.
 - [ ] HealthKit: **no workout is saved in 6.3** (that is 6.5); only the liveness session exists.
+
+
+## Reconciliation and conflicts (6.4) — owner-run
+
+**Status: not yet performed.** Needs a phone and a watch, and a disposable server.
+
+- [ ] Watch targets a plan, starts, logs one set, then **turn Wi-Fi off**.
+- [ ] On the phone, swap the next exercise in the plan. Back on the watch, log a set against the
+      item that was swapped, then turn Wi-Fi on.
+- [ ] The pending set flushes first, comes back as **off-plan** with the set preserved (same
+      exercise, load, reps, RIR and time), the summary shows the "plan changed while offline"
+      note, and the server's telemetry carries the original item index.
+- [ ] Once the watch is idle, **Plan updated** appears and the labels refresh with the phone's
+      plan, including a newer `plan_revision`; nothing changes under a set in progress.
+- [ ] With a set in progress, the phone edits another item: the current target does not move until
+      the set is logged.
+- [ ] Phone **Take over logging**: the watch's next foreground shows **Logging moved to the
+      phone**, adds no sets, and **Clear record** removes the local copy without abandoning the
+      session.
+- [ ] Phone finishes the workout while the watch is offline: the watch shows **Session ended
+      elsewhere**, keeps the local summary, and clears without recreating anything.
+- [ ] Change **Home Server** on the phone while a session is active: the watch keeps the old host,
+      finishes and syncs, then adopts the new host after the queue is empty.
+- [ ] A delayed older snapshot (cached revision below the current one) never overwrites the plan.

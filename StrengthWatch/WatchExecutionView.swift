@@ -166,6 +166,11 @@ struct WatchFinishedView: View {
                 Text("Workout complete").font(.headline)
                 Text("\(execution.completedSetCount) sets")
                     .font(.caption)
+                if execution.offPlanNoted {
+                    Text("Plan changed while offline — some sets were kept off-plan.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
                 Button("Done") { execution.dismissSummary() }
                     .font(.footnote)
             }

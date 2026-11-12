@@ -28,6 +28,11 @@ struct WatchExerciseView: View {
                     WatchRestBar(execution: execution, rest: rest)
                 }
 
+                if execution.planUpdated {
+                    Text("Plan updated")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                }
                 if execution.pendingCount > 0 || execution.isOffline {
                     Text(banner)
                         .font(.caption2)

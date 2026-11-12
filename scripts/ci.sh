@@ -57,6 +57,20 @@ if [[ -z "$embedded_watch" ]]; then
   exit 1
 fi
 
+# The contract fixes the deployment targets (§5). A project edit that lowers one still builds,
+# so read the settings back and fail here instead of silently widening the supported range.
+assert_deployment_target() {
+  local scheme=$1 setting=$2 expected=$3 actual
+  actual=$(xcodebuild -project StrengthApp.xcodeproj -scheme "$scheme" -showBuildSettings 2>/dev/null \
+    | awk -v key="$setting" '$1 == key { print $3; exit }')
+  if [[ "$actual" != "$expected" ]]; then
+    echo "error: $scheme $setting is '${actual:-unset}', expected $expected" >&2
+    exit 1
+  fi
+}
+assert_deployment_target StrengthApp IPHONEOS_DEPLOYMENT_TARGET 27.0
+assert_deployment_target StrengthWatch WATCHOS_DEPLOYMENT_TARGET 27.0
+
 args=(test -only-testing:"$ONLY_TESTING" -project StrengthApp.xcodeproj -scheme StrengthApp
       -destination "$DESTINATION" -derivedDataPath "$DERIVED_DATA")
 if [[ -n "${RESULT_BUNDLE:-}" ]]; then

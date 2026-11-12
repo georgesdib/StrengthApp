@@ -145,7 +145,7 @@ struct ExerciseWorkoutView: View {
                     }
                 }
                 .accessibilityIdentifier("exercise-save-form")
-                .disabled(model.isSaving)
+                .disabled(model.isSaving || model.isMirroringWatchSession)
             }
 
             if plannedSets > 0 {
@@ -177,6 +177,7 @@ struct ExerciseWorkoutView: View {
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
                                 .accessibilityIdentifier("log-planned-set-\(index)")
+                                .disabled(model.isMirroringWatchSession)
                             }
                         }
                     }
@@ -224,7 +225,7 @@ struct ExerciseWorkoutView: View {
                     Label("Start another set", systemImage: "plus")
                 }
                 .accessibilityIdentifier("exercise-add-set")
-                .disabled(model.isSaving)
+                .disabled(model.isSaving || model.isMirroringWatchSession)
             }
 
             Section {

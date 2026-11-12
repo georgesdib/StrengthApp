@@ -36,6 +36,8 @@ struct ActiveWorkoutView: View {
     @State private var planPicker: PlanPickerMode?
     @State private var pendingRemoval: PlanRemoval?
     @State private var planEditError: String?
+    @State private var confirmingTakeOver = false
+    @State private var takeOverError: String?
     @StateObject private var drafts = WorkoutDraftStore()
     @State private var otherExerciseId: String?
     @State private var showingOtherExercisePicker = false
@@ -101,6 +103,41 @@ struct ActiveWorkoutView: View {
                             LabeledContent("Status", value: Self.label(workout.status))
                             if let elapsed = workout.elapsedSeconds {
                                 LabeledContent("Elapsed", value: Self.durationLabel(elapsed))
+                            }
+                        }
+
+                        if model.isMirroringWatchSession {
+                            Section("Logged on Apple Watch") {
+                                Label(
+                                    "This session is logged on the Apple Watch.",
+                                    systemImage: "applewatch"
+                                )
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("mirror-banner")
+                                Text("Sets are recorded on the watch. Plan edits here reach it at the next idle point, never mid-set.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                if let takeOverError {
+                                    Text(takeOverError)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                        .accessibilityIdentifier("take-over-error")
+                                }
+                                Button {
+                                    confirmingTakeOver = true
+                                } label: {
+                                    HStack {
+                                        Spacer()
+                                        if model.isSaving {
+                                            ProgressView()
+                                        } else {
+                                            Text("Take over logging")
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                                .disabled(model.isSaving)
+                                .accessibilityIdentifier("take-over-logging")
                             }
                         }
 
@@ -217,7 +254,7 @@ struct ActiveWorkoutView: View {
                             } label: {
                                 Label("Log an exercise not in the plan", systemImage: "plus.circle")
                             }
-                            .disabled(model.isSaving)
+                            .disabled(model.isSaving || model.isMirroringWatchSession)
                             .accessibilityIdentifier("log-outside-exercise")
                             Text("The set is recorded as performed work without changing the prescription.")
                                 .font(.footnote)
@@ -442,6 +479,18 @@ struct ActiveWorkoutView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Logged sets stay in this workout, but the session will not be completed.")
+            }
+            .confirmationDialog(
+                "Take over logging on this iPhone?",
+                isPresented: $confirmingTakeOver,
+                titleVisibility: .visible
+            ) {
+                Button("Take over logging", role: .destructive) {
+                    Task { await takeOverLogging() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The watch stops logging and becomes read-only. Sets it already recorded stay in the session; anything still queued on the watch is sent when it reconnects.")
             }
             .sheet(item: $planPicker) { mode in
                 ExercisePickerSheet(model: model, title: mode.title) { exerciseId in
@@ -720,6 +769,13 @@ struct ActiveWorkoutView: View {
             dismiss()
         } else {
             abandonError = model.mutationError
+        }
+    }
+
+    private func takeOverLogging() async {
+        takeOverError = nil
+        if !(await model.takeOverLogging()) {
+            takeOverError = model.mutationError
         }
     }
 

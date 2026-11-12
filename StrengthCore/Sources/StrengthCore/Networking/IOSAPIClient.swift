@@ -639,6 +639,8 @@ public final class IOSAPIClient {
     }
 
     /// Transfers ownership of an in-progress workout to the calling device (contract §9).
+    /// Never journaled: queuing an ownership change would flip the owner minutes or hours after
+    /// the lifter was told it failed. The caller refreshes instead.
     public func takeover(
         workoutId: String,
         session: IOSSession,
@@ -650,7 +652,8 @@ public final class IOSAPIClient {
             kind: .takeover,
             targetId: workoutId,
             session: session,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            journaling: false
         )
     }
 

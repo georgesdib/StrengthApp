@@ -1685,6 +1685,7 @@ final class AppModel: ObservableObject {
             _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
+            pushExecutionIfMirroring()
             return true
         } catch {
             if let api = error as? APIError,
@@ -2400,9 +2401,21 @@ final class AppModel: ObservableObject {
         MirrorPolicy.isMirror(workout: activeWorkout, phoneDeviceID: device?.deviceID)
     }
 
+    /// Nudges the watch with the new plan after a phone edit. Best effort and redundant by
+    /// design: the watch also refreshes on foreground and after each set (contract §10.2), so a
+    /// dropped payload costs one stale view, never a lost edit.
+    private func pushExecutionIfMirroring() {
+        guard isMirroringWatchSession, let workout = activeWorkout else { return }
+        watchPairing.pushExecution(workout)
+    }
+
     /// Takes logging back from the watch. The watch turns read-only on its next refresh.
     func takeOverLogging() async -> Bool {
         guard let session, let workout = activeWorkout, !isSaving else { return false }
+        guard !offlineCaptureActive else {
+            mutationError = "Taking over logging requires the server."
+            return false
+        }
         _ = apply(.operationBegan)
         defer { _ = apply(.operationEnded) }
         do {

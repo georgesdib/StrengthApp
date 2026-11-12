@@ -19,6 +19,10 @@ protocol WatchConnectivitySession: AnyObject {
     var receivedApplicationContext: [String: Any] { get }
     func activate()
     func updateApplicationContext(_ context: [String: Any]) throws
+    /// Queued delivery for content that must not be dropped when the watch is unreachable.
+    /// Used for execution payloads; the credential handshake keeps the single-slot
+    /// application context (contract §10.2).
+    func transferUserInfo(_ userInfo: [String: Any])
 }
 
 /// Thin adapter over WCSession. Keeping it behind a protocol lets the handoff logic run in
@@ -50,6 +54,10 @@ final class LiveWatchConnectivitySession: NSObject, WatchConnectivitySession, WC
             throw WatchConnectivityError.unavailable
         }
         try session.updateApplicationContext(context)
+    }
+
+    func transferUserInfo(_ userInfo: [String: Any]) {
+        session?.transferUserInfo(userInfo)
     }
 
     nonisolated func session(
@@ -194,6 +202,26 @@ final class WatchPairingCoordinator: ObservableObject {
         if let connectivity, connectivity.activationState != .activated {
             connectivity.activate()
         }
+    }
+
+    /// Sends the plan revision the watch is missing after a phone edit. Queued rather than
+    /// latest-wins so a nudge is not dropped while the watch is unreachable; the watch ignores
+    /// anything not newer than its snapshot (contract §10.2, §10.5). Best effort: the watch also
+    /// refreshes on foreground and after each set, so a lost nudge is recoverable.
+    @discardableResult
+    func pushExecution(_ workout: WorkoutDetail) -> Bool {
+        guard isActive,
+              link?.revoked != true,
+              let connectivity,
+              connectivity.activationState == .activated,
+              connectivity.isWatchAppInstalled,
+              let revision = workout.planRevision,
+              let payload = RemoteExecutionPayload(workout: workout, revision: revision),
+              let json = payload.encodedString() else {
+            return false
+        }
+        connectivity.transferUserInfo(["execution": json])
+        return true
     }
 
     func stop() {

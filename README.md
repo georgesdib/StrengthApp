@@ -9,9 +9,10 @@ sync, conflict handling and cancellation); physical offline acceptance was owner
 R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
 closed. Phase 6.0 (the shared watch core) and 6.1 (the server watch contract) are complete. Phase
 6.2 is complete and closed 2026-11-10: 6.2a embedded watch target and CI, 6.2b credential/config
-handoff and phone-side Pair/Status/Revoke, and 6.2c read-only Today from the Home server. Physical
-Apple Watch acceptance remains owner-run. The watch has no start, set logging, HealthKit or offline
-execution yet.
+handoff and phone-side Pair/Status/Revoke, and 6.2c read-only Today from the Home server. Phases
+6.3–6.5 add the watch execution lifecycle, offline conflicts and heart rate with one HealthKit
+workout, and 6.6 adds the phone mirror with plan-revision pushes and take-over. Physical Apple
+Watch acceptance remains owner-run.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
@@ -113,8 +114,13 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 - **Settings** — Home Server, Away Server, Prefer Home Server, active route, Exercise Library,
   Apple Watch Pair/Status/Revoke, device id/label, app version, opt-in HealthKit readiness, Forget
   this device (local token only), re-pair instructions.
-- **Apple Watch** — credential status plus a read-only Today plan fetched from the Home server;
-  phone-targeted plans are hidden; no start, sets, forms, HealthKit or offline execution.
+- **Apple Watch** — credential status plus the Home server's watch-targeted work. A watch-targeted
+  plan is started, logged and finished on the watch (sets, form rating, optional mean velocity,
+  heart rate, one HealthKit workout, local-first outbox); phone-targeted plans are hidden. While
+  the watch owns the session the phone shows a **Logged on Apple Watch** banner, keeps set logging
+  and form ratings disabled, and remains read-only for capture; plan edits still work and are
+  pushed to the watch at its next idle point, never mid-set. **Take over logging** asks for
+  confirmation, moves ownership to the phone and leaves the watch read-only.
 - **Exercise Library** — searchable catalogue, read-only configuration, server-computed e1RM and
   paginated working-set history; the catalogue is cached on disk so browsing and exercise choice
   work offline, configuration is cached for the app session, e1RM/history are fetched on entry,

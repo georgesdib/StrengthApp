@@ -254,6 +254,12 @@ final class WatchExecutionController: ObservableObject {
         }
         await handle(result.stop)
         sync()
+        // Contract §10.2: refresh after each set, so a plan edit whose nudge was dropped while
+        // the watch was unreachable is picked up at this idle point rather than at the next
+        // foreground. Only when the flush finished cleanly; offline work stays local.
+        if result.persisted, result.stop == .allSent {
+            await reconcileNow()
+        }
     }
 
     func undoLastSet() {

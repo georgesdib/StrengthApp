@@ -1,7 +1,7 @@
 # Watch Phase 6.3 — execution lifecycle slice plan
 
-**Status:** 6.3a and 6.3b complete (2026-11-11); 6.3c not started. The owner approved the
-approach in this document.
+**Status:** 6.3a, 6.3b and 6.3c complete (2026-11-11). The 6.4–6.6 work packages superseded the
+later phases this document anticipated; the contract stays authoritative.
 
 **Authority:** the canonical requirements are the portfolio contract
 [iOS Phase 6 — watchOS companion](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)

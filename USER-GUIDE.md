@@ -230,8 +230,15 @@ Changing the Home Server and tapping **Save server settings** increments the wat
 version. When the watch has no active session, it updates its Home address without receiving a new
 token.
 
-The current watch build shows pairing/credential status only. Workout and read-only Today screens
-arrive in later phases.
+The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR with
+optional mean velocity, rest, rate form at **End exercise**, and finish with sRPE. Heart rate shows
+during the session and exactly one HealthKit workout is saved. Capture is local-first: without the
+network the sets queue on the watch and sync when it reconnects.
+
+While the watch owns the session the phone shows **Logged on Apple Watch** and does not accept sets,
+form ratings or velocity. Use the phone to edit the plan; an edit reaches the watch at its next idle
+point, never mid-set. **Take over logging** asks for confirmation, moves the session to the phone
+and leaves the watch read-only; sets the watch already recorded stay in the session.
 
 If the server address changes, save the settings and let the app recheck. If you change to a
 different server/database, pair again.

@@ -9,6 +9,8 @@ app presents and records that authority.
 - [README.md](../README.md) — project overview, requirements, build recipe and screens.
 - [USER-GUIDE.md](../USER-GUIDE.md) — owner-facing pairing, workout, HealthKit and troubleshooting guide.
 - [DEVICE-ACCEPTANCE.md](../DEVICE-ACCEPTANCE.md) — physical iPhone acceptance checklists and records.
+- [WATCH-ACCEPTANCE.md](../WATCH-ACCEPTANCE.md) — owner-run Apple Watch acceptance, including the
+  pending 6.7 steps W1–W12 and the rollback dry run.
 
 ## Client plan and contracts
 

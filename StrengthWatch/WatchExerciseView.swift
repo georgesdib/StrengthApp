@@ -12,6 +12,7 @@ struct WatchExerciseView: View {
     @State private var preparedFor: String?
     @State private var logging = false
     @State private var showingForm = false
+    @State private var velocityText = ""
 
     var body: some View {
         ScrollView {
@@ -185,6 +186,14 @@ struct WatchExerciseView: View {
                 Text("\(formatted(loadKg)) kg × \(reps)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                TextField("Bar speed m/s", text: $velocityText)
+                    .accessibilityIdentifier("watch-velocity")
+                if !velocityText.trimmingCharacters(in: .whitespaces).isEmpty,
+                   parsedVelocity == nil {
+                    Text("Speed must be a positive number.")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
                 ForEach(0...6, id: \.self) { value in
                     Button("\(value)") { save(rir: value) }
                 }
@@ -228,11 +237,28 @@ struct WatchExerciseView: View {
 
     // MARK: - Actions
 
+    /// Optional mean velocity for the set (VBT). Empty means "not measured"; a non-empty value
+    /// must parse, so a typo cannot silently drop the measurement.
+    private var parsedVelocity: Double? {
+        let trimmed = velocityText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, let value = Double(trimmed), value > 0 else { return nil }
+        return value
+    }
+
     private func save(rir: Int?) {
+        let trimmed = velocityText.trimmingCharacters(in: .whitespaces)
+        guard trimmed.isEmpty || parsedVelocity != nil else { return }
         showingRIR = false
         logging = true
+        let velocity = parsedVelocity
         Task {
-            await execution.logSet(loadKg: loadKg, reps: reps, rir: rir)
+            await execution.logSet(
+                loadKg: loadKg,
+                reps: reps,
+                rir: rir,
+                velocityMps: velocity
+            )
+            velocityText = ""
             logging = false
             prepare()
         }

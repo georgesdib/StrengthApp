@@ -44,6 +44,8 @@ public final class WatchExecutionEngine {
         public var loadKg: Double?
         public var reps: Int
         public var rir: Int?
+        /// Optional mean bar velocity for the set (VBT). Descriptive only; it never decides load.
+        public var velocityMps: Double?
 
         public init(
             exerciseId: String,
@@ -51,7 +53,8 @@ public final class WatchExecutionEngine {
             setIndex: Int,
             loadKg: Double?,
             reps: Int,
-            rir: Int?
+            rir: Int?,
+            velocityMps: Double? = nil
         ) {
             self.exerciseId = exerciseId
             self.planItemIndex = planItemIndex
@@ -59,6 +62,7 @@ public final class WatchExecutionEngine {
             self.loadKg = loadKg
             self.reps = reps
             self.rir = rir
+            self.velocityMps = velocityMps
         }
     }
 
@@ -402,7 +406,10 @@ public final class WatchExecutionEngine {
             forms: workout.forms,
             elapsedSeconds: workout.elapsedSeconds,
             sessionRpe: workout.sessionRpe,
-            startedAt: workout.startedAt
+            startedAt: workout.startedAt,
+            ownerDeviceId: workout.ownerDeviceId,
+            planRevision: revision,
+            lastActivityAt: workout.lastActivityAt
         )
         record.planRevision = revision
         if let selected = record.selectedItemIndex,
@@ -685,7 +692,7 @@ public final class WatchExecutionEngine {
             loadKg: entry.loadKg,
             reps: entry.reps,
             rir: entry.rir,
-            velocityMps: nil,
+            velocityMps: entry.velocityMps,
             setIndex: entry.setIndex,
             planItemIndex: entry.planItemIndex,
             performedAt: ServerClock.encodedISO(stamp)

@@ -199,9 +199,25 @@ Completed 2026-11-12 (client) against the new execution envelope.
 - **Limits.** No simulator or physical acceptance was performed in this slice. The §22.2 device
   spike (backdated minimal workout, UUID query, forced finish failure) remains owner-run.
 - **Deferred to 6.7:** the watchOS unit-test target and the §17 simulator smoke (fetch → start →
-  log → finish). Both are test infrastructure and belong with the acceptance/CI slice; they do not
-  replace the device spike, and if the spike shows the backdated path is wrong the watch test
-  target is pulled forward instead.
+  log → finish). Both are test infrastructure and belong with the acceptance/CI slice.
+
+### HealthKit spike results — 2026-11-12, watchOS simulator
+
+Run with a throwaway harness (branch deleted afterwards). Probes and results:
+
+1. Live session + builder, 10 s of collection, save with an external UUID: **pass**, start/end
+   11 seconds apart, metadata persisted. The effort sample failed with `HKError` code 5
+   (authorization not determined) because the harness never requested effort write — the app does.
+2. Query by metadata UUID: **count 1**, same dates. The exactly-once mechanism works.
+3. Minimal backdated workout, start 30 minutes in the past: **pass**, saved with the requested
+   start and end. §12.3's crash-recovery path is viable; no design change needed.
+4. Forced finish failure: `HKError` code 3 (invalid argument, "not currently ended"), then a
+   retry with the same UUID produced **count 1**. Our mapping classifies code 3 as definitive,
+   which matches the policy; the retry does not duplicate.
+
+The simulator cannot enforce the HealthKit entitlement, prompt as a device does, or provide HR,
+so the device re-run is folded into 6.7 physical acceptance rather than kept as a separate gate.
+6.5 is therefore verified to the extent the simulator allows; physical acceptance is outstanding.
 
 ## 6.5 corrective fixes — 2026-11-12
 

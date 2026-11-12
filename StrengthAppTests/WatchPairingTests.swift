@@ -12,6 +12,7 @@ private final class FakeWatchConnectivity: WatchConnectivitySession {
     var activationState: WCSessionActivationState = .activated
     var receivedApplicationContext: [String: Any] = [:]
     private(set) var updates: [[String: Any]] = []
+    private(set) var userInfos: [[String: Any]] = []
 
     func activate() {
         activationState = .activated
@@ -20,6 +21,10 @@ private final class FakeWatchConnectivity: WatchConnectivitySession {
 
     func updateApplicationContext(_ context: [String: Any]) throws {
         updates.append(context)
+    }
+
+    func transferUserInfo(_ userInfo: [String: Any]) {
+        userInfos.append(userInfo)
     }
 
     func receive(_ context: [String: Any]) {

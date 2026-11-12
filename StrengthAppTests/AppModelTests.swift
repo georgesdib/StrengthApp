@@ -316,6 +316,7 @@ private final class RecordingWatchConnectivity: WatchConnectivitySession {
     func updateApplicationContext(_ context: [String: Any]) throws {
         updates.append(context)
     }
+    func transferUserInfo(_ userInfo: [String: Any]) {}
 }
 
     @MainActor

@@ -31,7 +31,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         clock = try XCTUnwrap(ServerClock.parse("2026-11-07T16:00:00+00:00"))
             .addingTimeInterval(3_600)
         let transport = AsyncStubTransport { _ in
-            (200, Data(Fixtures.workoutInProgress.utf8))
+            (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
 
@@ -62,7 +62,7 @@ final class WatchExecutionEngineTests: XCTestCase {
     func testFailedSetIsPersistedWithItsOriginalTimestampAndStaysQueued() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Fixtures.workoutInProgress.utf8))
+                return (200, Data(Self.watchWorkout.utf8))
             }
             throw APIError.transport("offline")
         }
@@ -95,7 +95,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution-events") == true {
                 return (200, Data(Self.eventsAccepted.utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -114,7 +114,7 @@ final class WatchExecutionEngineTests: XCTestCase {
     func testAnUnauthorizedFlushKeepsTheQueueAndReportsCredentialsMissing() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Fixtures.workoutInProgress.utf8))
+                return (200, Data(Self.watchWorkout.utf8))
             }
             return (401, Data(#"{"error":"expired"}"#.utf8))
         }
@@ -130,7 +130,7 @@ final class WatchExecutionEngineTests: XCTestCase {
     }
 
     func testUndoOnlyCancelsASetThatWasNeverAttempted() async throws {
-        _ = try store.setActiveWorkout(try decode(Fixtures.workoutInProgress))
+        _ = try store.setActiveWorkout(try decode(Self.watchWorkout))
         _ = try store.setSession(WatchSessionRecord(
             sessionUUID: "session-1",
             startedAt: clock,
@@ -171,7 +171,7 @@ final class WatchExecutionEngineTests: XCTestCase {
 
     func testBeginSetRecordsAnExplicitStartAndMarksTheActiveSet() async throws {
         let transport = AsyncStubTransport { request in
-            (200, Data(Fixtures.workoutInProgress.utf8))
+            (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -199,7 +199,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/sets") == true {
                 throw APIError.transport("offline")
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -225,7 +225,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution-events") == true {
                 return (200, Data(Self.eventsAccepted.utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -248,7 +248,7 @@ final class WatchExecutionEngineTests: XCTestCase {
 
     func testExtendingARestRecordsTheAddedSeconds() async throws {
         let transport = AsyncStubTransport { request in
-            (200, Data(Fixtures.workoutInProgress.utf8))
+            (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -276,7 +276,7 @@ final class WatchExecutionEngineTests: XCTestCase {
     func testHealthKitOutcomeAndDismissalPersist() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Fixtures.workoutInProgress.utf8))
+                return (200, Data(Self.watchWorkout.utf8))
             }
             throw APIError.transport("offline")
         }
@@ -406,7 +406,7 @@ final class WatchExecutionEngineTests: XCTestCase {
                 return (200, Data(Self.executionPayload(revision: 1, loadKg: 150).utf8))
             }
             if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Fixtures.workoutInProgress.utf8))
+                return (200, Data(Self.watchWorkout.utf8))
             }
             throw APIError.transport("offline")
         }
@@ -438,7 +438,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(revision: 1, loadKg: 150).utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -504,7 +504,7 @@ final class WatchExecutionEngineTests: XCTestCase {
                 return (200, Data(Self.executionPayload(owner: nil).utf8))
             }
             if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Fixtures.workoutInProgress.utf8))
+                return (200, Data(Self.watchWorkout.utf8))
             }
             throw APIError.transport("offline")
         }
@@ -527,7 +527,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(owner: "watch-1").utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         let anonymous = IOSSession(baseURL: URL(string: "http://home.local:8000")!, token: "token")
@@ -539,7 +539,7 @@ final class WatchExecutionEngineTests: XCTestCase {
     }
 
     func testStartWithoutConfirmedOwnershipIsReadOnly() async throws {
-        let json = Fixtures.workoutInProgress.replacingOccurrences(
+        let json = Self.watchWorkout.replacingOccurrences(
             of: "\"owner_device_id\": \"watch-1\",", with: ""
         )
         let transport = AsyncStubTransport { _ in (200, Data(json.utf8)) }
@@ -564,7 +564,7 @@ final class WatchExecutionEngineTests: XCTestCase {
                 box.seen.append(box.value ?? "nil")
                 return (200, Data(Self.executionPayload(owner: box.value).utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -587,7 +587,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(owner: "watch-1").utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -603,7 +603,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(owner: "phone-1").utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -621,7 +621,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(status: "completed").utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -635,7 +635,7 @@ final class WatchExecutionEngineTests: XCTestCase {
     func testNotOwnerDuringFlushTurnsTheSessionReadOnly() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Fixtures.workoutInProgress.utf8))
+                return (200, Data(Self.watchWorkout.utf8))
             }
             let body = "{\"error\":\"not yours\",\"code\":\"not_owner\"}"
             return (409, Data(body.utf8))
@@ -657,7 +657,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(revision: 1, loadKg: 150).utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -681,7 +681,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/sets") == true {
                 return (200, Data(Fixtures.workoutWithSet.utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -704,7 +704,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(revision: 0, loadKg: 999).utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -731,7 +731,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution-events") == true {
                 return (200, Data(Self.eventsAccepted.utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -766,7 +766,7 @@ final class WatchExecutionEngineTests: XCTestCase {
 
     func testSelectingAnExerciseEmitsNothingUntilASetStarts() async throws {
         let transport = AsyncStubTransport { request in
-            (200, Data(Fixtures.workoutInProgress.utf8))
+            (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -814,7 +814,7 @@ final class WatchExecutionEngineTests: XCTestCase {
 
     func testBackToListClearsTheSelection() async throws {
         let transport = AsyncStubTransport { request in
-            (200, Data(Fixtures.workoutInProgress.utf8))
+            (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -831,7 +831,7 @@ final class WatchExecutionEngineTests: XCTestCase {
     func testFinishClosesAnOpenRestWithATerminalEvent() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Fixtures.workoutInProgress.utf8))
+                return (200, Data(Self.watchWorkout.utf8))
             }
             throw APIError.transport("offline")
         }
@@ -855,7 +855,7 @@ final class WatchExecutionEngineTests: XCTestCase {
 
     func testFinishDropsTheStartEventOfASetThatWasNeverLogged() async throws {
         let transport = AsyncStubTransport { request in
-            (200, Data(Fixtures.workoutInProgress.utf8))
+            (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -876,7 +876,7 @@ final class WatchExecutionEngineTests: XCTestCase {
 
     func testSetDraftSurvivesARelaunch() async throws {
         let transport = AsyncStubTransport { request in
-            (200, Data(Fixtures.workoutInProgress.utf8))
+            (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -950,7 +950,7 @@ final class WatchExecutionEngineTests: XCTestCase {
     func testFinishPersistsTheIntentBeforeTheServerCallAndQueuesIt() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Fixtures.workoutInProgress.utf8))
+                return (200, Data(Self.watchWorkout.utf8))
             }
             throw APIError.transport("offline")
         }
@@ -977,7 +977,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/abandon") == true {
                 return (200, Data(Fixtures.workoutCompleted.utf8))
             }
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
@@ -994,7 +994,7 @@ final class WatchExecutionEngineTests: XCTestCase {
     // MARK: - Relaunch
 
     func testRelaunchRestoresAnActiveSessionAndItsQueue() async throws {
-        _ = try store.setActiveWorkout(try decode(Fixtures.workoutInProgress))
+        _ = try store.setActiveWorkout(try decode(Self.watchWorkout))
         _ = try store.setSession(WatchSessionRecord(
             sessionUUID: "session-1",
             startedAt: clock,
@@ -1079,6 +1079,15 @@ final class WatchExecutionEngineTests: XCTestCase {
     {"workout_id":"workout-1","accepted":[],"duplicates":[],
      "received_at":"2026-11-07T16:00:01+00:00"}
     """#
+
+    /// The shared workout fixture, owned by this watch rather than the phone. The phone suites
+    /// need a phone-owned copy because mirror mode blocks their writes.
+    private static var watchWorkout: String {
+        Fixtures.workoutInProgress.replacingOccurrences(
+            of: #""owner_device_id": "device-1""#,
+            with: #""owner_device_id": "watch-1""#
+        )
+    }
 
     private func session() -> IOSSession {
         IOSSession(baseURL: URL(string: "http://home.local:8000")!, token: "token", deviceID: "watch-1")

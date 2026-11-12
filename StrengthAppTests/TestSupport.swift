@@ -365,7 +365,7 @@ enum Fixtures {
       "sets": [],
       "forms": [],
       "elapsed_seconds": 600,
-      "owner_device_id": "watch-1",
+      "owner_device_id": "device-1",
       "started_at": "2026-11-07T16:00:00+00:00"
     }
     """#
@@ -394,7 +394,7 @@ enum Fixtures {
          "rating": 4, "note": null}
       ],
       "elapsed_seconds": 660,
-      "owner_device_id": "watch-1",
+      "owner_device_id": "device-1",
       "started_at": "2026-11-07T16:00:00+00:00"
     }
     """#
@@ -421,7 +421,7 @@ enum Fixtures {
       "forms": [],
       "elapsed_seconds": 2700,
       "session_rpe": 7.0,
-      "owner_device_id": "watch-1",
+      "owner_device_id": "device-1",
       "started_at": "2026-11-07T16:00:00+00:00"
     }
     """#

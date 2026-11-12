@@ -2395,7 +2395,39 @@ final class AppModel: ObservableObject {
         return await cancelOfflineOperation(operation.operationId)
     }
 
+    /// A watch-owned session is logged on the watch; the phone mirrors it and may edit the plan.
+    var isMirroringWatchSession: Bool {
+        MirrorPolicy.isMirror(workout: activeWorkout, phoneDeviceID: device?.deviceID)
+    }
+
+    /// Takes logging back from the watch. The watch turns read-only on its next refresh.
+    func takeOverLogging() async -> Bool {
+        guard let session, let workout = activeWorkout, !isSaving else { return false }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
+        do {
+            let updated = try await client.takeover(
+                workoutId: workout.workoutId,
+                session: session,
+                idempotencyKey: UUID().uuidString.lowercased()
+            )
+            _ = apply(.operationSucceeded(updated))
+            workoutRefreshGrace = true
+            persistActiveWorkout()
+            mutationError = nil
+            return true
+        } catch {
+            mutationError = (error as? LocalizedError)?.errorDescription
+                ?? "Logging could not be taken over."
+            return false
+        }
+    }
+
     private func permitsMutation(kind: MutationKind, operationId: String) -> Bool {
+        if isMirroringWatchSession, kind != .planEdit {
+            mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
+            return false
+        }
         let unresolved = pendingMutations
         guard !unresolved.isEmpty else { return true }
         if unresolved.contains(where: {

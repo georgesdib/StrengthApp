@@ -182,6 +182,24 @@ Completed 2026-11-12 (client) against the new execution envelope.
   kept, and confirmed ownership restores writing. A start response without a confirmed owner is
   read-only rather than writable.
 
+## Phase 6.5 — heart rate and HealthKit save — 2026-11-12
+
+- **Recorder.** `WatchHealthKitRecorder` owns the session, the live builder, the data source and
+  the heart-rate statistics; it maps HealthKit errors into definitive or transient save failures.
+- **Finaliser in core.** `HealthKitFinalizer` implements the exactly-once rules: an existing
+  workout with the session UUID wins; a live builder is finished with the original end; otherwise
+  one minimal backdated workout is saved. Transient failures stay pending and count attempts;
+  five attempts or a definitive error become unsaved; a manual **Try again** is the only path out
+  of unsaved. Nine unit tests cover that matrix with a fake recorder.
+- **State and UI.** `FinishIntent` carries `hkAttempts` and `hkNoticeDismissed` (optional for
+  older records). The summary shows saving/saved, and on unsaved shows **Try again** and
+  **Dismiss**; Done is unaffected.
+- **Effort.** The session RPE is written as a `workoutEffortScore` sample after the workout;
+  failure to write it never invalidates the workout.
+- **Limits.** No simulator or physical acceptance was performed in this slice. The §22.2 device
+  spike (backdated minimal workout, UUID query, forced finish failure) remains owner-run, as does
+  the simulator smoke.
+
 ## Verification
 
 ```bash

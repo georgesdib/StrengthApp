@@ -16,16 +16,24 @@ public struct FinishIntent: Codable, Equatable, Sendable {
     public let sessionRpe: Double?
     public var hkState: HealthKitSaveState
     public var serverAcked: Bool
+    /// Automatic save attempts so far; optional so earlier records still decode.
+    public var hkAttempts: Int?
+    /// The lifter dismissed the unsaved notice; keeps the truth but stops nagging.
+    public var hkNoticeDismissed: Bool?
 
     public init(
         endedAt: Date,
         sessionRpe: Double?,
         hkState: HealthKitSaveState = .pending,
-        serverAcked: Bool = false
+        serverAcked: Bool = false,
+        hkAttempts: Int? = 0,
+        hkNoticeDismissed: Bool? = false
     ) {
         self.endedAt = endedAt
         self.sessionRpe = sessionRpe
         self.hkState = hkState
         self.serverAcked = serverAcked
+        self.hkAttempts = hkAttempts
+        self.hkNoticeDismissed = hkNoticeDismissed
     }
 }

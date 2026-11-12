@@ -133,6 +133,7 @@ struct WatchFinishProgressView: View {
                         .font(.caption2)
                         .foregroundStyle(.red)
                 }
+                WatchHealthKitStatus(execution: execution)
                 Button("Retry sync") {
                     Task { await execution.flushNow() }
                 }
@@ -171,6 +172,7 @@ struct WatchFinishedView: View {
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
+                WatchHealthKitStatus(execution: execution)
                 Button("Done") { execution.dismissSummary() }
                     .font(.footnote)
             }
@@ -244,6 +246,47 @@ struct WatchEndedView: View {
             Button("Keep", role: .cancel) {}
         } message: {
             Text("The local snapshot is removed. The server's record is unchanged.")
+        }
+    }
+}
+
+// MARK: - HealthKit save status
+
+struct WatchHealthKitStatus: View {
+    @ObservedObject var execution: WatchExecutionController
+
+    var body: some View {
+        if let state = execution.healthKitState {
+            switch state {
+            case .pending:
+                Text("Saving workout to Health…")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            case .saved:
+                Text("Saved to Health")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+            case .unsaved:
+                if !execution.healthKitNoticeDismissed {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("The HealthKit workout was not saved.")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                        if let failure = execution.healthKitFailure {
+                            Text(failure)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Button("Try again") {
+                                Task { await execution.retryHealthKit() }
+                            }
+                            Button("Dismiss") { execution.dismissHealthKitNotice() }
+                        }
+                        .font(.caption2)
+                    }
+                }
+            }
         }
     }
 }

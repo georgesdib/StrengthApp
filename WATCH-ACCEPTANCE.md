@@ -217,3 +217,22 @@ suspension or the Digital Crown.
       stay correct and match the session elapsed time.
 - [ ] **Ownership:** a session whose ownership cannot be confirmed shows read-only, keeps its
       queued sets, and becomes writable again only after a reconciliation confirms this watch.
+
+
+## Heart rate and HealthKit (6.5) — owner-run
+
+- [ ] Start a watch session with workout and heart-rate read access allowed: the Set screen shows a
+      live **bpm** while the wrist is raised, and it disappears if HR is not authorised.
+- [ ] Log a couple of sets, finish with an sRPE, and confirm Health holds **exactly one**
+      strength-training workout with the real start and end, the session's effort, and HR samples.
+- [ ] Repeat with HR read **denied**: the workout still saves, with no HR.
+- [ ] Finish, then force-quit before the watch syncs. Relaunch: the summary returns, Health still
+      shows exactly one workout, and the server finish replays once.
+- [ ] Mid-session, force-quit and relaunch, then finish: Health holds one workout with the original
+      start, with **no HR** for the pre-crash segment (the documented trade).
+- [ ] Deny Health access mid-session, finish: the workout reports **not saved** once, with
+      **Try again** and **Dismiss**; Try again after re-allowing access saves the same workout
+      once, and Dismiss removes the notice without changing the record.
+- [ ] Abandon a session: Health gains no workout.
+- [ ] The Health app shows the effort value matching the chosen sRPE, and nothing when
+      *Not recorded* was chosen.

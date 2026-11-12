@@ -25,10 +25,15 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var planUpdated = false
     @Published private(set) var offPlanNoted = false
     @Published private(set) var canLeaveExercise = true
+    @Published private(set) var heartRate: Int?
+    @Published private(set) var healthKitState: HealthKitSaveState?
+    @Published private(set) var healthKitNoticeDismissed = false
+    @Published private(set) var healthKitFailure: String?
 
     private let credentialStore: WatchCredentialStore
     private let engine: WatchExecutionEngine
     private let anchor: WatchLivenessAnchor
+    private let healthRecorder: WatchHealthKitRecorder?
     private let onCredentialsMissing: @MainActor () -> Void
     private var retryTask: Task<Void, Never>?
     private let pathMonitor = NWPathMonitor()
@@ -40,15 +45,29 @@ final class WatchExecutionController: ObservableObject {
     init(
         store: WatchCredentialStore = WatchCredentialStore(),
         anchor: WatchLivenessAnchor? = nil,
+        recorder: WatchHealthKitRecorder? = nil,
         onCredentialsMissing: @escaping @MainActor () -> Void
     ) {
         self.credentialStore = store
-        self.anchor = anchor ?? WatchHealthKitAnchor()
         self.onCredentialsMissing = onCredentialsMissing
+        if let anchor {
+            self.anchor = anchor
+            self.healthRecorder = recorder
+        } else if let recorder {
+            self.anchor = recorder
+            self.healthRecorder = recorder
+        } else {
+            let health = WatchHealthKitRecorder()
+            self.anchor = health
+            self.healthRecorder = health
+        }
         self.engine = WatchExecutionEngine(
             client: IOSAPIClient(),
             store: OfflineCaptureStore(fileURL: Self.recordFileURL)
         )
+        healthRecorder?.onHeartRate = { [weak self] bpm in
+            self?.heartRate = bpm
+        }
     }
 
     static var recordFileURL: URL {
@@ -76,6 +95,9 @@ final class WatchExecutionController: ObservableObject {
             if engine.phase == .active || engine.phase == .finishing {
                 await beginLivenessIfNeeded()
                 await reconcileNow()
+            }
+            if engine.healthKitInput()?.state == .pending {
+                await finalizeHealthKit()
             }
         }
     }
@@ -286,7 +308,11 @@ final class WatchExecutionController: ObservableObject {
         defer { isWorking = false }
         let stop = await engine.finish(sessionRpe: sessionRpe, session: session)
         await handle(stop)
-        await endLiveness()
+        // The HealthKit save ends the live session itself, so liveness is not ended here.
+        await finalizeHealthKit()
+        if healthRecorder == nil {
+            await endLiveness()
+        }
         sync()
     }
 
@@ -299,6 +325,38 @@ final class WatchExecutionController: ObservableObject {
 
     func dismissSummary() {
         engine.clearFinished()
+        sync()
+    }
+
+    /// Runs the exactly-once save through the finaliser. Automatic attempts continue while
+    /// pending; a manual attempt is the explicit Try again.
+    func finalizeHealthKit(manual: Bool = false) async {
+        guard let input = engine.healthKitInput(), let recorder = healthRecorder else { return }
+        let outcome = await HealthKitFinalizer.finalize(
+            externalUUID: input.sessionUUID,
+            startedAt: input.startedAt,
+            endedAt: input.endedAt,
+            effort: input.effort,
+            state: input.state,
+            attempts: input.attempts,
+            manual: manual,
+            recorder: recorder
+        )
+        engine.applyHealthKitOutcome(outcome)
+        if outcome.state != .pending {
+            await recorder.endWithoutSaving()
+            liveness.reset()
+        }
+        sync()
+    }
+
+    /// Try again on the unsaved notice: one immediate attempt, reusing the same external UUID.
+    func retryHealthKit() async {
+        await finalizeHealthKit(manual: true)
+    }
+
+    func dismissHealthKitNotice() {
+        engine.dismissHealthKitNotice()
         sync()
     }
 
@@ -410,6 +468,9 @@ final class WatchExecutionController: ObservableObject {
         planUpdated = engine.planUpdated
         offPlanNoted = engine.sessionRecord?.offPlanNoted ?? false
         canLeaveExercise = engine.canLeaveExercise
+        healthKitState = engine.sessionRecord?.finish?.hkState
+        healthKitNoticeDismissed = engine.sessionRecord?.finish?.hkNoticeDismissed ?? false
+        healthKitFailure = engine.healthKitFailure
         isOffline = engine.network == .offline
         lastError = engine.lastError
     }

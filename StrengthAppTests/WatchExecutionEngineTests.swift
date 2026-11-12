@@ -271,6 +271,42 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertEqual(added, 15)
     }
 
+    // MARK: - HealthKit finalisation state
+
+    func testHealthKitOutcomeAndDismissalPersist() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        _ = await engine.finish(sessionRpe: 8, session: session())
+
+        let input = try XCTUnwrap(engine.healthKitInput())
+        XCTAssertEqual(input.state, .pending)
+        XCTAssertEqual(input.attempts, 0)
+        XCTAssertEqual(input.effort, 8)
+        XCTAssertEqual(input.endedAt, try XCTUnwrap(engine.sessionRecord?.finish?.endedAt))
+
+        engine.applyHealthKitOutcome(HealthKitFinalizationOutcome(
+            state: .unsaved, attempts: 3, failure: "authorisation denied"
+        ))
+
+        XCTAssertEqual(engine.healthKitInput()?.state, .unsaved)
+        XCTAssertEqual(engine.healthKitFailure, "authorisation denied")
+        let stored = try XCTUnwrap(try store.load().session?.finish)
+        XCTAssertEqual(stored.hkState, .unsaved)
+        XCTAssertEqual(stored.hkAttempts, 3)
+
+        engine.dismissHealthKitNotice()
+
+        let relaunched = makeEngine(transport: AsyncStubTransport { _ in (200, Data()) })
+        try relaunched.restore()
+        XCTAssertEqual(relaunched.healthKitInput()?.dismissed, true)
+    }
+
     // MARK: - Phase 6.4 corrective fixes
 
     func testAnActiveExerciseCannotBeLeftUntilItIsEnded() async throws {

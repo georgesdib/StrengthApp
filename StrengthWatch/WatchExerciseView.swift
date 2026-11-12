@@ -87,6 +87,11 @@ struct WatchExerciseView: View {
             Text(item.effortLabel)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            if let heartRate = execution.heartRate {
+                Text("\(heartRate) bpm")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
     }
 

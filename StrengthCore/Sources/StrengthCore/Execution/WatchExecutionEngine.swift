@@ -83,6 +83,8 @@ public final class WatchExecutionEngine {
     public private(set) var nextRetryAt: Date?
     /// A newer plan arrived while the watch was busy; it is applied at the next idle point.
     public private(set) var planUpdated = false
+    /// Why the last HealthKit save attempt failed, if it did.
+    public private(set) var healthKitFailure: String?
 
     private let client: IOSAPIClient
     private let store: OfflineCaptureStore
@@ -480,6 +482,54 @@ public final class WatchExecutionEngine {
             capture.session = record
         }
         applyDeferredPlanIfIdle()
+    }
+
+    // MARK: - HealthKit finalisation
+
+    public struct HealthKitInput: Equatable, Sendable {
+        public let sessionUUID: String
+        public let startedAt: Date
+        public let endedAt: Date
+        public let effort: Double?
+        public let state: HealthKitSaveState
+        public let attempts: Int
+        public let dismissed: Bool
+    }
+
+    public func healthKitInput() -> HealthKitInput? {
+        guard let record = sessionRecord, let finish = record.finish else { return nil }
+        return HealthKitInput(
+            sessionUUID: record.sessionUUID,
+            startedAt: record.startedAt,
+            endedAt: finish.endedAt,
+            effort: finish.sessionRpe,
+            state: finish.hkState,
+            attempts: finish.hkAttempts ?? 0,
+            dismissed: finish.hkNoticeDismissed ?? false
+        )
+    }
+
+    public func applyHealthKitOutcome(_ outcome: HealthKitFinalizationOutcome) {
+        guard var record = sessionRecord, var finish = record.finish else { return }
+        finish.hkState = outcome.state
+        finish.hkAttempts = outcome.attempts
+        record.finish = finish
+        sessionRecord = record
+        healthKitFailure = outcome.state == .unsaved ? outcome.failure : nil
+        if let updated = try? store.setSession(record) {
+            apply(updated)
+        }
+    }
+
+    /// Stops showing the unsaved notice. The unsaved state itself is kept.
+    public func dismissHealthKitNotice() {
+        guard var record = sessionRecord, var finish = record.finish else { return }
+        finish.hkNoticeDismissed = true
+        record.finish = finish
+        sessionRecord = record
+        if let updated = try? store.setSession(record) {
+            apply(updated)
+        }
     }
 
     /// Cancels the set in progress without recording one. Its start event is dropped, because a

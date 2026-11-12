@@ -89,6 +89,7 @@ public final class WatchExecutionEngine {
     private var ladder = RetryLadder()
     private var networkPolicy = HomeNetworkPolicy()
     private var deferredPlan: (revision: Int, plan: PrescriptionPlan)?
+    private var flushTask: Task<WatchFlushStop, Never>?
     private let now: () -> Date
 
     public init(
@@ -132,6 +133,12 @@ public final class WatchExecutionEngine {
         sessionRecord?.exerciseItemIndex
     }
 
+    /// An exercise is active from its first started set until it is ended, so the list cannot be
+    /// re-entered in between.
+    public var canLeaveExercise: Bool {
+        sessionRecord?.exerciseItemIndex == nil
+    }
+
     /// The exercise the lifter picked from the list. Nothing can be started or logged without
     /// one, which is what keeps every set paired with an exercise.
     public var selectedItem: PrescriptionItem? {
@@ -149,6 +156,10 @@ public final class WatchExecutionEngine {
         guard let workout, planItems.contains(where: { ($0.orderIndex ?? -1) == itemIndex }) else {
             return
         }
+        // While an exercise is active the lifter stays in it until End exercise.
+        if let active = sessionRecord?.exerciseItemIndex, active != itemIndex {
+            return
+        }
         let stamp = stampedNow()
         try mutate { capture in
             guard var record = capture.session else { return }
@@ -164,6 +175,7 @@ public final class WatchExecutionEngine {
     /// Returns to the exercise list without ending the exercise; the next Start set still counts
     /// for the same exercise if it is selected again.
     public func clearSelection() throws {
+        guard canLeaveExercise else { return }
         guard let workout, sessionRecord?.selectedItemIndex != nil else { return }
         let stamp = stampedNow()
         try mutate { capture in
@@ -183,6 +195,24 @@ public final class WatchExecutionEngine {
             return body.planItemIndex == planItemIndex
         }.count
         return acknowledged + queued
+    }
+
+    /// Now in the session's clock domain (server-adjusted when the offset is known).
+    public func serverNow(_ local: Date = Date()) -> Date {
+        sessionRecord?.serverNow(at: local) ?? local
+    }
+
+    public func setDuration(at local: Date) -> TimeInterval {
+        guard let record = sessionRecord, let active = record.activeSet else { return 0 }
+        return record.setDuration(setStartedAt: active.startedAt, at: local)
+    }
+
+    public func restRemaining(at local: Date) -> TimeInterval? {
+        sessionRecord?.restRemaining(at: local)
+    }
+
+    public func restIsComplete(at local: Date) -> Bool {
+        sessionRecord?.restIsComplete(at: local) ?? false
     }
 
     public var canUndoLastSet: Bool {
@@ -250,11 +280,25 @@ public final class WatchExecutionEngine {
             phase = .ended(envelope.status)
             return .nothingToSend
         }
-        if let owner = envelope.ownerDeviceId,
-           let device = session.deviceID,
-           owner != device {
+        // Missing ownership is never permission to write (fail closed).
+        guard let owner = envelope.ownerDeviceId, !owner.isEmpty else {
+            phase = .readOnly
+            lastError = "Ownership could not be confirmed, so the watch is read-only."
+            return .nothingToSend
+        }
+        guard let device = session.deviceID, !device.isEmpty else {
+            phase = .readOnly
+            lastError = "This watch's device identity is missing, so the watch is read-only."
+            return .nothingToSend
+        }
+        guard owner == device else {
             phase = .readOnly
             return .nothingToSend
+        }
+        // Confirmed ownership restores writing after a read-only or reconciliation-required state.
+        if case .readOnly = phase {
+            phase = .active
+            lastError = nil
         }
         applyRevisionIfNeeded(envelope)
         markOnline(session)
@@ -265,7 +309,7 @@ public final class WatchExecutionEngine {
         guard let revision = envelope.planRevision,
               let plan = envelope.plan,
               revision > (sessionRecord?.planRevision ?? 0) else { return }
-        guard activeSet == nil, pendingCount == 0 else {
+        guard activeSet == nil else {
             deferredPlan = (revision, plan)
             planUpdated = true
             return
@@ -275,7 +319,7 @@ public final class WatchExecutionEngine {
 
     /// Applies a deferred revision once the watch is idle again (contract §10.5).
     private func applyDeferredPlanIfIdle() {
-        guard let deferred = deferredPlan, activeSet == nil, pendingCount == 0 else { return }
+        guard let deferred = deferredPlan, activeSet == nil else { return }
         deferredPlan = nil
         apply(plan: deferred.plan, revision: deferred.revision)
     }
@@ -364,7 +408,16 @@ public final class WatchExecutionEngine {
                 capture.session = record
                 capture.activeWorkout = detail
             }
-            phase = .active
+            if let owner = detail.ownerDeviceId,
+               let device = session.deviceID,
+               !owner.isEmpty,
+               owner == device {
+                phase = .active
+            } else {
+                // The session exists server-side, but this watch cannot prove it may write.
+                phase = .readOnly
+                lastError = "Ownership could not be confirmed, so logging is disabled on this watch."
+            }
             nextRetryAt = nil
             ladder.succeeded()
             markOnline(session)
@@ -418,8 +471,27 @@ public final class WatchExecutionEngine {
         try mutate { capture in
             try self.closeRest(in: &capture, at: stamp, workout: workout)
             try self.closeExercise(in: &capture, at: stamp, workout: workout)
+            if let active = capture.session?.activeSet {
+                self.dropEvents(localSetID: active.localSetID, from: &capture)
+            }
             guard var record = capture.session else { return }
             record.selectedItemIndex = nil
+            record.activeSet = nil
+            capture.session = record
+        }
+        applyDeferredPlanIfIdle()
+    }
+
+    /// Cancels the set in progress without recording one. Its start event is dropped, because a
+    /// set that never happened leaves no trace.
+    public func cancelActiveSet() throws {
+        guard sessionRecord?.activeSet != nil else { return }
+        try mutate { capture in
+            if let active = capture.session?.activeSet {
+                self.dropEvents(localSetID: active.localSetID, from: &capture)
+            }
+            guard var record = capture.session else { return }
+            record.activeSet = nil
             capture.session = record
         }
         applyDeferredPlanIfIdle()
@@ -667,8 +739,32 @@ public final class WatchExecutionEngine {
 
     /// Sends replayable operations in order, stopping on the first failure. Acknowledged work is
     /// removed from the queue only after the server accepted it.
+    /// Single-flight: concurrent callers await the pass already running, so an operation is never
+    /// submitted twice. Work queued during a pass is picked up by one follow-up pass.
     @discardableResult
     public func flush(session: IOSSession) async -> WatchFlushStop {
+        if let inFlight = flushTask {
+            let result = await inFlight.value
+            guard result == .allSent || result == .nothingToSend else { return result }
+            guard hasReplayableWork() else { return result }
+            return await flush(session: session)
+        }
+        let task = Task { @MainActor [weak self] () -> WatchFlushStop in
+            guard let self else { return .nothingToSend }
+            let result = await self.performFlush(session: session)
+            self.flushTask = nil
+            return result
+        }
+        flushTask = task
+        return await task.value
+    }
+
+    private func hasReplayableWork() -> Bool {
+        guard let capture = try? store.load() else { return false }
+        return capture.operations.contains { $0.isReplayable(now: now()) }
+    }
+
+    private func performFlush(session: IOSSession) async -> WatchFlushStop {
         if case .readOnly = phase { return .nothingToSend }
         if case .ended = phase { return .nothingToSend }
         let capture: OfflineCapture

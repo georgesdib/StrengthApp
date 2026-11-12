@@ -62,12 +62,14 @@ struct WatchExerciseView: View {
     private func header(_ item: PrescriptionItem) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Button {
-                    execution.backToList()
-                } label: {
-                    Image(systemName: "chevron.left")
+                if execution.canLeaveExercise {
+                    Button {
+                        execution.backToList()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .accessibilityIdentifier("watch-back-to-list")
                 }
-                .accessibilityIdentifier("watch-back-to-list")
                 Text(exerciseName(item))
                     .font(.headline)
                 Spacer()
@@ -118,7 +120,7 @@ struct WatchExerciseView: View {
     private func runningSet(_ item: PrescriptionItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text("Set time \(setDuration(enteredAt: context.date))")
+                Text("Set time \(formattedDuration(execution.setDuration(at: context.date)))")
                     .font(.subheadline)
                     .monospacedDigit()
             }
@@ -227,9 +229,8 @@ struct WatchExerciseView: View {
         execution.completedSetCount(for: item) + 1
     }
 
-    private func setDuration(enteredAt date: Date) -> String {
-        guard let started = execution.activeSet?.startedAt else { return "0:00" }
-        let seconds = max(0, Int(date.timeIntervalSince(started)))
+    private func formattedDuration(_ interval: TimeInterval) -> String {
+        let seconds = Int(interval)
         return "\(seconds / 60):\(String(format: "%02d", seconds % 60))"
     }
 
@@ -255,10 +256,10 @@ struct WatchRestBar: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(alignment: .leading, spacing: 4) {
-                if rest.isComplete(at: context.date) {
+                if execution.restIsComplete(at: context.date) {
                     Text("Rest complete").font(.subheadline)
                 } else {
-                    let remaining = Int(rest.remaining(at: context.date).rounded(.up))
+                    let remaining = Int((execution.restRemaining(at: context.date) ?? 0).rounded(.up))
                     Text("Rest \(remaining / 60):\(String(format: "%02d", remaining % 60))")
                         .font(.subheadline)
                         .monospacedDigit()

@@ -312,6 +312,9 @@ public struct WorkoutDetail: Codable, Identifiable {
     public let elapsedSeconds: Int?
     public let sessionRpe: Double?
     public let startedAt: String?
+    /// Who owns this session. Missing means ownership cannot be confirmed, which is never
+    /// permission to write.
+    public let ownerDeviceId: String?
 
     public init(
         workoutId: String,
@@ -324,7 +327,8 @@ public struct WorkoutDetail: Codable, Identifiable {
         forms: [WorkoutForm]?,
         elapsedSeconds: Int?,
         sessionRpe: Double?,
-        startedAt: String?
+        startedAt: String?,
+        ownerDeviceId: String? = nil
     ) {
         self.workoutId = workoutId
         self.prescriptionId = prescriptionId
@@ -337,6 +341,7 @@ public struct WorkoutDetail: Codable, Identifiable {
         self.elapsedSeconds = elapsedSeconds
         self.sessionRpe = sessionRpe
         self.startedAt = startedAt
+        self.ownerDeviceId = ownerDeviceId
     }
 
     public var id: String { workoutId }

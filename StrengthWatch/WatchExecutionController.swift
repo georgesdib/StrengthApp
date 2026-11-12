@@ -24,6 +24,7 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var liveness = WatchLivenessPolicy()
     @Published private(set) var planUpdated = false
     @Published private(set) var offPlanNoted = false
+    @Published private(set) var canLeaveExercise = true
 
     private let credentialStore: WatchCredentialStore
     private let engine: WatchExecutionEngine
@@ -114,6 +115,19 @@ final class WatchExecutionController: ObservableObject {
     /// Server-adjusted elapsed time for the session screen.
     func elapsed(at date: Date) -> TimeInterval {
         engine.sessionRecord?.elapsedSeconds(at: date) ?? 0
+    }
+
+    /// Set duration and rest countdown use the same clock domain as their timestamps.
+    func setDuration(at date: Date) -> TimeInterval {
+        engine.setDuration(at: date)
+    }
+
+    func restRemaining(at date: Date) -> TimeInterval? {
+        engine.restRemaining(at: date)
+    }
+
+    func restIsComplete(at date: Date) -> Bool {
+        engine.restIsComplete(at: date)
     }
 
     // MARK: - Start
@@ -395,6 +409,7 @@ final class WatchExecutionController: ObservableObject {
         exerciseItemIndex = engine.exerciseItemIndex
         planUpdated = engine.planUpdated
         offPlanNoted = engine.sessionRecord?.offPlanNoted ?? false
+        canLeaveExercise = engine.canLeaveExercise
         isOffline = engine.network == .offline
         lastError = engine.lastError
     }

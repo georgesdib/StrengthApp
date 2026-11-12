@@ -166,6 +166,22 @@ Completed 2026-11-12 (client) against the new execution envelope.
 - **Config deferral**: a home-server change waits while a session is active or work is queued
   (contract §7.8) and is retried when the watch is free.
 
+## Phase 6.4 corrective fixes — 2026-11-12
+
+- **Exercise navigation gate:** an exercise is active from its first started set until End
+  exercise; `selectItem` refuses a different exercise and `clearSelection` refuses while one is
+  active, so no UI path can bypass it. Ending an exercise during an unlogged set cancels that set
+  and drops its start event.
+- **Single-flight flush:** the engine owns a flush task; concurrent callers await it, and one
+  follow-up pass runs when work was queued during the pass. No operation is submitted twice.
+- **Revision after commit, not after drain:** a newer revision is applied as soon as no set is
+  active, even with queued operations; only an active set defers it.
+- **One clock domain:** set duration, rest countdown and completion are computed against the
+  persisted server offset, like session elapsed time.
+- **Ownership fails closed:** missing owner or missing device identity is read-only, queued work is
+  kept, and confirmed ownership restores writing. A start response without a confirmed owner is
+  read-only rather than writable.
+
 ## Verification
 
 ```bash

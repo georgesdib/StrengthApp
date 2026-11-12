@@ -271,6 +271,279 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertEqual(added, 15)
     }
 
+    // MARK: - Phase 6.4 corrective fixes
+
+    func testAnActiveExerciseCannotBeLeftUntilItIsEnded() async throws {
+        let transport = AsyncStubTransport { _ in (200, Data(Self.twoItemWorkout.utf8)) }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet(loadKg: 140, reps: 5)
+
+        XCTAssertFalse(engine.canLeaveExercise)
+        try engine.clearSelection()
+        XCTAssertEqual(engine.selectedItem?.orderIndex, 0, "the list stays out of reach")
+        try engine.selectItem(1)
+        XCTAssertEqual(engine.selectedItem?.orderIndex, 0, "another exercise cannot be opened")
+    }
+
+    func testTheRestrictionHoldsBetweenSetsAndAfterLogging() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Self.twoItemWorkout.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet(loadKg: 140, reps: 5)
+        _ = await engine.logSet(entry(setIndex: 1), session: session())
+
+        XCTAssertNil(engine.activeSet, "the set is logged")
+        XCTAssertFalse(engine.canLeaveExercise, "the exercise is still active between sets")
+        try engine.clearSelection()
+        XCTAssertEqual(engine.selectedItem?.orderIndex, 0)
+    }
+
+    func testEndingTheExerciseReleasesTheListAndAllowsTheNextOne() async throws {
+        let transport = AsyncStubTransport { _ in (200, Data(Self.twoItemWorkout.utf8)) }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet(loadKg: 140, reps: 5)
+
+        try engine.doneWithExercise()
+
+        XCTAssertTrue(engine.canLeaveExercise)
+        XCTAssertNil(engine.selectedItem)
+        XCTAssertNil(engine.activeSet)
+        try engine.selectItem(1)
+        try engine.beginSet(loadKg: 100, reps: 8)
+        XCTAssertEqual(engine.selectedItem?.orderIndex, 1)
+        XCTAssertEqual(engine.activeSet?.planItemIndex, 1)
+    }
+
+    func testConcurrentFlushesSubmitEachOperationOnce() async throws {
+        final class Mode { var failing = true; var setRequests = 0 }
+        let mode = Mode()
+        let gate = TestGate()
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Self.twoItemWorkout.utf8))
+            }
+            if request.url?.path.hasSuffix("/execution-events") == true {
+                return (200, Data(Self.eventsAccepted.utf8))
+            }
+            if request.url?.path.hasSuffix("/sets") == true {
+                mode.setRequests += 1
+                if mode.failing { throw APIError.transport("offline") }
+                await gate.wait()
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        _ = await engine.logSet(entry(setIndex: 1), session: session())
+        XCTAssertEqual(engine.pendingCount, 1)
+
+        mode.failing = false
+        mode.setRequests = 0
+        async let first = engine.flush(session: session())
+        async let second = engine.flush(session: session())
+        // Let both flushes reach the blocked set request, then release it.
+        for _ in 0..<200 where mode.setRequests == 0 {
+            await Task.yield()
+        }
+        await gate.openGate()
+        _ = await (first, second)
+
+        XCTAssertEqual(engine.pendingCount, 0)
+        XCTAssertEqual(mode.setRequests, 1, "one submission for the single queued set")
+    }
+
+    func testRevisionAppliesAfterAnOfflineSetEvenWithQueuedWork() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(revision: 1, loadKg: 150).utf8))
+            }
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet(loadKg: 140, reps: 5)
+
+        _ = await engine.reconcile(session: session())
+        XCTAssertTrue(engine.planUpdated, "held while the set is active")
+        XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 140)
+
+        _ = await engine.logSet(entry(setIndex: 1), session: session())
+
+        XCTAssertEqual(engine.pendingCount, 1, "the set is still queued")
+        XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 150, "the revision applied anyway")
+        XCTAssertFalse(engine.planUpdated)
+        guard case .addSet(let queued)? = try store.load().operations.first(where: {
+            $0.kind == .addSet
+        })?.body else {
+            return XCTFail("the offline set is preserved")
+        }
+        XCTAssertEqual(queued.planItemIndex, 0)
+        XCTAssertNotNil(queued.performedAt)
+    }
+
+    func testCancellingTheActiveSetAlsoAppliesTheDeferredRevision() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(revision: 1, loadKg: 150).utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet(loadKg: 140, reps: 5)
+        _ = await engine.reconcile(session: session())
+        XCTAssertTrue(engine.planUpdated)
+
+        try engine.cancelActiveSet()
+
+        XCTAssertNil(engine.activeSet)
+        XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 150)
+        XCTAssertFalse(engine.planUpdated)
+    }
+
+    func testExecutionEnvelopeDecodesTheOwner() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let payload = Self.executionPayload(owner: "watch-1", revision: 1)
+        let response = try decoder.decode(
+            ExecutionAnalyticsResponse.self, from: Data(payload.utf8)
+        )
+        XCTAssertEqual(response.ownerDeviceId, "watch-1", payload)
+        XCTAssertEqual(response.planRevision, 1)
+        XCTAssertNotNil(response.plan)
+    }
+
+    func testSetDurationAndRestUseTheServerClock() throws {
+        let serverStart = Date(timeIntervalSince1970: 1_800_000_000)
+        for offset in [0.0, 300.0, -300.0] {
+            var record = WatchSessionRecord(
+                sessionUUID: "session-\(offset)",
+                startedAt: serverStart,
+                clockOffsetSeconds: offset
+            )
+            record.activeSet = ActiveSet(
+                localSetID: "set-1", planItemIndex: 0, setIndex: 1, startedAt: serverStart
+            )
+            record.rest = RestInterval(startedAt: serverStart, prescribedSeconds: 120)
+            // Sixty server seconds after the start, expressed in the local clock.
+            let localNow = serverStart.addingTimeInterval(60 - offset)
+
+            XCTAssertEqual(record.serverNow(at: localNow), serverStart.addingTimeInterval(60))
+            XCTAssertEqual(
+                record.setDuration(setStartedAt: serverStart, at: localNow), 60, accuracy: 0.01,
+                "set duration with offset \(offset)"
+            )
+            XCTAssertEqual(
+                record.restRemaining(at: localNow) ?? -1, 60, accuracy: 0.01,
+                "rest countdown with offset \(offset)"
+            )
+            XCTAssertFalse(record.restIsComplete(at: localNow))
+            XCTAssertTrue(
+                record.restIsComplete(at: serverStart.addingTimeInterval(121 - offset)),
+                "rest finishes on time with offset \(offset)"
+            )
+        }
+    }
+
+    func testMissingOwnershipIsNeverPermissionToWrite() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(owner: nil).utf8))
+            }
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        _ = await engine.logSet(entry(setIndex: 1), session: session())
+        XCTAssertEqual(engine.pendingCount, 1)
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+        XCTAssertEqual(engine.pendingCount, 1, "queued work is preserved")
+        let result = await engine.logSet(entry(setIndex: 2), session: session())
+        XCTAssertFalse(result.persisted)
+    }
+
+    func testMissingDeviceIdentityIsReadOnly() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(owner: "watch-1").utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        let anonymous = IOSSession(baseURL: URL(string: "http://home.local:8000")!, token: "token")
+        _ = await engine.start(issuedPlanID: "plan-1", session: anonymous)
+
+        _ = await engine.reconcile(session: anonymous)
+
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+    }
+
+    func testStartWithoutConfirmedOwnershipIsReadOnly() async throws {
+        let json = Fixtures.workoutInProgress.replacingOccurrences(
+            of: "\"owner_device_id\": \"watch-1\",", with: ""
+        )
+        let transport = AsyncStubTransport { _ in (200, Data(json.utf8)) }
+        let engine = makeEngine(transport: transport)
+
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+        XCTAssertNotNil(engine.workout, "the session is kept, not discarded")
+    }
+
+    func testReconciliationRestoresWritabilityAfterOwnershipIsConfirmed() async throws {
+        final class OwnerBox {
+            var value: String?
+            var requests = 0
+            var seen: [String] = []
+        }
+        let box = OwnerBox()
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                box.requests += 1
+                box.seen.append(box.value ?? "nil")
+                return (200, Data(Self.executionPayload(owner: box.value).utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        _ = await engine.reconcile(session: session())
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+
+        box.value = "watch-1"
+        _ = await engine.reconcile(session: session())
+        XCTAssertEqual(
+            engine.phase, WatchExecutionPhase.active,
+            "error=\(engine.lastError ?? "nil") requests=\(box.requests) seen=\(box.seen)"
+        )
+    }
+
     // MARK: - Reconciliation
 
     func testReconciliationKeepsAnOwnedInProgressSessionActive() async throws {
@@ -469,7 +742,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertNil(engine.exerciseItemIndex)
     }
 
-    func testSwitchingExerciseClosesTheOneThatStarted() async throws {
+    func testSwitchingExerciseIsBlockedUntilTheActiveOneEnds() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {
                 return (200, Data(Self.twoItemWorkout.utf8))
@@ -482,15 +755,25 @@ final class WatchExecutionEngineTests: XCTestCase {
         try engine.beginSet(loadKg: 140, reps: 5)
 
         try engine.selectItem(1)
+        XCTAssertEqual(engine.selectedItem?.orderIndex, 0, "the active exercise wins")
+        XCTAssertEqual(engine.exerciseItemIndex, 0)
 
+        try engine.doneWithExercise()
+        try engine.selectItem(1)
+        try engine.beginSet(loadKg: 100, reps: 8)
         XCTAssertEqual(engine.selectedItem?.orderIndex, 1)
-        XCTAssertNil(engine.exerciseItemIndex, "left the first exercise")
+        XCTAssertEqual(engine.exerciseItemIndex, 1)
+
         let capture = try store.load()
         let types = capture.operations.flatMap { operation -> [ExecutionEventType] in
             guard case .executionEvents(let events) = operation.body else { return [] }
             return events.map(\.eventType)
         }
-        XCTAssertEqual(types, [.exerciseStarted, .setStarted, .exerciseCompleted])
+        // Ending an exercise during an unlogged set cancels that set, so its start event is gone.
+        XCTAssertEqual(types, [
+            .exerciseStarted, .exerciseCompleted,
+            .exerciseStarted, .setStarted,
+        ])
     }
 
     func testBackToListClearsTheSelection() async throws {
@@ -608,6 +891,7 @@ final class WatchExecutionEngineTests: XCTestCase {
             ),
             session: session()
         )
+        try engine.doneWithExercise()
         try engine.selectItem(1)
         try engine.beginSet(loadKg: 100, reps: 8)
         try engine.doneWithExercise()
@@ -619,10 +903,10 @@ final class WatchExecutionEngineTests: XCTestCase {
         }
         XCTAssertEqual(events.map(\.eventType), [
             .exerciseStarted, .setStarted, .setCompleted,
-            .exerciseCompleted, .exerciseStarted, .setStarted,
+            .exerciseCompleted, .exerciseStarted,
             .exerciseCompleted,
         ])
-        XCTAssertEqual(events.map(\.planItemIndex), [0, 0, 0, 0, 1, 1, 1])
+        XCTAssertEqual(events.map(\.planItemIndex), [0, 0, 0, 0, 1, 1])
     }
 
     // MARK: - Finish and discard
@@ -725,6 +1009,7 @@ final class WatchExecutionEngineTests: XCTestCase {
       },
       "sets": [],
       "forms": [],
+      "owner_device_id": "watch-1",
       "started_at": "2026-11-07T16:00:00+00:00"
     }
     """#

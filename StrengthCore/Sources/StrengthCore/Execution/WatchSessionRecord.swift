@@ -83,10 +83,32 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         clockOffsetSeconds.map(ServerClock.init(offset:))
     }
 
+    /// The session's clock domain: every timestamp stored for this session was captured in
+    /// server-adjusted terms, so all durations must be measured with this now.
+    public func serverNow(at local: Date) -> Date {
+        clock?.serverNow(from: local) ?? local
+    }
+
     /// Elapsed session time measured in server-adjusted terms, so a fast or slow watch clock
     /// cannot distort it (contract §8).
     public func elapsedSeconds(at local: Date) -> TimeInterval {
-        let now = clock?.serverNow(from: local) ?? local
-        return max(0, now.timeIntervalSince(startedAt))
+        max(0, serverNow(at: local).timeIntervalSince(startedAt))
+    }
+
+    /// Duration of the set in progress, in the same clock domain as its `startedAt`.
+    public func setDuration(setStartedAt: Date, at local: Date) -> TimeInterval {
+        max(0, serverNow(at: local).timeIntervalSince(setStartedAt))
+    }
+
+    /// Remaining rest, measured against a server-adjusted now so a non-zero offset cannot finish
+    /// a rest early or extend it.
+    public func restRemaining(at local: Date) -> TimeInterval? {
+        guard let rest, rest.isOpen else { return nil }
+        return rest.remaining(at: serverNow(at: local))
+    }
+
+    public func restIsComplete(at local: Date) -> Bool {
+        guard let rest, rest.isOpen else { return false }
+        return rest.isComplete(at: serverNow(at: local))
     }
 }

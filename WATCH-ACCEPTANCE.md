@@ -1,4 +1,4 @@
-# Phase 6.2b/6.2c watch acceptance — owner-run
+# Watch acceptance — owner-run (6.2b–6.7)
 
 **Status: not yet performed.** This script is for the owner's physical iPhone + Apple Watch. A
 simulator build is not proof of WatchConnectivity delivery, Keychain isolation or watch installation.
@@ -146,8 +146,8 @@ suspension or the Digital Crown.
       values; the list counts it without changing the prescription.
 - [ ] **End exercise** returns to the list with the completed sets; starting exercise 2 before
       exercise 1 works and the server's telemetry shows both blocks separately.
-- [ ] The phone adds or removes an exercise: the watch's list does not change (read-only until
-      6.6), and nothing on the watch breaks.
+- [ ] The phone adds or removes an exercise: as of 6.6 the watch's plan refreshes at the next
+      idle point (see W4/W5); nothing on the watch breaks.
 - [ ] Let the countdown reach zero: it reads **Rest complete** and **End rest** is still there.
       Nothing closes the rest by itself.
 - [ ] Start the next set without ending the rest: the rest closes at that moment and the set is
@@ -251,3 +251,131 @@ suspension or the Digital Crown.
       **Effort was not saved** without retrying the workout.
 - [ ] Leave the watch still with HR shown: the value disappears within ~30 seconds when readings
       stop, and never shows 0 for "no data".
+
+
+
+---
+
+# Phase 6.6/6.7 watch acceptance checklist — pending
+
+**Status: not yet run.** Script prepared 2026-11-12 against the Phase 6.6 corrections. Automated
+coverage is listed in [WATCH-6.6-PLAN.md](docs/WATCH-6.6-PLAN.md) and contract §17; the steps below
+are the physical half. Run on the Ultra, fill in the sign-off table, and record the build SHA and
+date. Nothing here may be claimed from simulator evidence.
+
+## Before you start
+
+- [ ] Development server is reachable on the home LAN; `watch_enabled: true`; migration 0058 applied.
+- [ ] Phone paired; watch paired and listed as the one active watch device; HealthKit workout
+      authorisation granted on the watch.
+- [ ] Seed today's plan through the API with `execution_target: watch` (not the UI), and keep the
+      phone app closed except where a step needs it.
+- [ ] A watch-owned session has not already been left idle; abandon or finish any leftover session
+      so the 24h abandonment path cannot interfere.
+- [ ] Record the StrengthApp commit SHA under test before starting.
+
+## W1 — Delayed or failed credential delivery (§17.1)
+
+- [ ] Fresh pair; the watch shows the Today plan once and settles on `Paired` without churn.
+- [ ] Revoke the watch from the phone; the watch reports credentials missing and stops fetching.
+- [ ] Re-pair; the watch recovers, and the server lists exactly one active watch device.
+
+## W2 — Relaunch with pending sets (§17.2)
+
+- [ ] Start a watch session, disable the watch's network, and log three sets.
+- [ ] Force-quit the watch app and relaunch it; the three sets show as pending, in order.
+- [ ] Restore the network; the sets flush in their original order with no duplicates, and the
+      pending badge clears only after acknowledgement.
+
+## W3 — Backgrounding mid-workout (§17.3)
+
+- [ ] With the session and heart rate running, background the watch app for at least three minutes.
+- [ ] Return, log a set: the rest timer, set timer and elapsed time are correct, and heart rate resumes.
+
+## W4 — Phone plan edit while the watch is offline (§17.4)
+
+- [ ] Offline on the watch, swap an unstarted item and change a set count on the phone.
+- [ ] Reconnect: pending sets flush first, then the revision applies ("Plan updated"), never mid-set.
+- [ ] Repeat against the item the watch already logged a set against: the server answers
+      `plan_item_mismatch`, the set survives as off-plan with its performed exercise, and the
+      telemetry keeps the original plan-item index.
+
+## W5 — Active session, refresh and reconnect (6.6 / §13)
+
+- [ ] Start a set, then open **Plan**: the same exercise and running set remain; Plan shows
+      completed, current and upcoming rows and offers no way to select or log.
+- [ ] Try to switch exercise from Plan: it is impossible; **End exercise** is still required.
+- [ ] Tap **Refresh** on Set and on Session with queued work: the queue flushes before the plan
+      updates; a failed flush keeps the queue, shows the error and does not apply a snapshot.
+- [ ] Drop Wi-Fi, log a set, reconnect: the set flushes once and the authoritative snapshot is
+      reconciled once.
+- [ ] Seed a stale session (lowered threshold or seeded last activity): the advisory warning is
+      visible on Set, Session and Plan and does not block logging.
+- [ ] Abandon the session from the phone: the watch says **Workout abandoned elsewhere** (no raw
+      status), keeps the local set count and offers **Clear record**.
+- [ ] Session shows elapsed, completed/pending sets, provisional volume, sync/error state,
+      **Refresh**, **Retry sync**, **Undo last set**, next exercise and **Finish**.
+- [ ] Phone mirror: the form section is disabled and says ratings are recorded on the watch; a
+      phone rating attempt is rejected and never enters the offline queue.
+
+## W6 — Take-over and read-only state (§17.6)
+
+- [ ] While the watch is mid-session, take over logging on the phone and confirm.
+- [ ] The phone logs a set successfully; the watch turns read-only, refuses a set write, and no
+      captured set is lost.
+
+## W7 — HealthKit finish without duplication (§17.7)
+
+- [ ] Finish with sRPE: the server session completes, and HealthKit holds exactly one strength
+      workout with heart rate, real start/end and effort.
+- [ ] Repeat, force-quitting after finish but before the save settles; relaunching still yields
+      exactly one workout with the same external UUID.
+
+## W8 — Clock skew (§17.8)
+
+- [ ] Set the paired iPhone's clock five minutes fast (the watch follows), log and finish a session.
+- [ ] The session, its sets and the telemetry timeline keep the times the sets were performed.
+
+## W10 — Execution target (§17.10)
+
+- [ ] A phone-targeted plan is not listed on the watch and cannot be started there.
+- [ ] A watch-targeted plan shows the phone notice and no phone Start button.
+
+## W11 — Patchy Wi-Fi (§17.11)
+
+- [ ] Drop the network several times mid-session: each drop queues, each return partially flushes,
+      and no operation is cleared before acknowledgement.
+- [ ] Finish offline, reconnect after two minutes: server matches the watch — same sets, same
+      timestamps, one finish, no duplicates.
+
+## W12 — Home config refresh (§17.12)
+
+- [ ] With no session and an empty outbox, change the home URL on the phone: the watch applies the
+      new `configVersion` and keeps its token.
+- [ ] With an active session or queued operations, the change is deferred and the old-URL queue
+      flushes first; the watch never follows the phone's Away route.
+
+## R — Rollback dry run (approved for the development server)
+
+- [ ] Set `watch_enabled: false` and stop minting watch devices; confirm a new watch plan cannot be
+      issued and the watch degrades cleanly, with the phone unaffected.
+- [ ] Re-enable, re-pair and confirm the watch recovers; record what the watch and phone showed.
+
+## Sign-off
+
+| Check | Result | Notes |
+|---|---|---|
+| W1 credential delivery | pending | |
+| W2 relaunch with pending sets | pending | |
+| W3 backgrounding | pending | |
+| W4 phone edit while offline | pending | |
+| W5 active session/refresh/reconnect | pending | |
+| W6 take-over and read-only | pending | |
+| W7 HealthKit exactly once | pending | |
+| W8 clock skew | pending | |
+| W10 execution target | pending | |
+| W11 patchy Wi-Fi | pending | |
+| W12 home config refresh | pending | |
+| R rollback dry run | pending | |
+
+Owner confirmation: pending · Build: 6.6/6.7 corrections · Device: Apple Watch Ultra 4, watchOS 27.x

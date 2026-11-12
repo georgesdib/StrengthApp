@@ -5,6 +5,7 @@ import SwiftUI
 struct WatchExerciseView: View {
     @ObservedObject var execution: WatchExecutionController
     @Binding var showingSession: Bool
+    @Binding var showingPlan: Bool
 
     @State private var loadKg = 0.0
     @State private var reps = 5
@@ -30,6 +31,15 @@ struct WatchExerciseView: View {
                     WatchRestBar(execution: execution, rest: rest)
                 }
 
+                Button {
+                    Task { await execution.reconcileNow() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                        .font(.footnote)
+                }
+                .accessibilityIdentifier("watch-refresh-exercise")
+
+                WatchStaleWarning(isStale: execution.isStale)
                 if execution.planUpdated {
                     Text("Plan updated")
                         .font(.caption2)
@@ -76,6 +86,12 @@ struct WatchExerciseView: View {
                 Text(exerciseName(item))
                     .font(.headline)
                 Spacer()
+                Button {
+                    showingPlan = true
+                } label: {
+                    Image(systemName: "list.bullet")
+                }
+                .accessibilityIdentifier("watch-plan")
                 Button {
                     showingSession = true
                 } label: {

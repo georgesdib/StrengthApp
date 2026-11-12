@@ -4,6 +4,7 @@ import SwiftUI
 struct WatchExecutionView: View {
     @ObservedObject var execution: WatchExecutionController
     @State private var showingSession = false
+    @State private var showingPlan = false
 
     var body: some View {
         Group {
@@ -28,14 +29,25 @@ struct WatchExecutionView: View {
                 WatchEndedView(execution: execution, reason: reason)
             default:
                 if execution.selectedItem == nil {
-                    WatchExerciseListView(execution: execution, showingSession: $showingSession)
+                    WatchExerciseListView(
+                        execution: execution,
+                        showingSession: $showingSession,
+                        showingPlan: $showingPlan
+                    )
                 } else {
-                    WatchExerciseView(execution: execution, showingSession: $showingSession)
+                    WatchExerciseView(
+                        execution: execution,
+                        showingSession: $showingSession,
+                        showingPlan: $showingPlan
+                    )
                 }
             }
         }
         .sheet(isPresented: $showingSession) {
             WatchSessionSheet(execution: execution)
+        }
+        .sheet(isPresented: $showingPlan) {
+            WatchPlanView(execution: execution)
         }
     }
 }
@@ -65,19 +77,29 @@ struct WatchSessionSheet: View {
                         .font(.title3)
                         .monospacedDigit()
                 }
-                Text("Sets \(execution.completedSetCount) of \(plannedSets)")
+                Text("Sets \(execution.completedSetCount) done · \(max(0, plannedSets - execution.completedSetCount)) remaining")
                     .font(.caption)
-                Text("Volume \(Int(execution.tonnageKg)) kg\(execution.pendingCount > 0 ? " (provisional)" : "")")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                if execution.pendingCount > 0 {
-                    Text("\(execution.pendingCount) pending")
+                if execution.pendingSetCount > 0 {
+                    Text("\(execution.pendingSetCount) sets pending")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
-                Text(execution.isOffline ? "Offline" : "Home server")
+                Text("Volume \(Int(execution.tonnageKg)) kg\(execution.pendingCount > 0 ? " (provisional)" : "")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if let next = execution.nextExerciseName {
+                    Text("Next: \(next)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                WatchStaleWarning(isStale: execution.isStale)
+                Text(execution.isOffline ? "Offline — changes stay on the watch" : "Connected to home server")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if execution.isWorking {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
                 if let banner = execution.liveness.banner {
                     Text(banner)
                         .font(.caption2)
@@ -88,6 +110,11 @@ struct WatchSessionSheet: View {
                         .font(.caption2)
                         .foregroundStyle(.red)
                 }
+                Button("Refresh") {
+                    Task { await execution.reconcileNow() }
+                }
+                .font(.footnote)
+                .accessibilityIdentifier("watch-session-refresh")
                 Button("Retry sync") {
                     Task { await execution.flushNow() }
                 }
@@ -223,15 +250,16 @@ struct WatchReadOnlyView: View {
 
 struct WatchEndedView: View {
     @ObservedObject var execution: WatchExecutionController
-    var reason: String
+    var reason: WatchEndedReason
     @State private var confirmingClear = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Session ended elsewhere")
+                Text(reason.title)
                     .font(.headline)
-                Text(reason)
+                    .accessibilityIdentifier("watch-ended-title")
+                Text(reason.message)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text("\(execution.completedSetCount) sets were recorded on this watch.")

@@ -1,5 +1,40 @@
 import Foundation
 
+/// Why the server-side session is no longer writable. The raw server status is never shown to the
+/// lifter; the view renders a stable, explicit message for each case.
+public enum WatchEndedReason: Equatable, Sendable {
+    case completed
+    case abandoned
+    case unavailable
+
+    public init(status: String) {
+        switch status.lowercased() {
+        case "completed": self = .completed
+        case "abandoned": self = .abandoned
+        default: self = .unavailable
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .completed: return "Workout completed elsewhere"
+        case .abandoned: return "Workout abandoned elsewhere"
+        case .unavailable: return "Workout ended elsewhere"
+        }
+    }
+
+    public var message: String {
+        switch self {
+        case .completed:
+            return "This workout was completed on another device. The sets recorded on this watch are preserved locally."
+        case .abandoned:
+            return "This workout was abandoned on another device. The sets recorded on this watch are preserved locally."
+        case .unavailable:
+            return "This workout is no longer active on the server. The sets recorded on this watch are preserved locally."
+        }
+    }
+}
+
 public enum WatchExecutionPhase: Equatable, Sendable {
     case ready
     case starting
@@ -10,11 +45,42 @@ public enum WatchExecutionPhase: Equatable, Sendable {
     /// The phone took ownership; the watch shows the session but cannot write.
     case readOnly
     /// The server completed, abandoned or lost the workout; the snapshot is a preserved record.
-    case ended(String)
+    case ended(WatchEndedReason)
 }
 
 /// The outcome of one flush pass. The caller decides when to try again; the engine never
 /// schedules its own timer.
+/// One read-only row on the active-session Plan screen. It carries no action.
+public struct WatchPlanRow: Identifiable, Equatable, Sendable {
+    public enum Status: Equatable, Sendable {
+        case completed
+        case current
+        case upcoming
+    }
+
+    public let orderIndex: Int
+    public let exerciseId: String
+    public let plannedSets: Int
+    public let completedSets: Int
+    public let status: Status
+
+    public init(
+        orderIndex: Int,
+        exerciseId: String,
+        plannedSets: Int,
+        completedSets: Int,
+        status: Status
+    ) {
+        self.orderIndex = orderIndex
+        self.exerciseId = exerciseId
+        self.plannedSets = plannedSets
+        self.completedSets = completedSets
+        self.status = status
+    }
+
+    public var id: Int { orderIndex }
+}
+
 public enum WatchFlushStop: Equatable, Sendable {
     case nothingToSend
     case allSent
@@ -145,6 +211,52 @@ public final class WatchExecutionEngine {
         workout?.plan?.items ?? []
     }
 
+    /// Read-only plan rows for the active-session Plan screen. Reading them never changes the
+    /// selection, active set or execution phase, so opening Plan cannot disturb the workout.
+    public var planRows: [WatchPlanRow] {
+        let current = sessionRecord?.selectedItemIndex
+        return planItems.enumerated().map { position, item in
+            let identity = item.orderIndex ?? position
+            let planned = item.sets ?? 0
+            let completed = setsDone(planItemIndex: identity)
+            let status: WatchPlanRow.Status
+            if identity == current {
+                status = .current
+            } else if planned > 0, completed >= planned {
+                status = .completed
+            } else {
+                status = .upcoming
+            }
+            return WatchPlanRow(
+                orderIndex: identity,
+                exerciseId: item.exerciseId ?? "exercise",
+                plannedSets: planned,
+                completedSets: completed,
+                status: status
+            )
+        }
+    }
+
+    /// The next unfinished item after the current one, falling back to the first unfinished item
+    /// when the current exercise is the last one. Read-only; it never changes the selection.
+    public var nextPlanItem: PrescriptionItem? {
+        let items = planItems
+        guard !items.isEmpty else { return nil }
+        let current = sessionRecord?.selectedItemIndex
+        let start = current.flatMap { index in
+            items.firstIndex { ($0.orderIndex ?? -1) == index }.map { $0 + 1 }
+        } ?? 0
+        let ordered: [PrescriptionItem]
+        if start <= 0 || start >= items.count {
+            ordered = items
+        } else {
+            ordered = Array(items[start...]) + Array(items[..<start])
+        }
+        return ordered.first {
+            setsDone(planItemIndex: $0.orderIndex ?? -1) < ($0.sets ?? 0)
+        }
+    }
+
     public var activeSet: ActiveSet? {
         sessionRecord?.activeSet
     }
@@ -253,7 +365,14 @@ public final class WatchExecutionEngine {
         switch phase {
         case .active, .finishing:
             let stop = await flush(session: session)
-            if case .credentialsMissing = stop { return stop }
+            // A failed flush leaves the local queue authoritative: fetching now could apply a
+            // snapshot that does not yet contain the queued work. Only a clean flush may proceed.
+            switch stop {
+            case .allSent, .nothingToSend:
+                break
+            default:
+                return stop
+            }
         case .readOnly, .ended:
             break
         default:
@@ -270,7 +389,7 @@ public final class WatchExecutionEngine {
                 return .credentialsMissing
             case .server(let status, let code, _, _, _)
                 where status == 404 || code == "workout_not_found":
-                phase = .ended("The workout is no longer on the server.")
+                phase = .ended(.unavailable)
                 return .nothingToSend
             default:
                 return transient(api)
@@ -345,7 +464,7 @@ public final class WatchExecutionEngine {
         session: IOSSession
     ) -> WatchFlushStop {
         guard envelope.status == "in_progress" else {
-            phase = .ended(envelope.status)
+            phase = .ended(WatchEndedReason(status: envelope.status))
             return .nothingToSend
         }
         // Missing ownership is never permission to write (fail closed).
@@ -1093,7 +1212,7 @@ public final class WatchExecutionEngine {
             if code == "not_owner" {
                 phase = .readOnly
             } else if code == "workout_not_active" || code == "workout_not_found" {
-                phase = .ended(code)
+                phase = .ended(.unavailable)
             }
             _ = try? store.updateState(
                 operationId: operation.operationId, state: .conflict, error: text

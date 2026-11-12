@@ -1199,6 +1199,62 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertEqual(model.activeWorkout?.sets?.count, 1)
     }
 
+    func testWatchMirrorRejectsFormBeforeTheOfflineQueue() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mirror-offline-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let offlineStore = OfflineCaptureStore(fileURL: url)
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let workout = try decoder.decode(
+            WorkoutDetail.self, from: Data(Fixtures.watchOwnedWorkout.utf8)
+        )
+        _ = try offlineStore.setActiveWorkout(workout)
+        _ = try offlineStore.record(
+            OfflineOperation(
+                operationId: "pending-set",
+                workoutId: workout.workoutId,
+                body: .addSet(
+                    AddSetRequest(
+                        exerciseId: "competition_squat",
+                        loadKg: 140,
+                        reps: 3,
+                        rir: 2,
+                        velocityMps: nil,
+                        setIndex: 1,
+                        planItemIndex: 0
+                    )
+                ),
+                createdAt: Date(),
+                localSetId: -1
+            ),
+            activeWorkout: workout
+        )
+
+        let transport = StubTransport { _ in (404, Data()) }
+        let (model, defaults, suite, _) = pairedModel(
+            transport: transport,
+            offlineStore: offlineStore
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        XCTAssertTrue(model.isMirroringWatchSession)
+        let before = model.pendingOfflineCount
+        XCTAssertGreaterThan(before, 0)
+
+        let rated = await model.rateForm(
+            FormRatingRequest(exerciseId: "competition_squat", rating: 4, note: nil),
+            idempotencyKey: "mirror-offline-form"
+        )
+
+        XCTAssertFalse(rated)
+        XCTAssertEqual(model.pendingOfflineCount, before, "a mirror must not queue a rating")
+        XCTAssertEqual(
+            model.mutationError,
+            "Form ratings are recorded on the Apple Watch. Take over logging to rate here."
+        )
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

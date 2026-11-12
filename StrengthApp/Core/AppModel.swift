@@ -886,6 +886,8 @@ final class AppModel: ObservableObject {
             offlineTelemetryError = "Execution timing was not recorded because offline recovery needs attention."
             return
         }
+        // A watch-owned session owns its telemetry as well; the phone mirror is read-only.
+        guard !isMirroringWatchSession else { return }
         guard !events.isEmpty, let activeWorkout else { return }
         do {
             offlineCapture = try offlineStore.appendExecutionEvents(
@@ -1384,6 +1386,10 @@ final class AppModel: ObservableObject {
 
     func addSet(_ body: AddSetRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        guard !isMirroringWatchSession else {
+            mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
+            return false
+        }
         if offlineCaptureActive {
             return queueAddSet(body, idempotencyKey: idempotencyKey, workout: workout)
         }
@@ -1423,6 +1429,10 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async -> Bool {
         guard !isSaving, let session else { return false }
+        guard !isMirroringWatchSession else {
+            mutationError = "Sets are recorded on the Apple Watch. Take over logging to change them here."
+            return false
+        }
         guard !offlineCaptureActive else {
             mutationError = "Removing a server-confirmed set requires a connection. Pending local sets can still be removed."
             return false
@@ -1455,6 +1465,12 @@ final class AppModel: ObservableObject {
 
     func rateForm(_ body: FormRatingRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        // Ownership is checked before the offline branch: a mirror must not queue a phone-side
+        // form rating that the server would reject later.
+        guard !isMirroringWatchSession else {
+            mutationError = "Form ratings are recorded on the Apple Watch. Take over logging to rate here."
+            return false
+        }
         if offlineCaptureActive {
             return queueForm(body, idempotencyKey: idempotencyKey, workout: workout)
         }
@@ -1704,6 +1720,10 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        guard !isMirroringWatchSession else {
+            mutationError = "This workout is logged on the Apple Watch. Take over logging to finish it here."
+            return false
+        }
         guard !offlineFinishPending else {
             mutationError = "This workout is already queued for finish."
             return false

@@ -39,6 +39,7 @@ final class WatchExecutionController: ObservableObject {
     private let healthRecorder: WatchHealthKitRecorder?
     private let onCredentialsMissing: @MainActor () -> Void
     private var retryTask: Task<Void, Never>?
+    private var reconcileTask: Task<Void, Never>?
     private var finalizeTask: Task<Void, Never>?
     private var heartRateClearTask: Task<Void, Never>?
     private let pathMonitor = NWPathMonitor()
@@ -143,7 +144,22 @@ final class WatchExecutionController: ObservableObject {
     }
 
     /// Flushes pending work first, then compares ownership, status and revision with the server.
+    /// Single-flight: refresh, reconnect and the post-set refresh share one request.
     func reconcileNow() async {
+        if let inFlight = reconcileTask {
+            await inFlight.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performReconcile()
+            self.reconcileTask = nil
+        }
+        reconcileTask = task
+        await task.value
+    }
+
+    private func performReconcile() async {
         guard let session = currentSession() else {
             credentialsMissing()
             return
@@ -273,6 +289,20 @@ final class WatchExecutionController: ObservableObject {
 
     var planItems: [PrescriptionItem] {
         engine.planItems
+    }
+
+    /// Read-only rows for the active-session Plan screen.
+    var planRows: [WatchPlanRow] {
+        engine.planRows
+    }
+
+    /// Next unfinished exercise from the authoritative plan, displayed on the Session screen.
+    var nextExerciseName: String? {
+        engine.nextPlanItem.map(Self.displayName)
+    }
+
+    var pendingSetCount: Int {
+        engine.pendingSetCount
     }
 
     /// Opens an exercise from the list. Telemetry starts with the first set, not the tap.
@@ -486,7 +516,8 @@ final class WatchExecutionController: ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
             self?.retryTask = nil
-            await self?.flushNow()
+            // A successful retry also reconciles; a failed flush stops before the snapshot.
+            await self?.reconcileNow()
         }
     }
 
@@ -518,7 +549,8 @@ final class WatchExecutionController: ObservableObject {
 
     private func pathBecameAvailable() async {
         guard engine.phase == .active || engine.phase == .finishing else { return }
-        await flushNow()
+        // Reconnect is flush followed by authoritative reconciliation, never a flush alone.
+        await reconcileNow()
     }
 
     /// A restored or recovered session asks HealthKit again, but claims liveness only when the
@@ -544,6 +576,15 @@ final class WatchExecutionController: ObservableObject {
         guard liveness.isRunning else { return }
         await anchor.end(at: Date())
         liveness.reset()
+    }
+
+    nonisolated private static func displayName(_ item: PrescriptionItem) -> String {
+        let id = item.exerciseId ?? ""
+        guard !id.isEmpty else { return "Exercise" }
+        return id
+            .split(separator: "_")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
     }
 
     private func sync() {

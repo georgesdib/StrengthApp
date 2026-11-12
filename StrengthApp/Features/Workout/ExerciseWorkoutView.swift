@@ -113,39 +113,48 @@ struct ExerciseWorkoutView: View {
             }
 
             Section("Form rating") {
-                if let existing = workout?.formRating(for: exerciseId) {
-                    LabeledContent("Current rating", value: "\(existing.rating) / 5")
-                        .accessibilityIdentifier("exercise-form-current")
-                    Text("Saving again records a correction. The earlier rating is retained; the latest is shown here.")
+                if model.isMirroringWatchSession {
+                    Label("Form ratings are recorded on the Apple Watch.", systemImage: "applewatch")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("mirror-form-disabled")
+                    Text("Take over logging to rate form on the phone.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                }
-                Picker("Rating", selection: $rating) {
-                    ForEach(1...5, id: \.self) { value in
-                        Text("\(value)").tag(value)
+                } else {
+                    if let existing = workout?.formRating(for: exerciseId) {
+                        LabeledContent("Current rating", value: "\(existing.rating) / 5")
+                            .accessibilityIdentifier("exercise-form-current")
+                        Text("Saving again records a correction. The earlier rating is retained; the latest is shown here.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("exercise-form-rating")
-                if let formError {
-                    Text(formError).foregroundStyle(.red)
-                }
-                Button {
-                    Task { await saveForm() }
-                } label: {
-                    HStack {
-                        Spacer()
-                        if model.isSaving {
-                            ProgressView()
-                        } else {
-                            Text(workout?.formRating(for: exerciseId) == nil
-                                 ? "Save form rating" : "Save correction")
+                    Picker("Rating", selection: $rating) {
+                        ForEach(1...5, id: \.self) { value in
+                            Text("\(value)").tag(value)
                         }
-                        Spacer()
                     }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("exercise-form-rating")
+                    if let formError {
+                        Text(formError).foregroundStyle(.red)
+                    }
+                    Button {
+                        Task { await saveForm() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if model.isSaving {
+                                ProgressView()
+                            } else {
+                                Text(workout?.formRating(for: exerciseId) == nil
+                                     ? "Save form rating" : "Save correction")
+                            }
+                            Spacer()
+                        }
+                    }
+                    .accessibilityIdentifier("exercise-save-form")
+                    .disabled(model.isSaving)
                 }
-                .accessibilityIdentifier("exercise-save-form")
-                .disabled(model.isSaving || model.isMirroringWatchSession)
             }
 
             if plannedSets > 0 {

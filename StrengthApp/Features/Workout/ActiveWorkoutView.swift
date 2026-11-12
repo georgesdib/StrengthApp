@@ -326,47 +326,56 @@ struct ActiveWorkoutView: View {
                         }
 
                         Section("Form rating") {
-                            Picker("Exercise", selection: $ratingExercise) {
-                                Text("Choose").tag("")
-                                ForEach(exerciseOptions, id: \.self) { id in
-                                    Text(Self.label(id)).tag(id)
-                                }
-                            }
-                            .onChange(of: ratingExercise) { _, id in
-                                rating = workout.formRating(for: id)?.rating ?? 4
-                            }
-                            if let existing = workout.formRating(for: ratingExercise) {
-                                LabeledContent("Current rating", value: "\(existing.rating) / 5")
-                                    .accessibilityIdentifier("form-current-rating")
-                                Text("Saving again records a correction. The earlier rating is retained in the record; the latest is shown here.")
+                            if model.isMirroringWatchSession {
+                                Label("Form ratings are recorded on the Apple Watch.", systemImage: "applewatch")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("mirror-form-disabled")
+                                Text("Take over logging to rate form on the phone.")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
-                                    .accessibilityIdentifier("form-correction-note")
-                            }
-                            Picker("Rating", selection: $rating) {
-                                ForEach(1...5, id: \.self) { value in
-                                    Text("\(value)").tag(value)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            if let error = formError {
-                                Text(error).foregroundStyle(.red)
-                            }
-                            Button {
-                                Task { await saveForm(workout) }
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    if model.isSaving {
-                                        ProgressView()
-                                    } else {
-                                        Text(workout.formRating(for: ratingExercise) == nil ? "Save form rating" : "Save correction")
+                            } else {
+                                Picker("Exercise", selection: $ratingExercise) {
+                                    Text("Choose").tag("")
+                                    ForEach(exerciseOptions, id: \.self) { id in
+                                        Text(Self.label(id)).tag(id)
                                     }
-                                    Spacer()
                                 }
+                                .onChange(of: ratingExercise) { _, id in
+                                    rating = workout.formRating(for: id)?.rating ?? 4
+                                }
+                                if let existing = workout.formRating(for: ratingExercise) {
+                                    LabeledContent("Current rating", value: "\(existing.rating) / 5")
+                                        .accessibilityIdentifier("form-current-rating")
+                                    Text("Saving again records a correction. The earlier rating is retained in the record; the latest is shown here.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityIdentifier("form-correction-note")
+                                }
+                                Picker("Rating", selection: $rating) {
+                                    ForEach(1...5, id: \.self) { value in
+                                        Text("\(value)").tag(value)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                if let error = formError {
+                                    Text(error).foregroundStyle(.red)
+                                }
+                                Button {
+                                    Task { await saveForm(workout) }
+                                } label: {
+                                    HStack {
+                                        Spacer()
+                                        if model.isSaving {
+                                            ProgressView()
+                                        } else {
+                                            Text(workout.formRating(for: ratingExercise) == nil ? "Save form rating" : "Save correction")
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                                .accessibilityIdentifier("save-form")
+                                .disabled(model.isSaving || ratingExercise.isEmpty)
                             }
-                            .accessibilityIdentifier("save-form")
-                            .disabled(model.isSaving || ratingExercise.isEmpty)
                         }
 
                         Section("Finish") {

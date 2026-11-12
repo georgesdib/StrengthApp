@@ -24,6 +24,7 @@ app presents and records that authority.
 - [iOS R8 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R8-CONTRACT.md)
 - [watchOS Phase 6 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
 - [Watch 6.3 execution-lifecycle slice plan](WATCH-6.3-PLAN.md) — client-side slices, files and tests for Phase 6.3; the contract above stays authoritative.
+- [Watch 6.6 active-session plan](WATCH-6.6-PLAN.md) — client-side destinations, refresh/reconnect, ownership corrections and acceptance pointers; the contract above stays authoritative.
 
 Shared server/client phase contracts are canonical in the portfolio `docs/contracts/` directory; backend implementation, migrations and tests stay in the server repository. Do not maintain duplicate contract text here.
 

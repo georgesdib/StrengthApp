@@ -11,8 +11,9 @@ closed. Phase 6.0 (the shared watch core) and 6.1 (the server watch contract) ar
 6.2 is complete and closed 2026-11-10: 6.2a embedded watch target and CI, 6.2b credential/config
 handoff and phone-side Pair/Status/Revoke, and 6.2c read-only Today from the Home server. Phases
 6.3–6.5 add the watch execution lifecycle, offline conflicts and heart rate with one HealthKit
-workout, and 6.6 adds the phone mirror with plan-revision pushes and take-over. Physical Apple
-Watch acceptance remains owner-run.
+workout. 6.6 adds the phone mirror with plan-revision pushes and take-over, the active Set,
+Session and Plan destinations, refresh/reconnect reconciliation, idle and ended-elsewhere
+messaging, and the mirror form controls. Physical Apple Watch acceptance remains owner-run.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active

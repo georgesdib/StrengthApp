@@ -400,7 +400,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertEqual(mode.setRequests, 1, "one submission for the single queued set")
     }
 
-    func testRevisionAppliesAfterAnOfflineSetEvenWithQueuedWork() async throws {
+    func testRevisionIsNotAppliedWhenTheQueueCannotFlush() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(revision: 1, loadKg: 150).utf8))
@@ -416,13 +416,17 @@ final class WatchExecutionEngineTests: XCTestCase {
         try engine.beginSet(loadKg: 140, reps: 5)
 
         _ = await engine.reconcile(session: session())
-        XCTAssertTrue(engine.planUpdated, "held while the set is active")
+        XCTAssertFalse(engine.planUpdated, "a failed flush must not fetch a snapshot")
         XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 140)
 
         _ = await engine.logSet(entry(setIndex: 1), session: session())
 
         XCTAssertEqual(engine.pendingCount, 1, "the set is still queued")
-        XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 150, "the revision applied anyway")
+        XCTAssertEqual(
+            engine.workout?.plan?.items.first?.loadKg,
+            140,
+            "the revision waits for a clean flush"
+        )
         XCTAssertFalse(engine.planUpdated)
         guard case .addSet(let queued)? = try store.load().operations.first(where: {
             $0.kind == .addSet
@@ -437,6 +441,9 @@ final class WatchExecutionEngineTests: XCTestCase {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(revision: 1, loadKg: 150).utf8))
+            }
+            if request.url?.path.hasSuffix("/execution-events") == true {
+                return (200, Data(Self.eventsAccepted.utf8))
             }
             return (200, Data(Self.watchWorkout.utf8))
         }
@@ -503,22 +510,16 @@ final class WatchExecutionEngineTests: XCTestCase {
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(owner: nil).utf8))
             }
-            if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Self.watchWorkout.utf8))
-            }
-            throw APIError.transport("offline")
+            return (200, Data(Self.watchWorkout.utf8))
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
         try engine.selectItem(0)
-        _ = await engine.logSet(entry(setIndex: 1), session: session())
-        XCTAssertEqual(engine.pendingCount, 1)
 
         _ = await engine.reconcile(session: session())
 
         XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
-        XCTAssertEqual(engine.pendingCount, 1, "queued work is preserved")
-        let result = await engine.logSet(entry(setIndex: 2), session: session())
+        let result = await engine.logSet(entry(setIndex: 1), session: session())
         XCTAssertFalse(result.persisted)
     }
 
@@ -628,7 +629,7 @@ final class WatchExecutionEngineTests: XCTestCase {
 
         _ = await engine.reconcile(session: session())
 
-        XCTAssertEqual(engine.phase, WatchExecutionPhase.ended("completed"))
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.ended(.completed))
         XCTAssertNotNil(engine.completedSetCount >= 0 ? engine.workout : nil)
     }
 
@@ -648,6 +649,109 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertTrue(result.persisted, "the set stays local")
         XCTAssertEqual(result.stop, .conflict(code: "not_owner", message: "not yours"))
         XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+    }
+
+    // MARK: - Phase 6.6 corrections
+
+    func testPlanRowsAreReadOnlyAndDoNotBypassTheExerciseLock() async throws {
+        let transport = AsyncStubTransport { _ in (200, Data(Self.twoItemWorkout.utf8)) }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet(loadKg: 140, reps: 5)
+        let active = engine.activeSet
+        let selected = engine.selectedItem?.orderIndex
+
+        let rows = engine.planRows
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0].status, .current)
+        XCTAssertEqual(rows[1].status, .upcoming)
+        XCTAssertEqual(engine.activeSet, active)
+        XCTAssertEqual(engine.selectedItem?.orderIndex, selected)
+        try engine.selectItem(1)
+        XCTAssertEqual(engine.selectedItem?.orderIndex, selected, "Plan cannot switch exercises")
+        XCTAssertEqual(engine.activeSet, active)
+    }
+
+    func testPlanRowsDistinguishCompletedAndNextExercise() async throws {
+        let completedWorkout = Self.twoItemWorkout.replacingOccurrences(
+            of: #""sets": []"#,
+            with: #""sets": [{"set_id": 1, "exercise_id": "competition_squat", "set_index": 1, "plan_item_index": 0, "load_kg": 140.0, "reps": 5, "rir": 2, "source": "manual"}]"#
+        )
+        let transport = AsyncStubTransport { _ in
+            (200, Data(completedWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        let rows = engine.planRows
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0].status, .completed)
+        XCTAssertEqual(rows[1].status, .upcoming)
+        XCTAssertEqual(engine.nextPlanItem?.orderIndex, 1)
+    }
+
+    func testReconcileStopsWhenTheFlushFails() async throws {
+        final class Probe { var fetchedExecution = false }
+        let probe = Probe()
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Self.twoItemWorkout.utf8))
+            }
+            if request.url?.path.hasSuffix("/execution") == true {
+                probe.fetchedExecution = true
+                return (200, Data(Self.executionPayload(loadKg: 150).utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        _ = await engine.logSet(entry(setIndex: 1), session: session())
+        XCTAssertEqual(engine.pendingCount, 1, "the set stays queued with its events")
+
+        let stop = await engine.reconcile(session: session())
+
+        XCTAssertTrue(stop.isRetryable)
+        XCTAssertFalse(probe.fetchedExecution, "a failed flush must not apply a snapshot")
+        XCTAssertEqual(engine.pendingCount, 1)
+        XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 140)
+    }
+
+    func testAbandonedStatusMapsToAnExplicitReason() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(status: "abandoned").utf8))
+            }
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertEqual(engine.phase, .ended(.abandoned))
+        XCTAssertEqual(WatchEndedReason.abandoned.title, "Workout abandoned elsewhere")
+        XCTAssertTrue(WatchEndedReason.abandoned.message.contains("abandoned on another device"))
+        XCTAssertEqual(WatchEndedReason(status: "completed"), .completed)
+    }
+
+    func testStaleFlagFromTheAuthoritativeSnapshotIsExposed() async throws {
+        let payload = Self.executionPayload()
+            .replacingOccurrences(of: #""stale":false"#, with: #""stale":true"#)
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(payload.utf8))
+            }
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertTrue(engine.isStale)
     }
 
     // MARK: - Revision and mismatch
@@ -692,6 +796,8 @@ final class WatchExecutionEngineTests: XCTestCase {
 
         XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 140, "not under the lifter's hands")
         XCTAssertTrue(engine.planUpdated)
+        XCTAssertNotNil(engine.activeSet, "refresh preserves the running set")
+        XCTAssertEqual(engine.selectedItem?.orderIndex, 0, "refresh preserves the exercise")
 
         _ = await engine.logSet(entry(setIndex: 1), session: session())
 

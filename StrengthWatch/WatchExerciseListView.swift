@@ -5,6 +5,7 @@ import SwiftUI
 struct WatchExerciseListView: View {
     @ObservedObject var execution: WatchExecutionController
     @Binding var showingSession: Bool
+    @Binding var showingPlan: Bool
 
     var body: some View {
         ScrollView {
@@ -18,6 +19,12 @@ struct WatchExerciseListView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .accessibilityIdentifier("watch-refresh-plan")
+                    Button {
+                        showingPlan = true
+                    } label: {
+                        Image(systemName: "list.bullet")
+                    }
+                    .accessibilityIdentifier("watch-plan")
                     Button {
                         showingSession = true
                     } label: {
@@ -58,11 +65,7 @@ struct WatchExerciseListView: View {
                     .buttonStyle(.plain)
                 }
 
-                if execution.isStale {
-                    Text("No activity for 3h — the server may abandon this session.")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
+                WatchStaleWarning(isStale: execution.isStale)
                 if execution.planUpdated {
                     Text("Plan updated")
                         .font(.caption2)

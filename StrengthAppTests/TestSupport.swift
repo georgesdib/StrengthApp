@@ -347,6 +347,14 @@ enum Fixtures {
     }
     """#
 
+    /// The same session owned by the watch: the phone must mirror it, not log into it (6.6).
+    static var watchOwnedWorkout: String {
+        workoutInProgress.replacingOccurrences(
+            of: #""owner_device_id": "device-1""#,
+            with: #""owner_device_id": "watch-1""#
+        )
+    }
+
     static let workoutInProgress = #"""
     {
       "workout_id": "workout-1",

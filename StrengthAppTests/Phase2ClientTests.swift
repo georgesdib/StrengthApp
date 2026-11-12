@@ -1141,6 +1141,64 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertEqual(object["execution_target"] as? String, "watch")
     }
 
+    func testWatchOwnedSessionIsReadOnlyOnThePhoneUntilTakeOver() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.watchOwnedWorkout.utf8))
+            case "/api/ios/v1/workouts/workout-1/takeover":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            case "/api/ios/v1/workouts/workout-1/sets":
+                return (200, Data(Fixtures.workoutWithSet.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(readinessAck: false, idempotencyKey: "issue-mirror")
+        let started = await model.startWorkout(idempotencyKey: "start-mirror")
+        XCTAssertTrue(started)
+        XCTAssertTrue(model.isMirroringWatchSession)
+
+        let set = AddSetRequest(
+            exerciseId: "competition_squat", loadKg: 140, reps: 3,
+            rir: 2, velocityMps: 0.62, setIndex: 1, planItemIndex: 0
+        )
+        let added = await model.addSet(set, idempotencyKey: "mirror-set")
+        XCTAssertFalse(added, "the phone must not log into a watch-owned session")
+        XCTAssertEqual(
+            model.mutationError,
+            "Logging is on the Apple Watch. Take over logging to record sets here."
+        )
+        let rated = await model.rateForm(
+            FormRatingRequest(exerciseId: "competition_squat", rating: 4, note: nil),
+            idempotencyKey: "mirror-form"
+        )
+        XCTAssertFalse(rated)
+        XCTAssertFalse(transport.requests.contains {
+            $0.url?.path == "/api/ios/v1/workouts/workout-1/sets"
+        }, "no set may reach the server while mirroring")
+
+        let tookOver = await model.takeOverLogging()
+        XCTAssertTrue(tookOver)
+        XCTAssertFalse(model.isMirroringWatchSession)
+        XCTAssertNil(model.mutationError)
+
+        let addedAfter = await model.addSet(set, idempotencyKey: "mirror-set-after")
+        XCTAssertTrue(addedAfter, "the phone owns the session after take-over")
+        XCTAssertEqual(model.activeWorkout?.sets?.count, 1)
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

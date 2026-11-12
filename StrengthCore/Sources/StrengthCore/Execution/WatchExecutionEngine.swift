@@ -7,6 +7,10 @@ public enum WatchExecutionPhase: Equatable, Sendable {
     case finishing
     case finished
     case abandoned
+    /// The phone took ownership; the watch shows the session but cannot write.
+    case readOnly
+    /// The server completed, abandoned or lost the workout; the snapshot is a preserved record.
+    case ended(String)
 }
 
 /// The outcome of one flush pass. The caller decides when to try again; the engine never
@@ -188,6 +192,71 @@ public final class WatchExecutionEngine {
 
     // MARK: - Restore
 
+    /// Reconciles with the server (contract §10.3/§11.5): flush pending work, then compare
+    /// ownership and status. A newer plan is applied only at an idle point.
+    @discardableResult
+    public func reconcile(session: IOSSession) async -> WatchFlushStop {
+        guard let workoutId = workout?.workoutId else { return .nothingToSend }
+        switch phase {
+        case .active, .finishing:
+            let stop = await flush(session: session)
+            if case .credentialsMissing = stop { return stop }
+        case .readOnly, .ended:
+            break
+        default:
+            return .nothingToSend
+        }
+        do {
+            let envelope = try await client.executionAnalytics(
+                workoutId: workoutId, session: session
+            )
+            return apply(envelope, session: session)
+        } catch let api as APIError {
+            switch api {
+            case .unauthorized, .forbidden:
+                return .credentialsMissing
+            case .server(let status, let code, _, _, _)
+                where status == 404 || code == "workout_not_found":
+                phase = .ended("The workout is no longer on the server.")
+                return .nothingToSend
+            default:
+                return transient(api)
+            }
+        } catch {
+            return transient(error)
+        }
+    }
+
+    /// Drops the local record without touching the server. Used when the session belongs to the
+    /// phone or has already ended.
+    public func clearLocal() {
+        try? store.clear()
+        workout = nil
+        sessionRecord = nil
+        pending = []
+        nextRetryAt = nil
+        lastError = nil
+        phase = .ready
+    }
+
+    private func apply(
+        _ envelope: ExecutionAnalyticsResponse,
+        session: IOSSession
+    ) -> WatchFlushStop {
+        guard envelope.status == "in_progress" else {
+            phase = .ended(envelope.status)
+            return .nothingToSend
+        }
+        if let owner = envelope.ownerDeviceId,
+           let device = session.deviceID,
+           owner != device {
+            phase = .readOnly
+            return .nothingToSend
+        }
+        markOnline(session)
+        return .allSent
+    }
+
     /// Relaunches from the durable record without contacting the server (contract §11.5 is 6.4).
     public func restore() throws {
         let capture = try store.load()
@@ -258,7 +327,7 @@ public final class WatchExecutionEngine {
 
     /// The lifter began a set. This is an explicit observation, never inferred from a screen.
     public func beginSet(loadKg: Double? = nil, reps: Int? = nil) throws {
-        guard let item = selectedItem, let workout else { return }
+        guard phase == .active, let item = selectedItem, let workout else { return }
         let itemIndex = item.orderIndex ?? 0
         let setIndex = setsDone(planItemIndex: itemIndex) + 1
         let stamp = stampedNow()
@@ -327,6 +396,12 @@ public final class WatchExecutionEngine {
     /// closed first, at the same instant, so every rest has one deliberate terminal event.
     @discardableResult
     public func logSet(_ entry: SetEntry, session: IOSSession) async -> CaptureResult {
+        guard phase == .active else {
+            return CaptureResult(
+                persisted: false,
+                stop: .conflict(code: "not_active", message: "This session cannot take sets.")
+            )
+        }
         guard let workout else {
             return CaptureResult(
                 persisted: false,
@@ -450,7 +525,10 @@ public final class WatchExecutionEngine {
 
     @discardableResult
     public func finish(sessionRpe: Double?, session: IOSSession) async -> WatchFlushStop {
-        guard let workoutId = workout?.workoutId, let workout, sessionRecord != nil else {
+        guard phase == .active || phase == .finishing, sessionRecord != nil else {
+            return .conflict(code: "not_active", message: "This session cannot be finished.")
+        }
+        guard let workoutId = workout?.workoutId, let workout else {
             return .conflict(code: "no_workout", message: "There is no active workout.")
         }
         let endedAt = stampedNow()
@@ -532,6 +610,8 @@ public final class WatchExecutionEngine {
     /// removed from the queue only after the server accepted it.
     @discardableResult
     public func flush(session: IOSSession) async -> WatchFlushStop {
+        if case .readOnly = phase { return .nothingToSend }
+        if case .ended = phase { return .nothingToSend }
         let capture: OfflineCapture
         do {
             capture = try store.load()
@@ -678,6 +758,11 @@ public final class WatchExecutionEngine {
             if status == 401 || status == 403 { return .credentialsMissing }
             if status >= 500 || status == 408 || status == 429 {
                 return transient(error)
+            }
+            if code == "not_owner" {
+                phase = .readOnly
+            } else if code == "workout_not_active" || code == "workout_not_found" {
+                phase = .ended(code)
             }
             _ = try? store.updateState(
                 operationId: operation.operationId, state: .conflict, error: text

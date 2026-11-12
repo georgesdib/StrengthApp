@@ -8,13 +8,19 @@ struct StrengthWatchApp: App {
 
     init() {
         let session = WatchSessionController()
+        let execution = WatchExecutionController(
+            onCredentialsMissing: { session.markCredentialsMissing() }
+        )
         _session = StateObject(wrappedValue: session)
         _today = StateObject(wrappedValue: WatchTodayController(
             onCredentialsMissing: { session.markCredentialsMissing() }
         ))
-        _execution = StateObject(wrappedValue: WatchExecutionController(
-            onCredentialsMissing: { session.markCredentialsMissing() }
-        ))
+        _execution = StateObject(wrappedValue: execution)
+        // §7.8: a home-server change waits until the session is finished and the outbox empty.
+        session.canApplyConfig = { [weak execution] in
+            guard let execution else { return false }
+            return execution.phase == .ready && execution.pendingCount == 0
+        }
     }
 
     var body: some Scene {

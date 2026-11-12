@@ -72,6 +72,7 @@ final class WatchExecutionController: ObservableObject {
             authorization = await anchor.authorizationStatus()
             if engine.phase == .active || engine.phase == .finishing {
                 await beginLivenessIfNeeded()
+                await reconcileNow()
             }
         }
     }
@@ -79,7 +80,27 @@ final class WatchExecutionController: ObservableObject {
     func sceneBecameActive() async {
         guard engine.phase == .active || engine.phase == .finishing else { return }
         await beginLivenessIfNeeded()
-        await flushNow()
+        await reconcileNow()
+    }
+
+    /// Flushes pending work first, then compares ownership, status and revision with the server.
+    func reconcileNow() async {
+        guard let session = currentSession() else {
+            credentialsMissing()
+            return
+        }
+        isWorking = true
+        defer { isWorking = false }
+        let stop = await engine.reconcile(session: session)
+        await handle(stop)
+        sync()
+    }
+
+    /// Clears the local record without abandoning the server session (used when the phone owns it
+    /// or the workout ended elsewhere).
+    func clearLocal() {
+        engine.clearLocal()
+        sync()
     }
 
     func sceneWillResign() {

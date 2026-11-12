@@ -69,6 +69,13 @@ public struct ExecutionAnalyticsResponse: Decodable {
     public let status: String
     public let startedAt: String
     public let endedAt: String?
+    /// Session envelope (contract §14): who owns the workout, its plan revision, and whether it
+    /// has gone stale. Older servers omit these, so reconciliation degrades to status-only.
+    public let ownerDeviceId: String?
+    public let planRevision: Int?
+    public let lastActivityAt: String?
+    public let stale: Bool?
+    public let plan: PrescriptionPlan?
     public let totalElapsedS: Double
     public let events: [ExecutionAnalyticsEvent]
     public let sets: [ExecutionAnalyticsSet]

@@ -271,6 +271,76 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertEqual(added, 15)
     }
 
+    // MARK: - Reconciliation
+
+    func testReconciliationKeepsAnOwnedInProgressSessionActive() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(owner: "watch-1").utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        let stop = await engine.reconcile(session: session())
+
+        XCTAssertEqual(stop, .allSent)
+        XCTAssertEqual(engine.phase, .active)
+    }
+
+    func testReconciliationGoesReadOnlyWhenThePhoneOwnsTheSession() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(owner: "phone-1").utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+        let result = await engine.logSet(entry(setIndex: 1), session: session())
+        XCTAssertFalse(result.persisted, "a read-only watch cannot capture")
+        XCTAssertEqual(try store.load().operations.count, 0)
+    }
+
+    func testReconciliationEndsWhenTheServerCompletedTheWorkout() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(status: "completed").utf8))
+            }
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.ended("completed"))
+        XCTAssertNotNil(engine.completedSetCount >= 0 ? engine.workout : nil)
+    }
+
+    func testNotOwnerDuringFlushTurnsTheSessionReadOnly() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            }
+            let body = "{\"error\":\"not yours\",\"code\":\"not_owner\"}"
+            return (409, Data(body.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        let result = await engine.logSet(entry(setIndex: 1), session: session())
+
+        XCTAssertTrue(result.persisted, "the set stays local")
+        XCTAssertEqual(result.stop, .conflict(code: "not_owner", message: "not yours"))
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+    }
+
     // MARK: - Selection
 
     func testSelectingAnExerciseEmitsNothingUntilASetStarts() async throws {
@@ -546,6 +616,30 @@ final class WatchExecutionEngineTests: XCTestCase {
       "started_at": "2026-11-07T16:00:00+00:00"
     }
     """#
+
+    private static func executionPayload(
+        status: String = "in_progress",
+        owner: String? = "watch-1",
+        revision: Int? = 0
+    ) -> String {
+        let ownerJSON = owner.map { "\"\($0)\"" } ?? "null"
+        let revisionJSON = revision.map(String.init) ?? "null"
+        let endedJSON = status == "in_progress" ? "null" : "\"2026-11-07T17:00:00+00:00\""
+        return """
+        {"workout_id":"workout-1","status":"\(status)",
+         "started_at":"2026-11-07T16:00:00+00:00","ended_at":\(endedJSON),
+         "total_elapsed_s":0,"events":[],"sets":[],"rests":[],"exercises":[],
+         "summary":{"active_lifting_s":0,"recorded_recovery_s":0,
+           "exercise_transition_s":0,"unclassified_s":0,"total_elapsed_s":0},
+         "data_quality":{"event_count":0,"sets_with_duration":0,
+           "rests_with_actual":0,"rests_without_prescribed":0,"workout_has_end":false},
+         "owner_device_id":\(ownerJSON),"plan_revision":\(revisionJSON),
+         "last_activity_at":"2026-11-07T16:00:00+00:00","stale":false,
+         "plan":{"for_date":"2026-11-07","session_type":"squat",
+           "items":[{"order_index":0,"exercise_id":"competition_squat","sets":3,
+             "reps_low":5,"load_kg":140.0,"rir_target":2}]}}
+        """
+    }
 
     private static let eventsAccepted = #"""
     {"workout_id":"workout-1","accepted":[],"duplicates":[],

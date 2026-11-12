@@ -22,6 +22,10 @@ struct WatchExecutionView: View {
                     Text("Session discarded").font(.headline)
                     Text("Nothing was saved for this session.").font(.caption2)
                 }
+            case .readOnly:
+                WatchReadOnlyView(execution: execution)
+            case .ended(let reason):
+                WatchEndedView(execution: execution, reason: reason)
             default:
                 if execution.selectedItem == nil {
                     WatchExerciseListView(execution: execution, showingSession: $showingSession)
@@ -165,6 +169,76 @@ struct WatchFinishedView: View {
                 Button("Done") { execution.dismissSummary() }
                     .font(.footnote)
             }
+        }
+    }
+}
+
+// MARK: - Ownership and ended states
+
+struct WatchReadOnlyView: View {
+    @ObservedObject var execution: WatchExecutionController
+    @State private var confirmingClear = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Logging moved to the phone")
+                    .font(.headline)
+                Text("This watch can still show the session but cannot add sets.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("\(execution.completedSetCount) sets recorded")
+                    .font(.caption)
+                if execution.pendingCount > 0 {
+                    Text("\(execution.pendingCount) waiting on the phone's session")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+                Button("Clear record") { confirmingClear = true }
+                    .font(.footnote)
+            }
+        }
+        .confirmationDialog(
+            "Clear the local record?",
+            isPresented: $confirmingClear,
+            titleVisibility: .visible
+        ) {
+            Button("Clear record", role: .destructive) { execution.clearLocal() }
+            Button("Keep", role: .cancel) {}
+        } message: {
+            Text("The workout stays on the phone; nothing is abandoned.")
+        }
+    }
+}
+
+struct WatchEndedView: View {
+    @ObservedObject var execution: WatchExecutionController
+    var reason: String
+    @State private var confirmingClear = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Session ended elsewhere")
+                    .font(.headline)
+                Text(reason)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("\(execution.completedSetCount) sets were recorded on this watch.")
+                    .font(.caption)
+                Button("Clear record") { confirmingClear = true }
+                    .font(.footnote)
+            }
+        }
+        .confirmationDialog(
+            "Clear the local record?",
+            isPresented: $confirmingClear,
+            titleVisibility: .visible
+        ) {
+            Button("Clear record", role: .destructive) { execution.clearLocal() }
+            Button("Keep", role: .cancel) {}
+        } message: {
+            Text("The local snapshot is removed. The server's record is unchanged.")
         }
     }
 }

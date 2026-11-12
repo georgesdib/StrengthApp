@@ -15,8 +15,13 @@ final class WatchSessionController: NSObject, ObservableObject {
     @Published private(set) var state: State = .waiting
     @Published private(set) var lastError: String?
 
+    /// The app decides when a configuration change may be applied (contract §7.8: not while a
+    /// session is active or work is queued).
+    var canApplyConfig: () -> Bool = { true }
+
     private let store: WatchCredentialStore
     private var session: WCSession?
+    private var deferredContext: [String: Any]?
     private var retryTask: Task<Void, Never>?
     private var retryAttempts = 0
 
@@ -46,6 +51,14 @@ final class WatchSessionController: NSObject, ObservableObject {
             process(session.receivedApplicationContext)
             sendAcknowledgement()
         }
+        retryDeferredConfig()
+    }
+
+    /// Applies a configuration change that was deferred while the session was busy.
+    func retryDeferredConfig() {
+        guard let context = deferredContext, canApplyConfig() else { return }
+        process(context)
+        sendAcknowledgement()
     }
 
     /// Called by the 6.3 API layer after a 401/403. The token is wiped immediately; the next
@@ -62,6 +75,14 @@ final class WatchSessionController: NSObject, ObservableObject {
               (try? credential.validated()) != nil else {
             return
         }
+        // Defer a home-server change while this watch has a session to finish and sync.
+        if let stored = store.stored,
+           stored.homeBaseURL != credential.homeBaseURL,
+           !canApplyConfig() {
+            deferredContext = context
+            return
+        }
+        deferredContext = nil
         do {
             _ = try store.apply(credential)
             lastError = nil

@@ -197,8 +197,31 @@ Completed 2026-11-12 (client) against the new execution envelope.
 - **Effort.** The session RPE is written as a `workoutEffortScore` sample after the workout;
   failure to write it never invalidates the workout.
 - **Limits.** No simulator or physical acceptance was performed in this slice. The §22.2 device
-  spike (backdated minimal workout, UUID query, forced finish failure) remains owner-run, as does
-  the simulator smoke.
+  spike (backdated minimal workout, UUID query, forced finish failure) remains owner-run.
+- **Deferred to 6.7:** the watchOS unit-test target and the §17 simulator smoke (fetch → start →
+  log → finish). Both are test infrastructure and belong with the acceptance/CI slice; they do not
+  replace the device spike, and if the spike shows the backdated path is wrong the watch test
+  target is pulled forward instead.
+
+## 6.5 corrective fixes — 2026-11-12
+
+- **Relaunch safety:** a `.finishing` session never starts a new builder; finalisation runs first,
+  so recovery uses the existing workout or the minimal backdated one, never a builder created at
+  relaunch.
+- **Startup coordination:** `HealthKitStartGate` requires both the session reaching `.running`
+  and collection beginning; either failure tears the session down and fails the start.
+- **Existence check fails closed:** `hasWorkout` throws; a failed query is transient and never
+  precedes a save.
+- **Nil finish is a failure:** a nil `finishWorkout` result is transient, and a failed live save
+  ends the session so the next attempt takes the minimal path.
+- **Single-flight finalisation** with pending-only retry on foreground; `.unsaved` stays manual.
+- **One clock domain for HealthKit:** start is derived from `bootstrap` server time (start fails
+  closed if it cannot be confirmed), so collection start and the server-derived end agree.
+- **Effort delivery is its own durable state** (`pending`/`saved`/`unavailable`) with a retry
+  that saves only the sample for the existing workout, and a summary notice when it cannot be
+  written.
+- **Heart-rate freshness:** readings are timestamped; anything older than 30 seconds is cleared and
+  never rendered as zero.
 
 ## Verification
 

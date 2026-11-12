@@ -236,3 +236,18 @@ suspension or the Digital Crown.
 - [ ] Abandon a session: Health gains no workout.
 - [ ] The Health app shows the effort value matching the chosen sRPE, and nothing when
       *Not recorded* was chosen.
+
+
+### Corrective checks (6.5 audit)
+
+- [ ] Watch clock set five minutes fast, start and finish a session: the Health workout's start and
+      end are the real times, and its duration is not negative or shifted.
+- [ ] With Health access denied mid-session, finish: the summary reports the workout was **not
+      saved**, and Health holds no duplicate after retrying later.
+- [ ] Force-quit during finalisation, relaunch with the server finish still pending: the watch does
+      **not** create a new live workout; Health gains either the existing workout or one minimal
+      backdated one — never two, and never one that starts at relaunch time.
+- [ ] Deny effort write while allowing workouts: the workout saves, and the summary says
+      **Effort was not saved** without retrying the workout.
+- [ ] Leave the watch still with HR shown: the value disappears within ~30 seconds when readings
+      stop, and never shows 0 for "no data".

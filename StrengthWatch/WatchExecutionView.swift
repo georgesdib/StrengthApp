@@ -266,6 +266,11 @@ struct WatchHealthKitStatus: View {
                 Text("Saved to Health")
                     .font(.caption2)
                     .foregroundStyle(.green)
+                if execution.effortState == .unavailable {
+                    Text("Effort was not saved.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
             case .unsaved:
                 if !execution.healthKitNoticeDismissed {
                     VStack(alignment: .leading, spacing: 4) {

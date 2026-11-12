@@ -5,26 +5,25 @@ import Foundation
 /// target and is exercised on hardware.
 @MainActor
 public protocol HealthKitSaving: AnyObject {
-    /// True when a live builder from this process can still finish its workout.
+    /// True only when a live builder created for this session in this process can still finish.
     var hasLiveBuilder: Bool { get }
 
-    /// A workout with this external UUID already exists in Health.
-    func hasWorkout(externalUUID: String) async -> Bool
+    /// True when a workout with this external UUID exists. Throws when the check could not be
+    /// completed: absence must be established, never assumed.
+    func hasWorkout(externalUUID: String) async throws -> Bool
 
-    /// Ends collection and finishes the live builder with the external UUID and original dates.
-    func finishLiveWorkout(
-        externalUUID: String,
-        endedAt: Date,
-        effort: Double?
-    ) async throws
+    /// Ends collection and finishes the live builder with the external UUID and original end.
+    func finishLiveWorkout(externalUUID: String, endedAt: Date) async throws
 
     /// Saves one minimal, backdated workout with no samples (contract §12.3).
     func saveMinimalWorkout(
         externalUUID: String,
         startedAt: Date,
-        endedAt: Date,
-        effort: Double?
+        endedAt: Date
     ) async throws
+
+    /// Writes the effort sample for an existing workout. Never creates a second workout.
+    func saveEffort(externalUUID: String, effort: Double) async throws
 
     /// Ends the live session without saving anything (abandon).
     func endWithoutSaving() async
@@ -38,15 +37,32 @@ public enum HealthKitSaveFailure: Error, Equatable, Sendable {
     case transient(String)
 }
 
+/// Delivery of the optional effort sample, independent from the workout itself.
+public enum EffortDeliveryState: String, Codable, Sendable, Equatable {
+    case pending
+    case saved
+    case unavailable
+}
+
 public struct HealthKitFinalizationOutcome: Equatable, Sendable {
     public let state: HealthKitSaveState
     public let attempts: Int
     public let failure: String?
+    public let effortState: EffortDeliveryState?
+    public let effortAttempts: Int?
 
-    public init(state: HealthKitSaveState, attempts: Int, failure: String?) {
+    public init(
+        state: HealthKitSaveState,
+        attempts: Int,
+        failure: String?,
+        effortState: EffortDeliveryState? = nil,
+        effortAttempts: Int? = nil
+    ) {
         self.state = state
         self.attempts = attempts
         self.failure = failure
+        self.effortState = effortState
+        self.effortAttempts = effortAttempts
     }
 }
 
@@ -63,63 +79,150 @@ public enum HealthKitFinalizer {
         effort: Double?,
         state: HealthKitSaveState,
         attempts: Int,
+        effortState: EffortDeliveryState?,
+        effortAttempts: Int?,
         manual: Bool,
         recorder: HealthKitSaving
     ) async -> HealthKitFinalizationOutcome {
-        if state == .saved {
-            return HealthKitFinalizationOutcome(state: .saved, attempts: attempts, failure: nil)
-        }
+        var workoutState = state
+        var workoutAttempts = attempts
+
         if state == .unsaved && !manual {
             // Unsaved is terminal for automatic retries; only an explicit Try again may run.
-            return HealthKitFinalizationOutcome(state: .unsaved, attempts: attempts, failure: nil)
-        }
-        // The external UUID is the exactly-once mechanism: an existing workout wins.
-        if await recorder.hasWorkout(externalUUID: externalUUID) {
-            return HealthKitFinalizationOutcome(state: .saved, attempts: attempts, failure: nil)
-        }
-        do {
-            if recorder.hasLiveBuilder {
-                try await recorder.finishLiveWorkout(
-                    externalUUID: externalUUID, endedAt: endedAt, effort: effort
-                )
-            } else {
-                try await recorder.saveMinimalWorkout(
-                    externalUUID: externalUUID,
-                    startedAt: startedAt,
-                    endedAt: endedAt,
-                    effort: effort
-                )
-            }
-            return HealthKitFinalizationOutcome(state: .saved, attempts: attempts, failure: nil)
-        } catch let failure as HealthKitSaveFailure {
-            switch failure {
-            case .definitive(let message):
-                return HealthKitFinalizationOutcome(
-                    state: .unsaved, attempts: attempts, failure: message
-                )
-            case .transient(let message):
-                return transientOutcome(attempts: attempts, message: message, manual: manual)
-            }
-        } catch {
-            return transientOutcome(
-                attempts: attempts, message: error.localizedDescription, manual: manual
+            return HealthKitFinalizationOutcome(
+                state: .unsaved,
+                attempts: attempts,
+                failure: nil,
+                effortState: effortState,
+                effortAttempts: effortAttempts
             )
         }
+
+        var failure: String?
+        if workoutState != .saved {
+            do {
+                if try await recorder.hasWorkout(externalUUID: externalUUID) {
+                    workoutState = .saved
+                } else if recorder.hasLiveBuilder {
+                    try await recorder.finishLiveWorkout(
+                        externalUUID: externalUUID, endedAt: endedAt
+                    )
+                    workoutState = .saved
+                } else {
+                    try await recorder.saveMinimalWorkout(
+                        externalUUID: externalUUID,
+                        startedAt: startedAt,
+                        endedAt: endedAt
+                    )
+                    workoutState = .saved
+                }
+            } catch let saveFailure as HealthKitSaveFailure {
+                switch saveFailure {
+                case .definitive(let message):
+                    workoutState = .unsaved
+                    failure = message
+                case .transient(let message):
+                    workoutAttempts += 1
+                    failure = message
+                    workoutState = workoutAttempts >= maxAttempts ? .unsaved : .pending
+                }
+            } catch {
+                workoutAttempts += 1
+                failure = error.localizedDescription
+                workoutState = workoutAttempts >= maxAttempts ? .unsaved : .pending
+            }
+        }
+
+        // Effort is only meaningful once the workout exists, and never re-creates the workout.
+        var resolvedEffortState = effortState
+        var resolvedEffortAttempts = effortAttempts ?? 0
+        var effortFailure: String?
+        if workoutState == .saved, let effort, resolvedEffortState != .saved,
+           resolvedEffortState != .unavailable {
+            do {
+                try await recorder.saveEffort(externalUUID: externalUUID, effort: effort)
+                resolvedEffortState = .saved
+            } catch let saveFailure as HealthKitSaveFailure {
+                switch saveFailure {
+                case .definitive(let message):
+                    resolvedEffortState = .unavailable
+                    effortFailure = message
+                case .transient(let message):
+                    resolvedEffortAttempts += 1
+                    effortFailure = message
+                    resolvedEffortState = resolvedEffortAttempts >= maxAttempts
+                        ? .unavailable : .pending
+                }
+            } catch {
+                resolvedEffortAttempts += 1
+                effortFailure = error.localizedDescription
+                resolvedEffortState = resolvedEffortAttempts >= maxAttempts
+                    ? .unavailable : .pending
+            }
+        }
+        if resolvedEffortState == nil, effort != nil {
+            resolvedEffortState = .pending
+        }
+
+        return HealthKitFinalizationOutcome(
+            state: workoutState,
+            attempts: workoutAttempts,
+            failure: failure ?? effortFailure,
+            effortState: resolvedEffortState,
+            effortAttempts: resolvedEffortAttempts
+        )
+    }
+}
+
+/// Both legs of HealthKit startup must succeed before the app may start a server workout: the
+/// session reaching `.running` and the builder beginning collection are independent.
+public struct HealthKitStartGate: Equatable, Sendable {
+    public enum Outcome: Equatable, Sendable {
+        case waiting
+        case ready
+        case failed(String)
     }
 
-    private static func transientOutcome(
-        attempts: Int,
-        message: String,
-        manual: Bool
-    ) -> HealthKitFinalizationOutcome {
-        let next = attempts + 1
-        if manual {
-            // A manual retry that fails again stays unsaved rather than re-arming auto retries.
-            return HealthKitFinalizationOutcome(state: .unsaved, attempts: next, failure: message)
-        }
-        if next >= maxAttempts {
-            return HealthKitFinalizationOutcome(state: .unsaved, attempts: next, failure: message)
-        }
-        return HealthKitFinalizationOutcome(state: .pending, attempts: next, failure: message)
+    private var sessionRunning = false
+    private var collectionBegan = false
+    private var failure: String?
+
+    public init() {}
+
+    public var outcome: Outcome {
+        if let failure { return .failed(failure) }
+        return sessionRunning && collectionBegan ? .ready : .waiting
+    }
+
+    public mutating func sessionStarted() -> Outcome {
+        sessionRunning = true
+        return outcome
+    }
+
+    public mutating func collectionStarted() -> Outcome {
+        collectionBegan = true
+        return outcome
+    }
+
+    public mutating func failed(_ message: String) -> Outcome {
+        failure = message
+        return outcome
+    }
+}
+
+/// A heart-rate reading with the moment it was observed, so a stale value is never shown as live.
+public struct HeartRateReading: Equatable, Sendable {
+    public static let freshness: TimeInterval = 30
+
+    public let bpm: Int
+    public let observedAt: Date
+
+    public init(bpm: Int, observedAt: Date) {
+        self.bpm = bpm
+        self.observedAt = observedAt
+    }
+
+    public func isFresh(at date: Date) -> Bool {
+        date.timeIntervalSince(observedAt) <= Self.freshness
     }
 }

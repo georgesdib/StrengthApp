@@ -20,6 +20,9 @@ public struct FinishIntent: Codable, Equatable, Sendable {
     public var hkAttempts: Int?
     /// The lifter dismissed the unsaved notice; keeps the truth but stops nagging.
     public var hkNoticeDismissed: Bool?
+    /// Delivery of the optional effort sample, tracked separately from the workout.
+    public var effortState: EffortDeliveryState?
+    public var effortAttempts: Int?
 
     public init(
         endedAt: Date,
@@ -27,7 +30,9 @@ public struct FinishIntent: Codable, Equatable, Sendable {
         hkState: HealthKitSaveState = .pending,
         serverAcked: Bool = false,
         hkAttempts: Int? = 0,
-        hkNoticeDismissed: Bool? = false
+        hkNoticeDismissed: Bool? = false,
+        effortState: EffortDeliveryState? = nil,
+        effortAttempts: Int? = 0
     ) {
         self.endedAt = endedAt
         self.sessionRpe = sessionRpe
@@ -35,5 +40,7 @@ public struct FinishIntent: Codable, Equatable, Sendable {
         self.serverAcked = serverAcked
         self.hkAttempts = hkAttempts
         self.hkNoticeDismissed = hkNoticeDismissed
+        self.effortState = effortState
+        self.effortAttempts = effortAttempts
     }
 }

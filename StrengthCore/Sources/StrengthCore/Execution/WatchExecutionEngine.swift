@@ -374,6 +374,19 @@ public final class WatchExecutionEngine {
 
     // MARK: - Start
 
+    /// The server-adjusted clock used to start HealthKit collection, so the live workout's start
+    /// and its server-derived end share one domain (contract §8).
+    public func serverClock(session: IOSSession) async throws -> ServerClock {
+        let receivedAt = now()
+        let bootstrap = try await client.bootstrap(session: session)
+        guard let serverTime = ServerClock.parse(bootstrap.serverTime) else {
+            throw APIError.decoding
+        }
+        let clock = ServerClock(serverTime: serverTime, receivedAt: receivedAt)
+        guard clock.isPlausible else { throw APIError.decoding }
+        return clock
+    }
+
     @discardableResult
     public func start(issuedPlanID: String, session: IOSSession) async -> Bool {
         guard !issuedPlanID.isEmpty else {
@@ -494,6 +507,8 @@ public final class WatchExecutionEngine {
         public let state: HealthKitSaveState
         public let attempts: Int
         public let dismissed: Bool
+        public let effortState: EffortDeliveryState?
+        public let effortAttempts: Int?
     }
 
     public func healthKitInput() -> HealthKitInput? {
@@ -505,7 +520,9 @@ public final class WatchExecutionEngine {
             effort: finish.sessionRpe,
             state: finish.hkState,
             attempts: finish.hkAttempts ?? 0,
-            dismissed: finish.hkNoticeDismissed ?? false
+            dismissed: finish.hkNoticeDismissed ?? false,
+            effortState: finish.effortState,
+            effortAttempts: finish.effortAttempts
         )
     }
 
@@ -513,6 +530,12 @@ public final class WatchExecutionEngine {
         guard var record = sessionRecord, var finish = record.finish else { return }
         finish.hkState = outcome.state
         finish.hkAttempts = outcome.attempts
+        if let effortState = outcome.effortState {
+            finish.effortState = effortState
+        }
+        if let effortAttempts = outcome.effortAttempts {
+            finish.effortAttempts = effortAttempts
+        }
         record.finish = finish
         sessionRecord = record
         healthKitFailure = outcome.state == .unsaved ? outcome.failure : nil

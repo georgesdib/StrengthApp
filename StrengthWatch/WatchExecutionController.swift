@@ -29,6 +29,7 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var healthKitState: HealthKitSaveState?
     @Published private(set) var healthKitNoticeDismissed = false
     @Published private(set) var healthKitFailure: String?
+    @Published private(set) var effortState: EffortDeliveryState?
 
     private let credentialStore: WatchCredentialStore
     private let engine: WatchExecutionEngine
@@ -36,6 +37,8 @@ final class WatchExecutionController: ObservableObject {
     private let healthRecorder: WatchHealthKitRecorder?
     private let onCredentialsMissing: @MainActor () -> Void
     private var retryTask: Task<Void, Never>?
+    private var finalizeTask: Task<Void, Never>?
+    private var heartRateClearTask: Task<Void, Never>?
     private let pathMonitor = NWPathMonitor()
     private var pathMonitorStarted = false
     private var draftTask: Task<Void, Never>?
@@ -66,7 +69,22 @@ final class WatchExecutionController: ObservableObject {
             store: OfflineCaptureStore(fileURL: Self.recordFileURL)
         )
         healthRecorder?.onHeartRate = { [weak self] bpm in
-            self?.heartRate = bpm
+            self?.heartRateUpdated(bpm)
+        }
+    }
+
+    /// A reading older than the freshness window is no longer "live", so it is cleared rather than
+    /// left on screen indefinitely.
+    private func heartRateUpdated(_ bpm: Int?) {
+        heartRateClearTask?.cancel()
+        heartRate = bpm
+        guard bpm != nil else { return }
+        heartRateClearTask = Task { [weak self] in
+            try? await Task.sleep(
+                nanoseconds: UInt64(HeartRateReading.freshness * 1_000_000_000)
+            )
+            guard !Task.isCancelled else { return }
+            self?.heartRate = nil
         }
     }
 
@@ -92,11 +110,15 @@ final class WatchExecutionController: ObservableObject {
         startPathMonitor()
         Task {
             authorization = await anchor.authorizationStatus()
-            if engine.phase == .active || engine.phase == .finishing {
+            // A finished session must not start a new builder: that builder belongs to this
+            // launch, not to the workout being recovered (contract §12.3).
+            if engine.phase == .active {
                 await beginLivenessIfNeeded()
                 await reconcileNow()
+            } else if engine.phase == .finishing {
+                await reconcileNow()
             }
-            if engine.healthKitInput()?.state == .pending {
+            if needsHealthKitFinalisation {
                 await finalizeHealthKit()
             }
         }
@@ -104,8 +126,18 @@ final class WatchExecutionController: ObservableObject {
 
     func sceneBecameActive() async {
         guard engine.phase == .active || engine.phase == .finishing else { return }
-        await beginLivenessIfNeeded()
+        if engine.phase == .active {
+            await beginLivenessIfNeeded()
+        }
         await reconcileNow()
+        if needsHealthKitFinalisation {
+            await finalizeHealthKit()
+        }
+    }
+
+    private var needsHealthKitFinalisation: Bool {
+        guard let input = engine.healthKitInput() else { return false }
+        return input.state == .pending || input.effortState == .pending
     }
 
     /// Flushes pending work first, then compares ownership, status and revision with the server.
@@ -171,12 +203,22 @@ final class WatchExecutionController: ObservableObject {
             lastError = "Enable Health access on the watch to log here, or log this workout on the iPhone."
             return
         }
+        // Start HealthKit in the session's clock domain: one bootstrap call before the start gate.
+        let collectionStart: Date
         do {
-            try await anchor.begin(at: Date())
+            let clock = try await engine.serverClock(session: session)
+            collectionStart = clock.serverNow(from: Date())
+        } catch {
+            lastError = "Could not confirm the server clock, so the session was not started."
+            return
+        }
+        do {
+            try await anchor.begin(at: collectionStart)
             liveness.started()
         } catch {
             liveness.failed((error as? LocalizedError)?.errorDescription)
-            lastError = LivenessError.unavailable.errorDescription
+            lastError = (error as? LocalizedError)?.errorDescription
+                ?? LivenessError.unavailable.errorDescription
             return
         }
         let started = await engine.start(issuedPlanID: issuedPlanID, session: session)
@@ -330,7 +372,23 @@ final class WatchExecutionController: ObservableObject {
 
     /// Runs the exactly-once save through the finaliser. Automatic attempts continue while
     /// pending; a manual attempt is the explicit Try again.
+    /// Single-flight: concurrent callers await the attempt already running, because the
+    /// existence query is not a uniqueness constraint in HealthKit.
     func finalizeHealthKit(manual: Bool = false) async {
+        if let inFlight = finalizeTask {
+            await inFlight.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performFinalize(manual: manual)
+            self.finalizeTask = nil
+        }
+        finalizeTask = task
+        await task.value
+    }
+
+    private func performFinalize(manual: Bool) async {
         guard let input = engine.healthKitInput(), let recorder = healthRecorder else { return }
         let outcome = await HealthKitFinalizer.finalize(
             externalUUID: input.sessionUUID,
@@ -339,6 +397,8 @@ final class WatchExecutionController: ObservableObject {
             effort: input.effort,
             state: input.state,
             attempts: input.attempts,
+            effortState: input.effortState,
+            effortAttempts: input.effortAttempts,
             manual: manual,
             recorder: recorder
         )
@@ -471,6 +531,7 @@ final class WatchExecutionController: ObservableObject {
         healthKitState = engine.sessionRecord?.finish?.hkState
         healthKitNoticeDismissed = engine.sessionRecord?.finish?.hkNoticeDismissed ?? false
         healthKitFailure = engine.healthKitFailure
+        effortState = engine.sessionRecord?.finish?.effortState
         isOffline = engine.network == .offline
         lastError = engine.lastError
     }

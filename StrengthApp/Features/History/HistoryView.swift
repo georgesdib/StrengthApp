@@ -107,9 +107,6 @@ private struct HistoryRow: View {
                 if let marks = session.marks, marks > 0 {
                     Text("\(marks) mark\(marks == 1 ? "" : "s")")
                 }
-                if session.needsReview == 1 {
-                    Text("needs review")
-                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)

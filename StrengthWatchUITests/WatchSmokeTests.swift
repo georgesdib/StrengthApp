@@ -46,12 +46,14 @@ final class WatchSmokeTests: XCTestCase {
         let exercise = app.buttons["watch-exercise-0"]
         XCTAssertTrue(exercise.waitForExistence(timeout: 30))
         sleep(1)   // let the list settle after the phase change
-        exercise.tap()
         let startSet = app.buttons["watch-start-set"]
+        // A plain tap on a watchOS list row is sometimes swallowed; tap the coordinate instead.
+        exercise.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         if !startSet.waitForExistence(timeout: 10) {
-            exercise.tap()   // watchOS sometimes drops a tap during the transition
+            print("SMOKE-TREE-SELECT:\n\(app.debugDescription)")
+            exercise.tap()
+            XCTAssertTrue(startSet.waitForExistence(timeout: 30), "the exercise did not open")
         }
-        XCTAssertTrue(startSet.waitForExistence(timeout: 30))
         startSet.tap()
         app.tap()   // lets the interruption monitor fire
 

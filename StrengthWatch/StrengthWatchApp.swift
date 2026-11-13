@@ -47,6 +47,8 @@ struct StrengthWatchApp: App {
               let device = defaults.string(forKey: "watchSmokeDeviceID"),
               !url.isEmpty, !token.isEmpty, !device.isEmpty else { return }
         defaults.set(true, forKey: "watchSmokeEnabled")
+        // A session saved by an earlier run would launch straight into the execution view.
+        try? FileManager.default.removeItem(at: WatchExecutionController.recordFileURL)
         let store = WatchCredentialStore()
         store.clear()
         let context = WatchCredentialContext(

@@ -105,17 +105,20 @@ if [[ "$state_status" != "ready" ]]; then
 fi
 
 if [[ -z "${WATCH_SIMULATOR:-}" ]]; then
+  # Prefer the watch that is already booted: Xcode must have set up its pair's network path.
   WATCH_SIMULATOR=$(xcrun simctl list devices available --json | python3 -c \
-    "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['name'] for r in sorted(d) for x in d[r] if x.get('isAvailable') and x['name'].startswith('Apple Watch')))")
+    "import json,sys; d=json.load(sys.stdin)['devices']; \
+booted=[x['name'] for r in d for x in d[r] if x.get('isAvailable') and x.get('state')=='Booted' and x['name'].startswith('Apple Watch')]; \
+first=[x['name'] for r in sorted(d) for x in d[r] if x.get('isAvailable') and x['name'].startswith('Apple Watch')]; \
+print(booted[0] if booted else first[0])")
 fi
 WATCH_UDID=$(xcrun simctl list devices available --json | WATCH_SIMULATOR="$WATCH_SIMULATOR" python3 -c \
   "import json,os,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for r in sorted(d) for x in d[r] if x.get('isAvailable') and x['name']==os.environ['WATCH_SIMULATOR']))")
 
 echo "watch: $WATCH_SIMULATOR ($WATCH_UDID) · watch device: $watch_id"
 
-# A runner left over from an earlier run makes the next one die before connecting. Shut the
-# watch down and let Xcode boot it: a watch booted on its own loses its paired network path.
-xcrun simctl shutdown "$WATCH_UDID" 2>/dev/null || true
+# The watch must already be booted by Xcode with its phone pair (Window → Devices). A watch
+# booted by simctl alone has no network path to the Mac and the plan fetch fails.
 
 run_once() {
   TEST_RUNNER_WATCH_SMOKE_URL="$BASE" \
@@ -129,9 +132,6 @@ run_once() {
     -only-testing:StrengthWatchUITests
 }
 
-if ! run_once; then
-  echo "retrying once after a runner failure"
-  xcrun simctl shutdown "$WATCH_UDID" 2>/dev/null || true
-  sleep 3
-  run_once
-fi
+# No blind retry: a second attempt reuses a consumed plan and an active session, so its failure
+# would be noise. A runner that never attached means rerun the script (it resets the server).
+run_once

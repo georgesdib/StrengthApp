@@ -1,3 +1,4 @@
+import StrengthCore
 import SwiftUI
 
 @main
@@ -7,6 +8,9 @@ struct StrengthWatchApp: App {
     @StateObject private var execution: WatchExecutionController
 
     init() {
+#if DEBUG
+        Self.seedSmokeCredentialIfRequested()
+#endif
         let session = WatchSessionController()
         let execution = WatchExecutionController(
             onCredentialsMissing: { session.markCredentialsMissing() }
@@ -31,4 +35,29 @@ struct StrengthWatchApp: App {
             WatchRootView(session: session, today: today, execution: execution)
         }
     }
+
+#if DEBUG
+    /// UI-test seam: the simulator smoke test seeds a credential instead of pairing a phone
+    /// simulator. Launch arguments arrive as UserDefaults through XCUIApplication, and only a
+    /// Debug build honours them.
+    private static func seedSmokeCredentialIfRequested() {
+        let defaults = UserDefaults.standard
+        guard let url = defaults.string(forKey: "watchSmokeServerURL"),
+              let token = defaults.string(forKey: "watchSmokeToken"),
+              let device = defaults.string(forKey: "watchSmokeDeviceID"),
+              !url.isEmpty, !token.isEmpty, !device.isEmpty else { return }
+        defaults.set(true, forKey: "watchSmokeEnabled")
+        let store = WatchCredentialStore()
+        store.clear()
+        let context = WatchCredentialContext(
+            epoch: Int(Date().timeIntervalSince1970),
+            configVersion: Int(Date().timeIntervalSince1970),
+            homeBaseURL: url,
+            deviceID: device,
+            token: token,
+            issuedAt: ServerClock.encodedISO(Date())
+        )
+        _ = try? store.apply(context)
+    }
+#endif
 }

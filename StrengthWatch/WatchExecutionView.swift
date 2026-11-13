@@ -136,6 +136,7 @@ struct WatchSessionSheet: View {
                 }
                 Button("Finish") { showingFinish = true }
                     .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("watch-open-finish")
             }
         }
         .sheet(isPresented: $showingFinish) {
@@ -220,6 +221,7 @@ struct WatchFinishedView: View {
                 WatchHealthKitStatus(execution: execution)
                 Button("Done") { execution.dismissSummary() }
                     .font(.footnote)
+                    .accessibilityIdentifier("watch-done")
             }
         }
     }

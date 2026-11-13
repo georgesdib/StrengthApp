@@ -112,7 +112,7 @@ final class WatchExecutionController: ObservableObject {
         sync()
         startPathMonitor()
         Task {
-            authorization = await anchor.authorizationStatus()
+            authorization = WatchSmokeMode.isEnabled ? .authorized : await anchor.authorizationStatus()
             // A finished session must not start a new builder: that builder belongs to this
             // launch, not to the workout being recovered (contract §12.3).
             if engine.phase == .active {
@@ -212,32 +212,37 @@ final class WatchExecutionController: ObservableObject {
         isWorking = true
         defer { isWorking = false }
 
-        var status = await anchor.authorizationStatus()
-        if status != .authorized {
-            status = await anchor.requestAuthorization()
-        }
-        authorization = status
-        guard status == .authorized else {
-            lastError = "Enable Health access on the watch to log here, or log this workout on the iPhone."
-            return
-        }
-        // Start HealthKit in the session's clock domain: one bootstrap call before the start gate.
-        let collectionStart: Date
-        do {
-            let clock = try await engine.serverClock(session: session)
-            collectionStart = clock.serverNow(from: Date())
-        } catch {
-            lastError = "Could not confirm the server clock, so the session was not started."
-            return
-        }
-        do {
-            try await anchor.begin(at: collectionStart)
-            liveness.started()
-        } catch {
-            liveness.failed((error as? LocalizedError)?.errorDescription)
-            lastError = (error as? LocalizedError)?.errorDescription
-                ?? LivenessError.unavailable.errorDescription
-            return
+        if WatchSmokeMode.isEnabled {
+            // Simulator smoke: no HealthKit workout session exists there.
+            authorization = .authorized
+        } else {
+            var status = await anchor.authorizationStatus()
+            if status != .authorized {
+                status = await anchor.requestAuthorization()
+            }
+            authorization = status
+            guard status == .authorized else {
+                lastError = "Enable Health access on the watch to log here, or log this workout on the iPhone."
+                return
+            }
+            // Start HealthKit in the session's clock domain: one bootstrap call before the start gate.
+            let collectionStart: Date
+            do {
+                let clock = try await engine.serverClock(session: session)
+                collectionStart = clock.serverNow(from: Date())
+            } catch {
+                lastError = "Could not confirm the server clock, so the session was not started."
+                return
+            }
+            do {
+                try await anchor.begin(at: collectionStart)
+                liveness.started()
+            } catch {
+                liveness.failed((error as? LocalizedError)?.errorDescription)
+                lastError = (error as? LocalizedError)?.errorDescription
+                    ?? LivenessError.unavailable.errorDescription
+                return
+            }
         }
         let started = await engine.start(issuedPlanID: issuedPlanID, session: session)
         if !started {
@@ -397,7 +402,9 @@ final class WatchExecutionController: ObservableObject {
         let stop = await engine.finish(sessionRpe: sessionRpe, session: session)
         await handle(stop)
         // The HealthKit save ends the live session itself, so liveness is not ended here.
-        await finalizeHealthKit()
+        if !WatchSmokeMode.isEnabled {
+            await finalizeHealthKit()
+        }
         if healthRecorder == nil {
             await endLiveness()
         }

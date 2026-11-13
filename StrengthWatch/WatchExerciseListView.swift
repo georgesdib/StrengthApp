@@ -39,7 +39,7 @@ struct WatchExerciseListView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(execution.planItems) { item in
+                ForEach(Array(execution.planItems.enumerated()), id: \.element.id) { index, item in
                     Button {
                         execution.select(item)
                     } label: {
@@ -63,6 +63,7 @@ struct WatchExerciseListView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("watch-exercise-\(index)")
                 }
 
                 WatchStaleWarning(isStale: execution.isStale)

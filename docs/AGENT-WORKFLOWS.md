@@ -63,6 +63,15 @@ to the watch with devicectl. Use it when the iPhone's Watch app spins and silent
 "Install": that handoff gives up quietly when the watch is asleep or off its charger, while this
 prints the actual result. Override with WATCH_UDID or APP_PATH.
 
+Simulator smoke test (on demand, not a CI gate):
+
+    ./scripts/watch-smoke.sh
+
+It starts a disposable server, mints a watch credential, seeds the watch app through a Debug-only
+launch argument, and runs StrengthWatchUITests on a watch simulator: fetch → start → log →
+finish. Known rough edges: the test runner sometimes fails to attach, and a watch simulator booted
+outside Xcode can lose its network path; rerun before treating a failure as a product bug.
+
 Release compile:
 
     xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \

@@ -99,6 +99,7 @@ struct WatchExerciseView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityIdentifier("watch-session")
             }
             Text("Set \(setNumber(item)) of \(item.sets ?? 0)")
                 .font(.caption2)

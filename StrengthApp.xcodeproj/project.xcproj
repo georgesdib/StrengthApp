@@ -26,6 +26,7 @@
         { "path": "<PRODUCTS>/StrengthWatch.app", "id": "000000000000000000000121", "type": "wrapper.application", "index": false, "target-membership": [ { "build-phase": "StrengthApp/copy/Embed Watch Content", "code-sign-on-copy": true } ] },
         { "path": "<PRODUCTS>/StrengthAppTests.xctest", "id": "EAE4FAEC309F8DD500B7CC15", "type": "wrapper.cfbundle", "index": false },
         { "path": "<PRODUCTS>/StrengthAppUITests.xctest", "id": "EACD40A5309F8F500088B032", "type": "wrapper.cfbundle", "index": false },
+        { "path": "<PRODUCTS>/StrengthWatchUITests.xctest", "id": "000000000000000300000000", "type": "wrapper.cfbundle", "index": false },
       ],
     }, {
       "kind": "group",
@@ -38,6 +39,7 @@
     { "kind": "folder", "path": "StrengthAppTests", "target-membership": [ "StrengthAppTests" ] },
     { "kind": "folder", "path": "StrengthAppUITests", "target-membership": [ "StrengthAppUITests" ] },
     { "kind": "folder", "path": "StrengthWatch", "target-membership": [ "StrengthWatch" ] },
+    { "kind": "folder", "path": "StrengthWatchUITests", "target-membership": [ "StrengthWatchUITests" ] },
   ],
   "targets": [
     {
@@ -156,6 +158,29 @@
         "SWIFT_VERSION": "5.0",
         "TARGETED_DEVICE_FAMILY": "1,2",
         "TEST_TARGET_NAME": "StrengthApp",
+      },
+    }, {
+      "name": "StrengthWatchUITests",
+      "id": "000000000000000300000000",
+      "product": "Products/StrengthWatchUITests.xctest",
+      "product-type": "bundle.ui-testing",
+      "dependencies": [
+        "StrengthWatch",
+      ],
+      "build-phases": [
+        "compile-sources",
+      ],
+      "build-settings": {
+        "CODE_SIGN_STYLE": "Automatic",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.georgesdibpersonalteam.StrengthWatchUITests",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SDKROOT": "watchos",
+        "SUPPORTED_PLATFORMS": "watchsimulator watchos",
+        "SWIFT_VERSION": "5.0",
+        "TARGETED_DEVICE_FAMILY": "4",
+        "TEST_TARGET_NAME": "StrengthWatch",
+        "WATCHOS_DEPLOYMENT_TARGET": "27.0",
       },
     }, {
       "name": "StrengthWatch",

@@ -12,6 +12,11 @@
     <array>
         <string>workout-processing</string>
     </array>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>NSHealthShareUsageDescription</key>
     <string>Strength reads your heart rate during a watch workout so the screen stays awake while you log sets.</string>
     <key>NSHealthUpdateUsageDescription</key>

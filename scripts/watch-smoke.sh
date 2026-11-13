@@ -129,9 +129,20 @@ run_once() {
     -scheme StrengthWatch \
     -destination "id=$WATCH_UDID" \
     -derivedDataPath "$DERIVED_DATA" \
-    -only-testing:StrengthWatchUITests
+    -only-testing:StrengthWatchUITests 2>&1 | tee "$DIR/test.log"
+  return "${PIPESTATUS[0]}"
 }
 
-# No blind retry: a second attempt reuses a consumed plan and an active session, so its failure
-# would be noise. A runner that never attached means rerun the script (it resets the server).
-run_once
+if run_once; then
+  exit 0
+fi
+
+# The watchOS test runner sometimes dies before the tests start. That consumes no state, so one
+# retry is safe; a failure after the tests started is real and is not retried blindly.
+if grep -q "while preparing to run tests" "$DIR/test.log"; then
+  echo "runner died before the tests started; retrying once"
+  sleep 5
+  run_once && exit 0
+fi
+
+exit 1

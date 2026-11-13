@@ -59,6 +59,45 @@ final class WatchExecutionEngineTests: XCTestCase {
 
     // MARK: - Sets
 
+    func testWatchSetCarriesPerRepVelocitiesIntoTheQueuedOperation() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Self.watchWorkout.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+
+        let result = await engine.logSet(
+            WatchExecutionEngine.SetEntry(
+                exerciseId: "competition_squat",
+                planItemIndex: 0,
+                setIndex: 1,
+                loadKg: 140,
+                reps: 3,
+                rir: 2,
+                repVelocities: [
+                    RepVelocity(repIndex: 1, velocityMps: 0.62),
+                    RepVelocity(repIndex: 2, velocityMps: 0.58),
+                    RepVelocity(repIndex: 3, velocityMps: 0.55),
+                ]
+            ),
+            session: session()
+        )
+
+        XCTAssertTrue(result.persisted)
+        let capture = try store.load()
+        let operation = try XCTUnwrap(capture.operations.first { $0.kind == .addSet })
+        guard case .addSet(let body) = operation.body else {
+            return XCTFail("expected an add-set operation, got (operation.kind)")
+        }
+        XCTAssertEqual(body.repVelocities?.count, 3)
+        XCTAssertEqual(body.repVelocities?.first?.velocityMps, 0.62)
+        XCTAssertEqual(body.repVelocities?.last?.repIndex, 3)
+    }
+
     func testFailedSetIsPersistedWithItsOriginalTimestampAndStaysQueued() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {

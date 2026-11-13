@@ -112,6 +112,8 @@ public final class WatchExecutionEngine {
         public var rir: Int?
         /// Optional mean bar velocity for the set (VBT). Descriptive only; it never decides load.
         public var velocityMps: Double?
+        /// Optional per-rep velocities, in rep order. Descriptive like the mean.
+        public var repVelocities: [RepVelocity]?
 
         public init(
             exerciseId: String,
@@ -120,7 +122,8 @@ public final class WatchExecutionEngine {
             loadKg: Double?,
             reps: Int,
             rir: Int?,
-            velocityMps: Double? = nil
+            velocityMps: Double? = nil,
+            repVelocities: [RepVelocity]? = nil
         ) {
             self.exerciseId = exerciseId
             self.planItemIndex = planItemIndex
@@ -129,6 +132,7 @@ public final class WatchExecutionEngine {
             self.reps = reps
             self.rir = rir
             self.velocityMps = velocityMps
+            self.repVelocities = repVelocities
         }
     }
 
@@ -814,6 +818,7 @@ public final class WatchExecutionEngine {
             velocityMps: entry.velocityMps,
             setIndex: entry.setIndex,
             planItemIndex: entry.planItemIndex,
+            repVelocities: entry.repVelocities,
             performedAt: ServerClock.encodedISO(stamp)
         )
         do {

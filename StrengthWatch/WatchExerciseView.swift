@@ -15,6 +15,7 @@ struct WatchExerciseView: View {
     @State private var logging = false
     @State private var showingForm = false
     @State private var velocityText = ""
+    @State private var repVelocityText = ""
 
     var body: some View {
         ScrollView {
@@ -209,6 +210,13 @@ struct WatchExerciseView: View {
                         .font(.caption2)
                         .foregroundStyle(.red)
                 }
+                TextField("Per-rep m/s", text: $repVelocityText)
+                    .accessibilityIdentifier("watch-rep-velocity")
+                if let repVelocityError {
+                    Text(repVelocityError)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
                 ForEach(0...6, id: \.self) { value in
                     Button("\(value)") { save(rir: value) }
                 }
@@ -260,20 +268,40 @@ struct WatchExerciseView: View {
         return value
     }
 
+    /// Per-rep velocities are optional, but a typo or too many values must not be dropped
+    /// silently the way a rejected mean would be ignored.
+    private var parsedRepVelocities: [RepVelocity]? {
+        try? RepVelocityParser.parse(repVelocityText, reps: reps)
+    }
+
+    private var repVelocityError: String? {
+        guard !repVelocityText.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        do {
+            _ = try RepVelocityParser.parse(repVelocityText, reps: reps)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     private func save(rir: Int?) {
         let trimmed = velocityText.trimmingCharacters(in: .whitespaces)
         guard trimmed.isEmpty || parsedVelocity != nil else { return }
+        guard repVelocityError == nil else { return }
         showingRIR = false
         logging = true
         let velocity = parsedVelocity
+        let perRep = parsedRepVelocities
         Task {
             await execution.logSet(
                 loadKg: loadKg,
                 reps: reps,
                 rir: rir,
-                velocityMps: velocity
+                velocityMps: velocity,
+                repVelocities: perRep
             )
             velocityText = ""
+            repVelocityText = ""
             logging = false
             prepare()
         }

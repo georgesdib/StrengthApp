@@ -248,7 +248,13 @@ final class WatchExecutionController: ObservableObject {
 
     // MARK: - Sets and rest
 
-    func logSet(loadKg: Double?, reps: Int, rir: Int?, velocityMps: Double? = nil) async {
+    func logSet(
+        loadKg: Double?,
+        reps: Int,
+        rir: Int?,
+        velocityMps: Double? = nil,
+        repVelocities: [RepVelocity]? = nil
+    ) async {
         guard let session = currentSession(), let item = engine.selectedItem else { return }
         let itemIndex = item.orderIndex ?? 0
         let entry = WatchExecutionEngine.SetEntry(
@@ -258,7 +264,8 @@ final class WatchExecutionController: ObservableObject {
             loadKg: loadKg,
             reps: reps,
             rir: rir,
-            velocityMps: velocityMps
+            velocityMps: velocityMps,
+            repVelocities: repVelocities
         )
         isWorking = true
         defer { isWorking = false }

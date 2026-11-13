@@ -14,6 +14,8 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var pendingCount = 0
     @Published private(set) var completedSetCount = 0
     @Published private(set) var selectedItem: PrescriptionItem?
+    /// True only once the server acknowledged the finish; an empty queue is not proof.
+    @Published private(set) var finishAcknowledged = false
     @Published private(set) var lastError: String?
     @Published private(set) var isOffline = false
     @Published private(set) var isWorking = false
@@ -400,6 +402,11 @@ final class WatchExecutionController: ObservableObject {
         isWorking = true
         defer { isWorking = false }
         let stop = await engine.finish(sessionRpe: sessionRpe, session: session)
+        #if DEBUG
+        if WatchSmokeMode.isEnabled {
+            NSLog("SMOKE-FINISH stop=\(stop) error=\(engine.lastError ?? "-") pending=\(engine.pendingCount)")
+        }
+        #endif
         await handle(stop)
         // The HealthKit save ends the live session itself, so liveness is not ended here.
         if !WatchSmokeMode.isEnabled {
@@ -409,6 +416,10 @@ final class WatchExecutionController: ObservableObject {
             await endLiveness()
         }
         sync()
+        // sync() copies the engine's error, which is nil; a rejected finish must stay visible.
+        if case .conflict(_, let message) = stop {
+            lastError = message
+        }
     }
 
     func discard() async {
@@ -514,8 +525,8 @@ final class WatchExecutionController: ObservableObject {
             scheduleRetry(at: date)
         case .retryWindowSpent:
             lastError = "Offline. Saved on the watch; it will sync when you open the app at home."
-        case .conflict(_, let message):
-            lastError = message
+        case .conflict(let code, let message):
+            lastError = "\(message) (\(code))"
         case .storage(let message):
             lastError = message
         case .allSent, .nothingToSend:
@@ -621,6 +632,7 @@ final class WatchExecutionController: ObservableObject {
         tonnageKg = engine.tonnageKg
         isStale = engine.isStale
         isOffline = engine.network == .offline
+        finishAcknowledged = engine.sessionRecord?.finish?.serverAcked ?? false
         lastError = engine.lastError
     }
 }

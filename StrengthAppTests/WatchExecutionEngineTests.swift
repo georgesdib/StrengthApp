@@ -1092,6 +1092,26 @@ final class WatchExecutionEngineTests: XCTestCase {
 
     // MARK: - Finish and discard
 
+    func testFinishQueuesAValidUUIDIdempotencyKey() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Self.watchWorkout.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        _ = await engine.finish(sessionRpe: 7, session: session())
+
+        let capture = try store.load()
+        let operation = try XCTUnwrap(capture.operations.first { $0.kind == .completeWorkout })
+        XCTAssertNotNil(
+            UUID(uuidString: operation.operationId),
+            "the server rejects a non-UUID idempotency key: \(operation.operationId)"
+        )
+    }
+
     func testFinishPersistsTheIntentBeforeTheServerCallAndQueuesIt() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {

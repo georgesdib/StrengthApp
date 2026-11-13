@@ -95,6 +95,7 @@ final class WatchSmokeTests: XCTestCase {
             XCTFail("the finish never reached the server")
         }
         done.tap()
-        XCTAssertTrue(app.buttons["watch-start"].waitForExistence(timeout: 30))
+        // The plan was consumed, so Today shows its refresh control rather than a new Start.
+        XCTAssertTrue(app.buttons["watch-today-refresh"].waitForExistence(timeout: 30))
     }
 }

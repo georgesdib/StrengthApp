@@ -96,6 +96,20 @@ public enum WatchFlushStop: Equatable, Sendable {
     }
 }
 
+extension WatchFlushStop: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .nothingToSend: return "nothingToSend"
+        case .allSent: return "allSent"
+        case .retry(let at): return "retry(at: \(at))"
+        case .retryWindowSpent: return "retryWindowSpent"
+        case .credentialsMissing: return "credentialsMissing"
+        case .conflict(let code, let message): return "conflict(\(code): \(message))"
+        case .storage(let message): return "storage(\(message))"
+        }
+    }
+}
+
 /// The watch's execution lifecycle (contract §11).
 ///
 /// Every user action is one atomic local write: the outbox operation, the session record and the
@@ -931,7 +945,9 @@ public final class WatchExecutionEngine {
         }
         let endedAt = stampedNow()
         let operation = OfflineOperation(
-            operationId: "watch-finish-\(sessionRecord?.sessionUUID ?? workoutId)",
+            // The server requires a UUID idempotency key. The session UUID is stable across
+            // retries of this one finish, so a lost response still deduplicates.
+            operationId: sessionRecord?.sessionUUID ?? workoutId,
             workoutId: workoutId,
             body: .completeWorkout(CompleteWorkoutRequest(
                 sessionRpe: sessionRpe,

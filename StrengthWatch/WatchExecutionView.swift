@@ -164,11 +164,13 @@ struct WatchFinishProgressView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Finish saved on watch").font(.headline)
-                Text(execution.pendingCount > 0
-                     ? "Syncing to the home server…"
-                     : "Saved to the home server")
+                Text(execution.finishAcknowledged
+                     ? "Saved to the home server"
+                     : execution.pendingCount > 0
+                        ? "Syncing to the home server…"
+                        : "The server has not confirmed this finish")
                     .font(.caption2)
-                    .foregroundStyle(execution.pendingCount > 0 ? .orange : .secondary)
+                    .foregroundStyle(execution.finishAcknowledged ? Color.secondary : Color.orange)
                 if execution.pendingCount > 0 {
                     Text("\(execution.pendingCount) pending")
                         .font(.caption2)

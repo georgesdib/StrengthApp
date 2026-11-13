@@ -132,6 +132,7 @@ public struct HistoryResponse: Decodable {
 
 public struct HistoryDetail: Decodable {
     public let sessionId: String
+    public let workoutId: String?
     public let occurredOn: String
     public let workoutLabel: String?
     public let sessionType: String?

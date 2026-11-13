@@ -92,7 +92,10 @@ raw 100.x address.
    A working set starts the rest timer automatically; logged warm-ups (RIR 6) do not.
 7. Repeat for the remaining sets and exercises.
 8. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
-9. Review the completed session in **History**.
+9. Review the **Session report** that opens after completion: prescription adherence, velocity,
+   session feedback, quality flags and evidence. It is read-only. **Done** returns to Today.
+10. The same report is available later from the session's **History** detail. An imported session
+    with no workout record explains that no report exists.
 
 ### Set controls
 
@@ -297,6 +300,8 @@ missing rather than being estimated.
 - Exercise completion is based on leaving the exercise screen, so its boundary can be
   approximate.
 - No workout heart-rate observations.
+- The session report is only available after the server has acknowledged completion. A queued
+  offline finish shows no report until it syncs; open the session from History after that.
 - Warm-up rows are a guide; only working sets count toward the plan's set completion. Logging a
   warm-up uses **Start another set** with RIR 6.
 - The notification/vibration path and all timing behaviour require physical-iPhone acceptance;

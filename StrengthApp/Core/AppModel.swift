@@ -867,6 +867,18 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func workoutSummary(workoutId: String) async throws -> WorkoutSummary {
+        guard let session else { throw APIError.transport("Pair this device first.") }
+        do {
+            return try await client.workoutSummary(
+                workoutId: workoutId, session: session
+            ).summary
+        } catch {
+            handle(error)
+            throw error
+        }
+    }
+
     func executionAnalytics(workoutId: String) async throws -> ExecutionAnalyticsResponse {
         guard let session else { throw APIError.transport("Pair this device first.") }
         do {

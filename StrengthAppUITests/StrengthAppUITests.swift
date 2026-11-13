@@ -225,7 +225,33 @@ final class StrengthAppUITests: XCTestCase {
         let finish = app.buttons["finish-workout"]
         scrollTo(finish, in: app)
         finish.tap()
+        XCTAssertTrue(
+            app.navigationBars["Session report"].waitForExistence(timeout: 20),
+            "an acknowledged completion opens the report before returning to Today"
+        )
+        let reportDone = app.buttons["report-done"]
+        XCTAssertTrue(reportDone.waitForExistence(timeout: 10))
+        reportDone.tap()
         XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 20))
+
+        app.tabBars.buttons["History"].tap()
+        XCTAssertTrue(app.navigationBars["History"].waitForExistence(timeout: 10))
+        let reportDatePredicate = NSPredicate(
+            format: "label CONTAINS %@", LiveConfig.expectedSessionDate
+        )
+        let completedSession = app.descendants(matching: .any)
+            .matching(reportDatePredicate).firstMatch
+        XCTAssertTrue(completedSession.waitForExistence(timeout: 10))
+        completedSession.tap()
+        XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 10))
+        let historyReport = app.buttons["history-view-report"]
+        scrollTo(historyReport, in: app)
+        XCTAssertTrue(historyReport.waitForExistence(timeout: 10))
+        historyReport.tap()
+        XCTAssertTrue(app.navigationBars["Session report"].waitForExistence(timeout: 20))
+        app.buttons["report-done"].tap()
+        XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["History"].tap()
 
         app.tabBars.buttons["Settings"].tap()
         let exerciseLibrary = app.descendants(matching: .any)["exercise-library-link"]

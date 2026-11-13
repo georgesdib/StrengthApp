@@ -371,6 +371,18 @@ public final class IOSAPIClient {
         )
     }
 
+    /// AFC-2i: the authoritative completed-workout summary, unchanged from the web payload.
+    public func workoutSummary(
+        workoutId: String,
+        session: IOSSession
+    ) async throws -> WorkoutSummaryEnvelope {
+        try await get(
+            path: "api/ios/v1/workouts/\(workoutId)/summary",
+            query: [],
+            session: session
+        )
+    }
+
     public func writeReadiness(
         _ body: ReadinessWriteRequest,
         session: IOSSession,

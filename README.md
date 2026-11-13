@@ -106,6 +106,10 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   value and label a later save as a correction, additive plan
   editing (add/swap/remove and set count), finish with one sRPE picker (Not recorded or 1–10),
   optional productivity (Not recorded or 1–5), abandon with confirmation.
+- **Session report** — after an acknowledged completion, the iPhone shows the AFC-2 completed-workout
+  report: prescription adherence, VBT/velocity, session feedback, quality flags and evidence.
+  History detail can reopen the same report for an app-tracked session; imported sessions without a
+  workout record say so. The report is read-only and performs no client-side calculation.
 - **History** — paginated sessions with sets, tonnage, duration, main lifts and review state;
   tap a session for a read-only outline, duration and set summary plus a recorded execution
   timeline, set/rest durations, prescribed-versus-actual rest and missing-data indicators; load

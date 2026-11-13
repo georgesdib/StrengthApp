@@ -2,6 +2,10 @@ import SwiftUI
 import UIKit
 import StrengthCore
 
+private struct WorkoutReportTarget: Identifiable {
+    let id: String
+}
+
 struct ActiveWorkoutView: View {
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -41,6 +45,8 @@ struct ActiveWorkoutView: View {
     @StateObject private var drafts = WorkoutDraftStore()
     @State private var otherExerciseId: String?
     @State private var showingOtherExercisePicker = false
+    @State private var reportTarget: WorkoutReportTarget?
+    @State private var finishAcknowledged = false
 
     private var workout: WorkoutDetail? { model.activeWorkout }
 
@@ -445,7 +451,8 @@ struct ActiveWorkoutView: View {
                         model.clearRecoveryIssue()
                     }
                     .onChange(of: workout.status) { _, status in
-                        if status == "completed" || status == "abandoned" {
+                        if (status == "completed" || status == "abandoned"),
+                           !finishAcknowledged {
                             dismiss()
                         }
                     }
@@ -527,6 +534,11 @@ struct ActiveWorkoutView: View {
                     },
                     secondaryButton: .cancel()
                 )
+            }
+            .fullScreenCover(item: $reportTarget, onDismiss: {
+                dismiss()
+            }) { target in
+                WorkoutReportView(model: model, workoutId: target.id)
             }
     }
 
@@ -762,10 +774,19 @@ struct ActiveWorkoutView: View {
             productivity: productivity
         )
         let key = finishLocked ? finishOperation.key : finishOperation.use(request)
+        // The status callback must not dismiss the workout while the report is being presented.
+        finishAcknowledged = true
         if await model.completeWorkout(request, idempotencyKey: key) {
             finishOperation.acknowledged()
-            dismiss()
+            if model.offlineFinishPending {
+                // No authoritative summary exists until the queued finish syncs. The report
+                // remains reachable from History after that acknowledgement.
+                dismiss()
+            } else {
+                reportTarget = WorkoutReportTarget(id: workout.workoutId)
+            }
         } else {
+            finishAcknowledged = false
             finishError = model.mutationError
             // A lost response is ambiguous: lock the body and retry the exact operation.
             // A definitive 4xx can still be corrected with a new body.

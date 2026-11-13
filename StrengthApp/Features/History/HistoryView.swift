@@ -140,6 +140,7 @@ struct HistoryDetailView: View {
     @State private var executionUnavailable = false
     @State private var error: String?
     @State private var isLoading = false
+    @State private var showingReport = false
 
     var body: some View {
         List {
@@ -161,6 +162,20 @@ struct HistoryDetailView: View {
                     }
                     if let lifts = detail.mainLifts, !lifts.isEmpty {
                         LabeledContent("Main lifts", value: lifts.map(Self.liftLabel).joined(separator: ", "))
+                    }
+                }
+                Section("Coaching report") {
+                    if let workoutId = detail.workoutId, !workoutId.isEmpty {
+                        Button {
+                            showingReport = true
+                        } label: {
+                            Label("View session report", systemImage: "doc.text.magnifyingglass")
+                        }
+                        .accessibilityIdentifier("history-view-report")
+                    } else {
+                        Text("No coaching report is available for an imported session without a workout record.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 executionSection
@@ -193,6 +208,11 @@ struct HistoryDetailView: View {
         }
         .navigationTitle("Workout")
         .task { await load() }
+        .sheet(isPresented: $showingReport) {
+            if let workoutId = detail?.workoutId {
+                WorkoutReportView(model: model, workoutId: workoutId)
+            }
+        }
     }
 
     @ViewBuilder

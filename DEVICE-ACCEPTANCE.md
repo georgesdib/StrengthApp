@@ -173,6 +173,17 @@ record of what was exercised.
 - [ ] Finish with a session RPE 1-10; the workout completes, appears in History and contributes to
       Progress. Repeating the completion request does not create a second session.
 - [ ] Finish with Session RPE not recorded; the session completes without inventing an RPE.
+- [ ] An acknowledged completion opens the **Session report**; **Done** returns to Today and no
+      second completion request is sent.
+- [ ] The report shows adherence, velocity, session feedback, quality flags and evidence; a plan
+      edited during the workout shows the original and final prescription; unavailable data shows
+      its explicit reason rather than a zero.
+- [ ] Stop the server after completion or corrupt the report read: the report shows **Report
+      unavailable**, **Try again** retries only the read, and **Done** still leaves the flow.
+- [ ] From History, open the completed session and tap **View session report**; the same report
+      opens read-only. An imported session without a workout record explains why no report exists.
+- [ ] Queue a finish offline; the app dismisses as before with no report. After sync, the report is
+      available from History.
 - [ ] Abandon asks for confirmation; the workout becomes abandoned, leaves the active state and
       cannot later be completed.
 - [ ] Attempting to start while another workout is active shows a clear workout-active error and

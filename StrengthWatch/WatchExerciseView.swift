@@ -118,20 +118,22 @@ struct WatchExerciseView: View {
         VStack(alignment: .leading, spacing: 6) {
             loadRow
             repsRow
-            Button {
-                execution.beginSet(loadKg: loadKg, reps: reps)
-            } label: {
-                Text("Start set").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("watch-start-set")
-
-            if onLastPrescribedSet(item) {
-                Button("Add set") {
+            if prescribedSetsExhausted(item) {
+                Button {
                     execution.beginSet(loadKg: loadKg, reps: reps)
+                } label: {
+                    Text("Add set").frame(maxWidth: .infinity)
                 }
-                .font(.footnote)
+                .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("watch-add-set")
+            } else {
+                Button {
+                    execution.beginSet(loadKg: loadKg, reps: reps)
+                } label: {
+                    Text("Start set").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("watch-start-set")
             }
             Button("End exercise") {
                 if execution.completedSetCount(for: item) > 0 {
@@ -304,8 +306,9 @@ struct WatchExerciseView: View {
             : "\(execution.pendingCount) pending"
     }
 
-    private func onLastPrescribedSet(_ item: PrescriptionItem) -> Bool {
-        execution.completedSetCount(for: item) >= max(0, (item.sets ?? 0) - 1)
+    /// True once every prescribed set is done, so the only remaining action is an extra set.
+    private func prescribedSetsExhausted(_ item: PrescriptionItem) -> Bool {
+        execution.completedSetCount(for: item) >= max(0, item.sets ?? 0)
     }
 
     private func setNumber(_ item: PrescriptionItem) -> Int {

@@ -22,6 +22,9 @@ struct WatchExecutionView: View {
                 VStack(spacing: 8) {
                     Text("Session discarded").font(.headline)
                     Text("Nothing was saved for this session.").font(.caption2)
+                    Button("Done") { execution.clearLocal() }
+                        .font(.footnote)
+                        .accessibilityIdentifier("watch-discarded-done")
                 }
             case .readOnly:
                 WatchReadOnlyView(execution: execution)
@@ -48,6 +51,14 @@ struct WatchExecutionView: View {
         }
         .sheet(isPresented: $showingPlan) {
             WatchPlanView(execution: execution)
+        }
+        // Finishing or discarding from a sheet leaves it presented over a screen that no longer
+        // belongs to that sheet; close the stack when the phase leaves the active session.
+        .onChange(of: execution.phase) { _, phase in
+            if phase != .active {
+                showingSession = false
+                showingPlan = false
+            }
         }
     }
 }
@@ -152,7 +163,11 @@ struct WatchFinishProgressView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Finish saved on watch").font(.headline)
-                Text("Syncing to the home server…").font(.caption2)
+                Text(execution.pendingCount > 0
+                     ? "Syncing to the home server…"
+                     : "Saved to the home server")
+                    .font(.caption2)
+                    .foregroundStyle(execution.pendingCount > 0 ? .orange : .secondary)
                 if execution.pendingCount > 0 {
                     Text("\(execution.pendingCount) pending")
                         .font(.caption2)

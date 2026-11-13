@@ -54,6 +54,15 @@ Watch-only build:
       -destination 'platform=watchOS Simulator,id=<watch-simulator-id>' \
       -derivedDataPath <derived> build
 
+Install the watch app on a paired physical watch:
+
+    ./scripts/install-watch.sh
+
+It pushes the Watch/StrengthWatch.app embedded in the newest Debug-iphoneos phone build straight
+to the watch with devicectl. Use it when the iPhone's Watch app spins and silently returns to
+"Install": that handoff gives up quietly when the watch is asleep or off its charger, while this
+prints the actual result. Override with WATCH_UDID or APP_PATH.
+
 Release compile:
 
     xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \

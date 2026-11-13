@@ -273,6 +273,8 @@ date. Nothing here may be claimed from simulator evidence.
 - [ ] A watch-owned session has not already been left idle; abandon or finish any leftover session
       so the 24h abandonment path cannot interfere.
 - [ ] Record the StrengthApp commit SHA under test before starting.
+- [ ] Install the watch app from that build: run `./scripts/install-watch.sh` after building the
+      StrengthApp scheme for the iPhone, or confirm the watch already runs the same build.
 
 ## W1 — Delayed or failed credential delivery (§17.1)
 

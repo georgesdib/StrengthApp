@@ -21,6 +21,19 @@ public struct WorkoutSummary: Decodable {
     public let feedback: WorkoutFeedback?
     public let quality: WorkoutSummaryQuality?
     public let evidence: [WorkoutEvidence]?
+    /// AFC-2i: at most one deterministic per-workout observation. Nil means the server found
+    /// nothing that qualified; the report must not substitute its own.
+    public let observation: WorkoutObservation?
+}
+
+public struct WorkoutObservation: Decodable {
+    public let family: String?
+    public let text: String
+    public let gate: String?
+    public let n: Int?
+    public let evidenceId: String?
+    public let limitations: [String]?
+    public let basis: String?
 }
 
 public struct WorkoutAdherence: Decodable {

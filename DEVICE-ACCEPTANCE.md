@@ -182,6 +182,8 @@ record of what was exercised.
       unavailable**, **Try again** retries only the read, and **Done** still leaves the flow.
 - [ ] From History, open the completed session and tap **View session report**; the same report
       opens read-only. An imported session without a workout record explains why no report exists.
+- [ ] When the summary carries a per-workout observation, the report shows **What stood out** with
+      its gate, sample size and limitations; when the server returns none, the section is absent.
 - [ ] Queue a finish offline; the app dismisses as before with no report. After sync, the report is
       available from History.
 - [ ] Abandon asks for confirmation; the workout becomes abandoned, leaves the active state and

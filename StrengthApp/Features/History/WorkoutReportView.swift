@@ -63,12 +63,43 @@ struct WorkoutReportView: View {
                 }
             }
 
+            observationSection(summary.observation)
             adherenceSection(summary.adherence)
             vbtSection(summary.vbt)
             feedbackSection(summary.feedback)
             qualitySection(summary.quality, evidence: summary.evidence)
         }
         .accessibilityIdentifier("session-report")
+    }
+
+    @ViewBuilder
+    private func observationSection(_ observation: WorkoutObservation?) -> some View {
+        if let observation {
+            Section("What stood out") {
+                Text(observation.text)
+                Text(
+                    Self.label(observation.family ?? "observation")
+                    + (observation.gate.map { " · \($0)" } ?? "")
+                    + (observation.n.map { " · n=\($0)" } ?? "")
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                if let limitations = observation.limitations, !limitations.isEmpty {
+                    DisclosureGroup("Evidence and limitations") {
+                        ForEach(limitations, id: \.self) { limitation in
+                            Text(limitation)
+                                .font(.footnote)
+                        }
+                        if let evidenceId = observation.evidenceId {
+                            Text(evidenceId)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .accessibilityIdentifier("report-observation")
+        }
     }
 
     @ViewBuilder

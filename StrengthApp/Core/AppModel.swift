@@ -2457,7 +2457,10 @@ final class AppModel: ObservableObject {
     }
 
     private func permitsMutation(kind: MutationKind, operationId: String) -> Bool {
-        if isMirroringWatchSession, kind != .planEdit {
+        // The server allows abandonment from any device (contract §9), and the watch turns
+        // read-only on the next refresh. Everything else that writes to a watch-owned session
+        // needs the take-over first.
+        if isMirroringWatchSession, kind != .planEdit, kind != .abandonWorkout {
             mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
             return false
         }

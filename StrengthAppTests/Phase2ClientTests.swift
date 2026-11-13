@@ -1255,6 +1255,39 @@ final class Phase2AppModelTests: XCTestCase {
         )
     }
 
+    func testThePhoneCanAbandonAWatchOwnedSession() async {
+        var abandoned = false
+        let todayJSON = #"{"date":"2026-11-07","readiness":null,"readiness_score":null,"active_workout":"#
+            + Fixtures.watchOwnedWorkout + "}"
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data((abandoned ? Fixtures.today : todayJSON).utf8))
+            case "/api/ios/v1/workouts/workout-1/abandon":
+                abandoned = true
+                return (200, Data(Fixtures.watchOwnedWorkout.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+        XCTAssertTrue(model.isMirroringWatchSession)
+
+        let result = await model.abandonWorkout(idempotencyKey: "abandon-mirror")
+
+        XCTAssertTrue(result, "abandonment is allowed from any device, not just the owner")
+        XCTAssertNil(model.mutationError)
+        XCTAssertNil(model.activeWorkout)
+        XCTAssertTrue(transport.requests.contains {
+            $0.url?.path == "/api/ios/v1/workouts/workout-1/abandon"
+        })
+    }
+
     private func pairedModel(
         transport: HTTPTransport,
         journal: MutationJournal? = nil,

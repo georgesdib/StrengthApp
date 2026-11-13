@@ -102,11 +102,8 @@ struct TodayView: View {
                             NavigationLink {
                                 ActiveWorkoutView(model: model)
                             } label: {
-                                Label("Resume server workout", systemImage: "arrow.clockwise")
+                                Label("Open on this iPhone", systemImage: "iphone")
                             }
-                            .simultaneousGesture(TapGesture().onEnded {
-                                model.clearRecoveryIssue()
-                            })
                             Button("Abandon server workout", role: .destructive) {
                                 Task { await model.abandonRecoveredWorkout() }
                             }

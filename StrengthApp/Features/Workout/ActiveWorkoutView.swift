@@ -439,7 +439,11 @@ struct ActiveWorkoutView: View {
                             }
                         }
                     }
-                    .onAppear { prepare(workout) }
+                    .onAppear {
+                        prepare(workout)
+                        // Opening a recovered server workout resolves the prompt that led here.
+                        model.clearRecoveryIssue()
+                    }
                     .onChange(of: workout.status) { _, status in
                         if status == "completed" || status == "abandoned" {
                             dismiss()

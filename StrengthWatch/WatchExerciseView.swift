@@ -8,6 +8,7 @@ struct WatchExerciseView: View {
     @Binding var showingPlan: Bool
 
     @State private var loadKg = 0.0
+    @State private var loadText = ""
     @State private var reps = 5
     @State private var showingRIR = false
     @State private var preparedFor: String?
@@ -169,22 +170,18 @@ struct WatchExerciseView: View {
 
     private var loadRow: some View {
         HStack {
-            Text("\(formatted(loadKg)) kg").font(.body).monospacedDigit()
+            Text("Load").font(.caption2)
             Spacer()
-            Button("−") { loadKg = max(0, loadKg - 2.5) }
-            Button("+") { loadKg += 2.5 }
+            TextField("kg", text: $loadText)
+                .multilineTextAlignment(.trailing)
+                .accessibilityIdentifier("watch-load")
         }
-        .focusable()
-        .digitalCrownRotation(
-            $loadKg,
-            from: 0,
-            through: 400,
-            by: 2.5,
-            sensitivity: .medium,
-            isContinuous: false,
-            isHapticFeedbackEnabled: true
-        )
-        .accessibilityIdentifier("watch-load")
+        .onChange(of: loadText) { _, text in
+            let normalized = text.replacingOccurrences(of: ",", with: ".")
+            if let value = Double(normalized) {
+                loadKg = max(0, value)
+            }
+        }
     }
 
     private var repsRow: some View {
@@ -287,6 +284,7 @@ struct WatchExerciseView: View {
         let itemIndex = item.orderIndex ?? -1
         if let active = execution.activeSet, active.planItemIndex == itemIndex {
             loadKg = active.loadKg ?? loadKg
+            loadText = formatted(loadKg)
             reps = active.reps ?? reps
             preparedFor = "\(itemIndex)-draft"
             return
@@ -295,6 +293,7 @@ struct WatchExerciseView: View {
         guard preparedFor != key else { return }
         preparedFor = key
         loadKg = item.loadKg ?? loadKg
+        loadText = formatted(loadKg)
         reps = item.repsLow ?? item.repsHigh ?? reps
     }
 

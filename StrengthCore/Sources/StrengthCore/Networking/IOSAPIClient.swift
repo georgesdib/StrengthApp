@@ -648,7 +648,9 @@ public final class IOSAPIClient {
     ) async throws -> WorkoutDetail {
         try await post(
             path: "api/ios/v1/workouts/\(workoutId)/takeover",
-            body: EmptyRequest(),
+            // The server refuses a take-over that is not explicitly confirmed; the user has
+            // already confirmed in the UI, so the request carries that acknowledgement.
+            body: ["confirm": true],
             kind: .takeover,
             targetId: workoutId,
             session: session,

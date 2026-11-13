@@ -17,6 +17,25 @@ final class IOSAPIClientTests: XCTestCase {
         return (IOSAPIClient(transport: transport), transport)
     }
 
+    func testTakeoverSendsTheRequiredConfirmation() async throws {
+        let (client, transport) = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/ios/v1/workouts/workout-1/takeover")
+            let object = request.httpBody.flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            XCTAssertEqual(object?["confirm"] as? Bool, true)
+            return (200, Data(Fixtures.workoutInProgress.utf8))
+        }
+
+        _ = try await client.takeover(
+            workoutId: "workout-1",
+            session: session,
+            idempotencyKey: "takeover-1"
+        )
+
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+
     // MARK: Decoding
 
     func testBootstrapDecodesAndSendsTheBearerToken() async throws {

@@ -71,7 +71,7 @@ public enum JSONValue: Codable, Equatable {
 
 // MARK: - Prescription
 
-public struct PrescriptionPlan: Codable {
+public struct PrescriptionPlan: Codable, Sendable {
     public let forDate: String?
     public let sessionType: String?
     public let sessionLabel: String?
@@ -96,7 +96,7 @@ public struct PrescriptionPlan: Codable {
     }
 }
 
-public struct WarmupSet: Codable, Equatable, Identifiable {
+public struct WarmupSet: Codable, Equatable, Sendable, Identifiable {
     public let percent: Double
     public let reps: Int
     public let loadKg: Double
@@ -114,7 +114,7 @@ public struct WarmupSet: Codable, Equatable, Identifiable {
     }
 }
 
-public struct PrescriptionItem: Codable, Identifiable {
+public struct PrescriptionItem: Codable, Sendable, Identifiable {
     public let orderIndex: Int?
     public let exerciseId: String?
     public let sets: Int?

@@ -77,7 +77,7 @@ final class WatchHealthKitRecorder: NSObject, WatchLivenessAnchor, HealthKitSavi
             Task { [weak self] in
                 do {
                     try await builder.beginCollection(at: date)
-                    await self?.collectionBegan()
+                    self?.collectionBegan()
                 } catch {
                     await self?.failStart(error)
                 }
@@ -217,7 +217,7 @@ final class WatchHealthKitRecorder: NSObject, WatchLivenessAnchor, HealthKitSavi
         }
     }
 
-    private static func classify(_ error: Error) -> HealthKitSaveFailure {
+    private nonisolated static func classify(_ error: Error) -> HealthKitSaveFailure {
         if let failure = error as? HealthKitSaveFailure { return failure }
         let nsError = error as NSError
         guard nsError.domain == HKErrorDomain else {

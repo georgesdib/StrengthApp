@@ -63,9 +63,19 @@ final class WatchSmokeTests: XCTestCase {
         let endSet = app.buttons["watch-end-set"]
         XCTAssertTrue(endSet.waitForExistence(timeout: 15))
         endSet.tap()
+        // watchOS focuses the sheet's first text field, so the keyboard covers the RIR buttons.
+        sleep(1)
+        if app.buttons["Done"].exists {
+            app.buttons["Done"].tap()
+            sleep(1)
+        }
         let rir = app.buttons["5"]
         XCTAssertTrue(rir.waitForExistence(timeout: 15))
         rir.tap()
+        sleep(1)
+        if app.buttons["Done"].exists {
+            app.buttons["Done"].tap()
+        }
 
         // Finish from the session sheet.
         let session = app.buttons["watch-session"]

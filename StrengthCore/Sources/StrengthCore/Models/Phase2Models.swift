@@ -627,7 +627,7 @@ public struct StartWorkoutRequest: Encodable {
     }
 }
 
-public struct RepVelocity: Codable, Equatable, Identifiable {
+public struct RepVelocity: Codable, Equatable, Sendable, Identifiable {
     public let repIndex: Int
     public let velocityMps: Double
 

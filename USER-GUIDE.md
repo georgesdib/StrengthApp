@@ -235,6 +235,9 @@ optional mean velocity, rest, rate form at **End exercise**, and finish with sRP
 during the session and exactly one HealthKit workout is saved. Capture is local-first: without the
 network the sets queue on the watch and sync when it reconnects.
 
+Requested a workout for the wrong target? The ready card on Today offers **Request another
+workout**, which supersedes the pending plan; a watch only drops the old plan at its next refresh.
+
 While the watch owns the session the phone shows **Logged on Apple Watch** and does not accept sets,
 form ratings or velocity. Use the phone to edit the plan; an edit reaches the watch at its next idle
 point, never mid-set. **Take over logging** asks for confirmation, moves the session to the phone

@@ -12,6 +12,7 @@ struct TodayView: View {
     @State private var draftSettings = PlanSettings()
     @State private var draftTarget: PrescriptionExecutionTarget = .phone
     @State private var showingPlanSettings = false
+    @State private var confirmingReplace = false
     @State private var showingWorkout = false
     @State private var showingReview = false
     @State private var startAfterReview = false
@@ -467,6 +468,28 @@ struct TodayView: View {
                 Label("Review workout", systemImage: "list.bullet.clipboard")
             }
             .accessibilityIdentifier("review-workout")
+            Button {
+                confirmingReplace = true
+            } label: {
+                Label("Request another workout", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .accessibilityIdentifier("replace-workout")
+            .disabled(model.isSaving || model.isOffline || model.hasPendingOfflineCapture)
+            if model.isOffline || model.hasPendingOfflineCapture {
+                Text("Replacing the workout requires the server.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .confirmationDialog(
+            "Replace the ready workout?",
+            isPresented: $confirmingReplace,
+            titleVisibility: .visible
+        ) {
+            Button("Request another", role: .destructive) { startPrescription() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The ready plan is superseded and can no longer be started.")
         }
     }
 

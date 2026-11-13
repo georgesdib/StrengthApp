@@ -47,12 +47,14 @@ final class WatchSmokeTests: XCTestCase {
         XCTAssertTrue(exercise.waitForExistence(timeout: 30))
         sleep(1)   // let the list settle after the phase change
         let startSet = app.buttons["watch-start-set"]
-        // A plain tap on a watchOS list row is sometimes swallowed; tap the coordinate instead.
-        exercise.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        print("SMOKE-ROW hittable=\(exercise.isHittable) frame=\(exercise.frame)")
+        exercise.staticTexts.firstMatch.tap()
+        if !startSet.waitForExistence(timeout: 10) {
+            exercise.press(forDuration: 0.1)
+        }
         if !startSet.waitForExistence(timeout: 10) {
             print("SMOKE-TREE-SELECT:\n\(app.debugDescription)")
-            exercise.tap()
-            XCTAssertTrue(startSet.waitForExistence(timeout: 30), "the exercise did not open")
+            XCTFail("the exercise did not open")
         }
         startSet.tap()
         app.tap()   // lets the interruption monitor fire
@@ -78,7 +80,10 @@ final class WatchSmokeTests: XCTestCase {
 
         // The server acknowledges the finish and the summary offers Done.
         let done = app.buttons["watch-done"]
-        XCTAssertTrue(done.waitForExistence(timeout: 120), "the finish never reached the server")
+        if !done.waitForExistence(timeout: 120) {
+            print("SMOKE-TREE-FINISH:\n\(app.debugDescription)")
+            XCTFail("the finish never reached the server")
+        }
         done.tap()
         XCTAssertTrue(app.buttons["watch-start"].waitForExistence(timeout: 30))
     }

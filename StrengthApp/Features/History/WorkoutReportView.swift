@@ -137,15 +137,30 @@ struct WorkoutReportView: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.headline)
-            Text("\(view.matchedSets ?? 0) of \(view.prescribedSets ?? 0) prescribed sets filled")
-                .font(.subheadline)
+            if let matched = view.matchedSets, let prescribed = view.prescribedSets {
+                Text("\(matched) of \(prescribed) prescribed sets filled")
+                    .font(.subheadline)
+            } else {
+                Text("Set counts unavailable")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             if let completion = view.setCompletion {
                 Text("Set completion: \(Self.ratio(completion))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            LabeledContent("Missing sets", value: "\(view.missingSets ?? 0)")
-            LabeledContent("Extra sets", value: "\(view.extraSets ?? 0)")
+            LabeledContent("Missing sets", value: Self.count(view.missingSets))
+            LabeledContent("Extra sets", value: Self.count(view.extraSets))
+            if let unattributable = view.unattributablePlannedSets, unattributable > 0 {
+                LabeledContent(
+                    "Unattributable planned sets",
+                    value: "\(unattributable)"
+                )
+                Text("Some prescribed slots could not be attributed reliably to performed sets.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             attainment("Repetitions", view.reps)
             attainment("Load", view.load)
             attainment("RIR", view.rir)
@@ -160,9 +175,10 @@ struct WorkoutReportView: View {
                 Text("\(label): \(Self.ratio(value.attainment))")
                     .font(.caption)
                 Text(
-                    "within \(value.withinTarget ?? 0) · below \(value.belowTarget ?? 0)"
-                    + " · above \(value.aboveTarget ?? 0)"
-                    + " · unavailable \(value.unavailableSets ?? 0)"
+                    "within \(Self.count(value.withinTarget))"
+                    + " · below \(Self.count(value.belowTarget))"
+                    + " · above \(Self.count(value.aboveTarget))"
+                    + " · unavailable \(Self.count(value.unavailableSets))"
                 )
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -231,9 +247,9 @@ struct WorkoutReportView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     if let quality = vbt.quality {
-                        LabeledContent("Target sets", value: "\(quality.targetSets ?? 0)")
-                        LabeledContent("Comparable sets", value: "\(quality.comparableSets ?? 0)")
-                        LabeledContent("Excluded sets", value: "\(quality.excludedSets ?? 0)")
+                        LabeledContent("Target sets", value: Self.count(quality.targetSets))
+                        LabeledContent("Comparable sets", value: Self.count(quality.comparableSets))
+                        LabeledContent("Excluded sets", value: Self.count(quality.excludedSets))
                         if let metadata = quality.targetMetadata, !metadata.isEmpty {
                             Text("Target metadata: " + metadata.keys.sorted().map {
                                 "\($0) \(metadata[$0] ?? 0)"
@@ -248,8 +264,8 @@ struct WorkoutReportView: View {
                                 .font(.caption)
                                 .fontWeight(.semibold)
                             Text(
-                                "comparable \(exercise.comparableSets ?? 0)"
-                                + " · excluded \(exercise.excludedSets ?? 0)"
+                                "comparable \(Self.count(exercise.comparableSets))"
+                                + " · excluded \(Self.count(exercise.excludedSets))"
                                 + " · mean Δ \(Self.signed(exercise.meanSignedDeltaMps, unit: "m/s"))"
                             )
                             .font(.caption2)
@@ -351,9 +367,13 @@ struct WorkoutReportView: View {
 
     nonisolated private static func ratio(_ value: AdherenceRatio?) -> String {
         guard let value else { return "Unavailable" }
-        let counts = "\(value.numerator ?? 0) / \(value.denominator ?? 0)"
+        let counts = "\(count(value.numerator)) / \(count(value.denominator))"
         guard let ratio = value.ratio else { return counts }
         return counts + " (ratio " + String(format: "%.2f", ratio) + ")"
+    }
+
+    nonisolated private static func count(_ value: Int?) -> String {
+        value.map(String.init) ?? "Unavailable"
     }
 
     nonisolated private static func signed(_ value: Double?, unit: String) -> String {
@@ -408,7 +428,10 @@ struct WorkoutReportView: View {
             lines.append("Removed \(label(change.exerciseId ?? "exercise"))")
         }
         for change in changes.setCountChanged ?? [] {
-            lines.append("Set count changed: \(label(change.exerciseId ?? "exercise")) → \(change.sets ?? 0) sets")
+            lines.append(
+                "Set count changed: \(label(change.exerciseId ?? "exercise")) → "
+                + (change.sets.map { "\($0) sets" } ?? "unavailable")
+            )
         }
         for change in changes.targetsChanged ?? [] {
             lines.append("Targets changed: \(label(change.exerciseId ?? "exercise"))")

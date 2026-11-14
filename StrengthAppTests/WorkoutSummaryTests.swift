@@ -23,6 +23,7 @@ final class WorkoutSummaryTests: XCTestCase {
         XCTAssertEqual(summary.adherence?.finalPlan?.setCompletion?.numerator, 3)
         XCTAssertEqual(summary.adherence?.finalPlan?.setCompletion?.denominator, 4)
         XCTAssertEqual(summary.adherence?.finalPlan?.setCompletion?.ratio, 0.75)
+        XCTAssertEqual(summary.adherence?.finalPlan?.unattributablePlannedSets, 2)
         XCTAssertEqual(summary.adherence?.quality?.planModified, true)
         XCTAssertEqual(summary.adherence?.changes?.setCountChanged?.first?.sets, 3)
         XCTAssertEqual(summary.vbt?.status, "available")
@@ -102,7 +103,7 @@ final class WorkoutSummaryTests: XCTestCase {
           "reason": null,
           "original": {"view":"original","status":"available",
             "prescribed_sets":4,"performed_sets":5,"matched_sets":3,
-            "missing_sets":1,"extra_sets":1,
+            "missing_sets":1,"extra_sets":1,"unattributable_planned_sets":2,
             "set_completion":{"numerator":3,"denominator":4,"ratio":0.75},
             "reps":{"attainment":{"numerator":3,"denominator":3,"ratio":1.0},
               "evaluated_sets":3,"within_target":2,"below_target":1,
@@ -118,7 +119,7 @@ final class WorkoutSummaryTests: XCTestCase {
               "unavailable_metrics":["missing_actual_rir"]}},
           "final_plan": {"view":"final_plan","status":"available",
             "prescribed_sets":4,"performed_sets":5,"matched_sets":3,
-            "missing_sets":1,"extra_sets":1,
+            "missing_sets":1,"extra_sets":1,"unattributable_planned_sets":2,
             "set_completion":{"numerator":3,"denominator":4,"ratio":0.75},
             "reps":{"attainment":{"numerator":3,"denominator":3,"ratio":1.0},
               "evaluated_sets":3,"within_target":2,"below_target":1,

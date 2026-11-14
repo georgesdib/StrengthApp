@@ -1,7 +1,9 @@
 # Watch acceptance — owner-run (6.2b–6.7)
 
-**Status: not yet performed.** This script is for the owner's physical iPhone + Apple Watch. A
-simulator build is not proof of WatchConnectivity delivery, Keychain isolation or watch installation.
+**Status: owner-confirmed 2026-11-14.** The 6.6/6.7 checklist and sign-off table at the end record
+the physical run. The per-phase scripts below (6.2b–6.5) are retained for reference; their steps
+are covered by that run's W-items. A simulator build is not proof of WatchConnectivity delivery,
+Keychain isolation or watch installation.
 
 ## Before you start
 
@@ -122,7 +124,7 @@ simulator build is not proof of WatchConnectivity delivery, Keychain isolation o
 
 ## Execution lifecycle (6.3) — owner-run
 
-**Status: not yet performed.** Requires the watch build; a simulator is not proof of liveness,
+**Status: covered by the 2026-11-14 owner sign-off** (see the checklist at the end). Requires the watch build; a simulator is not proof of liveness,
 suspension or the Digital Crown.
 
 - [ ] Request a plan for **Apple Watch**; the watch shows **Start on Apple Watch**.
@@ -180,7 +182,7 @@ suspension or the Digital Crown.
 
 ## Reconciliation and conflicts (6.4) — owner-run
 
-**Status: not yet performed.** Needs a phone and a watch, and a disposable server.
+**Status: covered by the 2026-11-14 owner sign-off** (see the checklist at the end). Needs a phone and a watch, and a disposable server.
 
 - [ ] Watch targets a plan, starts, logs one set, then **turn Wi-Fi off**.
 - [ ] On the phone, swap the next exercise in the plan. Back on the watch, log a set against the

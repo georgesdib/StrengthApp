@@ -1,7 +1,7 @@
 # Phase 6.6 — active session, refresh and mirror ownership
 
 **Status:** implemented 2026-11-12; 283 iPhone/package tests pass and the watch target builds;
-physical Ultra acceptance pending. The canonical requirements
+physical Ultra acceptance owner-confirmed 2026-11-14. The canonical requirements
 are in the portfolio [watch contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
 §9, §10.3, §13 and §17; this slice plan records the client implementation and acceptance only.
 

@@ -12,6 +12,8 @@ struct WatchExerciseView: View {
     @State private var loadText = ""
     @State private var reps = 5
     @State private var showingRIR = false
+    /// End-set stamp: the RIR/velocity entry that follows is rest time, not set time.
+    @State private var completionStamp: Date?
     @State private var preparedFor: String?
     @State private var logging = false
     @State private var showingForm = false
@@ -161,6 +163,7 @@ struct WatchExerciseView: View {
             loadRow
             repsRow
             Button {
+                completionStamp = execution.currentStamp()
                 showingRIR = true
             } label: {
                 Text("End set").frame(maxWidth: .infinity)
@@ -227,7 +230,10 @@ struct WatchExerciseView: View {
                     Button("\(value)") { save(rir: value) }
                 }
                 Button("Not recorded") { save(rir: nil) }
-                Button("Cancel") { showingRIR = false }
+                Button("Cancel") {
+                    completionStamp = nil
+                    showingRIR = false
+                }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -298,13 +304,16 @@ struct WatchExerciseView: View {
         logging = true
         let velocity = parsedVelocity
         let perRep = parsedRepVelocities
+        let completedAt = completionStamp
+        completionStamp = nil
         Task {
             await execution.logSet(
                 loadKg: loadKg,
                 reps: reps,
                 rir: rir,
                 velocityMps: velocity,
-                repVelocities: perRep
+                repVelocities: perRep,
+                completedAt: completedAt
             )
             velocityText = ""
             repVelocityText = ""

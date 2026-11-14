@@ -264,7 +264,8 @@ final class WatchExecutionController: ObservableObject {
         reps: Int,
         rir: Int?,
         velocityMps: Double? = nil,
-        repVelocities: [RepVelocity]? = nil
+        repVelocities: [RepVelocity]? = nil,
+        completedAt: Date? = nil
     ) async {
         guard let session = currentSession(), let item = engine.selectedItem else { return }
         let itemIndex = item.orderIndex ?? 0
@@ -276,7 +277,8 @@ final class WatchExecutionController: ObservableObject {
             reps: reps,
             rir: rir,
             velocityMps: velocityMps,
-            repVelocities: repVelocities
+            repVelocities: repVelocities,
+            completedAt: completedAt
         )
         isWorking = true
         defer { isWorking = false }
@@ -284,7 +286,11 @@ final class WatchExecutionController: ObservableObject {
         // Rest belongs to a set that actually happened: a local storage failure must not start
         // one, while a network failure still does.
         if result.persisted, engine.phase == .active, let seconds = item.restS, seconds > 0 {
-            try? engine.startRest(seconds: seconds, planItemIndex: item.orderIndex)
+            try? engine.startRest(
+                seconds: seconds,
+                planItemIndex: item.orderIndex,
+                startedAt: completedAt
+            )
         }
         await handle(result.stop)
         sync()
@@ -384,6 +390,11 @@ final class WatchExecutionController: ObservableObject {
         draftTask = nil
         guard engine.activeSet != nil else { return }
         try? engine.updateActiveSetDraft(loadKg: draftLoad, reps: draftReps)
+    }
+
+    /// Stamps End set in the server clock domain before the RIR sheet opens.
+    func currentStamp() -> Date {
+        engine.currentStamp()
     }
 
     /// −15s on the watch: shortens what is left, and simply ends the rest if that is all of it.

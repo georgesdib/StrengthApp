@@ -128,6 +128,9 @@ public final class WatchExecutionEngine {
         public var velocityMps: Double?
         /// Optional per-rep velocities, in rep order. Descriptive like the mean.
         public var repVelocities: [RepVelocity]?
+        /// When the lifter tapped End set, in the server clock domain. Nil means "now".
+        /// VBT entry happens during the rest, so it must not move the set's completion.
+        public var completedAt: Date?
 
         public init(
             exerciseId: String,
@@ -137,7 +140,8 @@ public final class WatchExecutionEngine {
             reps: Int,
             rir: Int?,
             velocityMps: Double? = nil,
-            repVelocities: [RepVelocity]? = nil
+            repVelocities: [RepVelocity]? = nil,
+            completedAt: Date? = nil
         ) {
             self.exerciseId = exerciseId
             self.planItemIndex = planItemIndex
@@ -147,6 +151,7 @@ public final class WatchExecutionEngine {
             self.rir = rir
             self.velocityMps = velocityMps
             self.repVelocities = repVelocities
+            self.completedAt = completedAt
         }
     }
 
@@ -273,6 +278,11 @@ public final class WatchExecutionEngine {
         return ordered.first {
             setsDone(planItemIndex: $0.orderIndex ?? -1) < ($0.sets ?? 0)
         }
+    }
+
+    /// The current server-clock instant, so a view can stamp End set before the sheet opens.
+    public func currentStamp() -> Date {
+        stampedNow()
     }
 
     public var activeSet: ActiveSet? {
@@ -816,7 +826,10 @@ public final class WatchExecutionEngine {
                 stop: .conflict(code: "no_workout", message: "There is no active workout.")
             )
         }
-        let stamp = stampedNow()
+        // Completion is End set, not the moment the RIR/velocity entry finished.
+        let stamp = entry.completedAt ?? stampedNow()
+        // The add-set carries when the set was performed (Start set), not the save time.
+        let performed = sessionRecord?.activeSet?.startedAt ?? stamp
         let token = sessionRecord?.activeSet?.localSetID ?? UUID().uuidString.lowercased()
         let localSetID: Int
         do {
@@ -833,7 +846,7 @@ public final class WatchExecutionEngine {
             setIndex: entry.setIndex,
             planItemIndex: entry.planItemIndex,
             repVelocities: entry.repVelocities,
-            performedAt: ServerClock.encodedISO(stamp)
+            performedAt: ServerClock.encodedISO(performed)
         )
         do {
             try mutate { capture in
@@ -894,9 +907,15 @@ public final class WatchExecutionEngine {
 
     // MARK: - Rest
 
-    public func startRest(seconds: Int, planItemIndex: Int? = nil) throws {
+    /// Starts the rest anchored at `startedAt` (the set's End-set stamp), so time spent on the
+    /// RIR/velocity sheet is rest, not part of the set.
+    public func startRest(
+        seconds: Int,
+        planItemIndex: Int? = nil,
+        startedAt: Date? = nil
+    ) throws {
         guard seconds > 0, let workout else { return }
-        let stamp = stampedNow()
+        let stamp = startedAt ?? stampedNow()
         try mutate { capture in
             guard var record = capture.session else { return }
             record.rest = RestInterval(

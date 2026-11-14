@@ -59,6 +59,71 @@ final class WatchExecutionEngineTests: XCTestCase {
 
     // MARK: - Sets
 
+    func testAddSetIsPerformedWhenTheSetStartedNotWhenItWasSaved() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Self.watchWorkout.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+
+        let started = engine.currentStamp()
+        try engine.beginSet(loadKg: 140, reps: 3)
+        // The RIR/velocity sheet takes 90 s; none of it belongs to the set.
+        clock = clock.addingTimeInterval(90)
+        let completed = engine.currentStamp()
+
+        let result = await engine.logSet(
+            WatchExecutionEngine.SetEntry(
+                exerciseId: "competition_squat",
+                planItemIndex: 0,
+                setIndex: 1,
+                loadKg: 140,
+                reps: 3,
+                rir: 2,
+                completedAt: completed
+            ),
+            session: session()
+        )
+
+        XCTAssertTrue(result.persisted)
+        let operation = try XCTUnwrap(try store.load().operations.first { $0.kind == .addSet })
+        guard case .addSet(let body) = operation.body else {
+            return XCTFail("expected an add-set operation")
+        }
+        XCTAssertEqual(body.performedAt, ServerClock.encodedISO(started))
+        XCTAssertEqual(operation.createdAt, completed)
+    }
+
+    func testRestIsAnchoredAtTheEndSetStampNotTheSaveTime() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/workouts") == true {
+                return (200, Data(Self.watchWorkout.utf8))
+            }
+            throw APIError.transport("offline")
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet(loadKg: 140, reps: 3)
+        let endSet = engine.currentStamp()
+
+        _ = await engine.logSet(entry(setIndex: 1), session: session())
+        // The sheet closed 60 s after End set; the rest still started at End set.
+        try engine.startRest(
+            seconds: 120,
+            planItemIndex: 0,
+            startedAt: endSet.addingTimeInterval(-60)
+        )
+
+        let rest = try XCTUnwrap(engine.sessionRecord?.rest)
+        XCTAssertEqual(rest.startedAt, endSet.addingTimeInterval(-60))
+        XCTAssertEqual(rest.endsAt, endSet.addingTimeInterval(60))
+    }
+
     func testWatchSetCarriesPerRepVelocitiesIntoTheQueuedOperation() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/workouts") == true {

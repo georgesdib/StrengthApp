@@ -122,6 +122,9 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
     public let repsHigh: Int?
     public let loadKg: Double?
     public let loadBasis: String?
+    /// Present when the plan deliberately has no load for this item, e.g. a swap made during
+    /// the workout. A nil load is not the same thing as a bodyweight load.
+    public let unknownLoadReason: String?
     public let rirTarget: Int?
     public let effortModel: String?
     public let refs: [String]?
@@ -140,6 +143,7 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         repsHigh: Int?,
         loadKg: Double?,
         loadBasis: String?,
+        unknownLoadReason: String? = nil,
         rirTarget: Int?,
         effortModel: String?,
         refs: [String]?,
@@ -155,6 +159,7 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         self.repsHigh = repsHigh
         self.loadKg = loadKg
         self.loadBasis = loadBasis
+        self.unknownLoadReason = unknownLoadReason
         self.rirTarget = rirTarget
         self.effortModel = effortModel
         self.refs = refs
@@ -167,7 +172,9 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
     public var id: String { "\(orderIndex ?? 0)-\(exerciseId ?? "")" }
 
     public var loadLabel: String {
-        guard let loadKg, loadKg > 0 else { return "bodyweight" }
+        if loadBasis == "bodyweight" || loadKg == 0 { return "bodyweight" }
+        guard let loadKg else { return "Load not set" }
+        guard loadKg > 0 else { return "bodyweight" }
         return String(format: "%.1f kg", loadKg)
     }
 

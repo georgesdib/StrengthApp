@@ -107,23 +107,40 @@ struct WatchExerciseView: View {
             Text("Set \(setNumber(item)) of \(item.sets ?? 0)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                if let heartRate = execution.heartRate {
+                    Label("\(heartRate) bpm", systemImage: "heart.fill")
+                        .foregroundStyle(.red)
+                }
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Label(
+                        formattedDuration(execution.elapsed(at: context.date)),
+                        systemImage: "timer"
+                    )
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("watch-total-time")
+            }
+            .font(.caption)
+            .monospacedDigit()
             Text("\(item.loadLabel) × \(item.repsLabel)")
                 .font(.title3)
             Text(item.effortLabel)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            if let heartRate = execution.heartRate {
-                Text("\(heartRate) bpm")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
         }
     }
 
     private func idle(_ item: PrescriptionItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            warmupSection(item)
             loadRow
             repsRow
+            if loadEntryNeeded {
+                Text("Enter the load for this exercise.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
             if prescribedSetsExhausted(item) {
                 Button {
                     execution.beginSet(loadKg: loadKg, reps: reps)
@@ -131,6 +148,7 @@ struct WatchExerciseView: View {
                     Text("Add set").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(loadEntryNeeded)
                 .accessibilityIdentifier("watch-add-set")
             } else {
                 Button {
@@ -139,6 +157,7 @@ struct WatchExerciseView: View {
                     Text("Start set").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(loadEntryNeeded)
                 .accessibilityIdentifier("watch-start-set")
             }
             Button("End exercise") {
@@ -171,6 +190,26 @@ struct WatchExerciseView: View {
             .buttonStyle(.borderedProminent)
             .disabled(logging || execution.isWorking)
             .accessibilityIdentifier("watch-end-set")
+        }
+    }
+
+    @ViewBuilder
+    private func warmupSection(_ item: PrescriptionItem) -> some View {
+        if let warmups = item.warmup, !warmups.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Warm-up")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                ForEach(Array(warmups.enumerated()), id: \.offset) { index, warmup in
+                    Text("Warm-up \(index + 1): \(warmup.loadLabel) × \(warmup.reps)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Optional. Log working sets below.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityIdentifier("watch-warmups")
         }
     }
 
@@ -207,9 +246,10 @@ struct WatchExerciseView: View {
                 Text("\(formatted(loadKg)) kg × \(reps)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                // Only a calibrated lift has a velocity target; bodyweight work must not ask
-                // for bar speed (contract: the plan decides, the client displays).
-                if execution.selectedItem?.velocityTarget != nil {
+                // A calibrated lift always offers velocity; a swapped unknown-load lift has
+                // no target but can still record an optional measurement. Bodyweight work
+                // does not ask for bar speed.
+                if offersVelocityInput {
                     TextField("Bar speed m/s", text: $velocityText)
                         .accessibilityIdentifier("watch-velocity")
                     if !velocityText.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -274,6 +314,24 @@ struct WatchExerciseView: View {
 
     /// Optional mean velocity for the set (VBT). Empty means "not measured"; a non-empty value
     /// must parse, so a typo cannot silently drop the measurement.
+    /// A swapped or otherwise re-solved exercise has no issued target; allow an optional
+    /// measurement for it, but keep bodyweight work free of a bar-speed prompt.
+    private var offersVelocityInput: Bool {
+        guard let item = execution.selectedItem else { return false }
+        if item.velocityTarget != nil { return true }
+        guard item.loadBasis != "bodyweight" else { return false }
+        return item.unknownLoadReason != nil
+    }
+
+    /// A nil load after a swap is unknown, not bodyweight. Force an explicit entry before the
+    /// set can be started so a missing value is never recorded as 0 kg.
+    private var loadEntryNeeded: Bool {
+        guard let item = execution.selectedItem else { return false }
+        return item.loadKg == nil
+            && item.loadBasis != "bodyweight"
+            && loadKg <= 0
+    }
+
     private var parsedVelocity: Double? {
         let trimmed = velocityText.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, let value = Double(trimmed), value > 0 else { return nil }
@@ -335,8 +393,13 @@ struct WatchExerciseView: View {
         let key = "\(itemIndex)-\(item.exerciseId ?? "")"
         guard preparedFor != key else { return }
         preparedFor = key
-        loadKg = item.loadKg ?? loadKg
-        loadText = formatted(loadKg)
+        if let plannedLoad = item.loadKg {
+            loadKg = plannedLoad
+            loadText = formatted(plannedLoad)
+        } else {
+            loadKg = 0
+            loadText = ""
+        }
         reps = item.repsLow ?? item.repsHigh ?? reps
     }
 

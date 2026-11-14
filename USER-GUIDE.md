@@ -237,12 +237,17 @@ version. When the watch has no active session, it updates its Home address witho
 token.
 
 The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR
-(mean velocity only when the plan asks for it). The rest starts when you tap **End set**, so the
-RIR and velocity entry happens during the rest, not inside the set. Rest — **+15s** extends it,
-**−15s** shortens it,
-and a local notification fires when it ends if you allowed notifications — rate form at
-**End exercise**, and finish with sRPE and optional productivity. Heart rate shows during the
-session and exactly one HealthKit workout is saved. Capture is local-first: without the
+(mean velocity when the plan supplies a target, or optionally for a swapped lift that has no
+target). Warm-up rows are shown read-only above the working sets; the watch does not log them.
+The rest starts when you tap **End set**, so the RIR and velocity entry happens during the rest,
+not inside the set. Rest — **+15s** extends it, **−15s** shortens it, and a local notification fires
+when it ends if you allowed notifications — rate form at **End exercise**, and finish with
+editable sRPE and optional productivity. Total elapsed time and heart rate show at the top of the
+exercise screen. Exactly one HealthKit workout is saved.
+
+A swap deliberately clears the old lift's load, warm-up ramps and velocity target. The replacement
+shows **Load not set** rather than **bodyweight**; enter the load before starting. VBT remains
+optional for the swapped lift, but it is not presented as a calibrated target. Capture is local-first: without the
 network the sets queue on the watch and sync when it reconnects.
 
 Requested a workout for the wrong target? The ready card on Today offers **Request another

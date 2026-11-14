@@ -40,6 +40,10 @@ final class WatchTodayTests: XCTestCase {
                     "refs": [],
                     "rest_s": 180,
                     "essential": true,
+                    "warmup": [
+                        ["percent": 40, "reps": 5, "load_kg": 40],
+                        ["percent": 60, "reps": 3, "load_kg": 60]
+                    ],
                 ]],
                 "warnings": [],
                 "issues": [],
@@ -66,7 +70,43 @@ final class WatchTodayTests: XCTestCase {
         XCTAssertEqual(plan.items[0].loadLabel, "100.0 kg")
         XCTAssertEqual(plan.items[0].effortLabel, "RIR 2")
         XCTAssertEqual(plan.items[0].restLabel, "180s rest")
+        XCTAssertEqual(plan.items[0].warmupLabel, "40.0 kg×5 · 60.0 kg×3")
         XCTAssertEqual(plan.warnings, ["Keep the bar path quiet."])
+    }
+
+    func testUnknownLoadIsNotRenderedAsBodyweight() {
+        let unknown = PrescriptionItem(
+            orderIndex: 0,
+            exerciseId: "trap_bar_deadlift",
+            sets: 3,
+            repsLow: 5,
+            repsHigh: 5,
+            loadKg: nil,
+            loadBasis: nil,
+            unknownLoadReason: "swapped during workout; load not re-solved",
+            rirTarget: 2,
+            effortModel: "rir",
+            refs: [],
+            restS: 180,
+            essential: false
+        )
+        XCTAssertEqual(unknown.loadLabel, "Load not set")
+
+        let bodyweight = PrescriptionItem(
+            orderIndex: 1,
+            exerciseId: "pull_up",
+            sets: 3,
+            repsLow: 5,
+            repsHigh: 5,
+            loadKg: 0,
+            loadBasis: "bodyweight",
+            rirTarget: 2,
+            effortModel: "rir",
+            refs: [],
+            restS: 120,
+            essential: false
+        )
+        XCTAssertEqual(bodyweight.loadLabel, "bodyweight")
     }
 
     func testPhoneTargetedPlanIsHidden() throws {

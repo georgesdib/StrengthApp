@@ -122,10 +122,10 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   Apple Watch Pair/Status/Revoke, device id/label, app version, opt-in HealthKit readiness, Forget
   this device (local token only), re-pair instructions.
 - **Apple Watch** — credential status plus the Home server's watch-targeted work. A watch-targeted
-  plan is started, logged and finished on the watch (working sets, form rating, warm-up rows,
-  mean velocity when the plan supplies a target or a swapped lift has no target, rest with
-  +15s/−15s and a local end-of-rest notification, total elapsed time beside heart rate, one
-  HealthKit workout, editable sRPE and optional productivity at finish, local-first outbox);
+  plan is started, logged and finished on the watch (working sets and loggable warm-up sets,
+  form rating, mean velocity for external-load work even without a target, rest with +15s/−15s
+  and a local end-of-rest notification, total elapsed time beside heart rate, one HealthKit
+  workout, editable sRPE and optional productivity at finish, local-first outbox);
   phone-targeted plans are hidden. While
   the watch owns the session the phone shows a **Logged on Apple Watch** banner, keeps set logging
   and form ratings disabled, and remains read-only for capture; plan edits still work and are

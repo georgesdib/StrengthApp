@@ -148,7 +148,6 @@ struct WatchExerciseView: View {
                     Text("Add set").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(loadEntryNeeded)
                 .accessibilityIdentifier("watch-add-set")
             } else {
                 Button {
@@ -157,7 +156,6 @@ struct WatchExerciseView: View {
                     Text("Start set").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(loadEntryNeeded)
                 .accessibilityIdentifier("watch-start-set")
             }
             Button("End exercise") {
@@ -201,13 +199,25 @@ struct WatchExerciseView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                 ForEach(Array(warmups.enumerated()), id: \.offset) { index, warmup in
-                    Text("Warm-up \(index + 1): \(warmup.loadLabel) × \(warmup.reps)")
+                    HStack {
+                        Text("Warm-up \(index + 1): \(warmup.loadLabel) × \(warmup.reps)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Log") {
+                            Task {
+                                await execution.logWarmup(
+                                    loadKg: warmup.loadKg,
+                                    reps: warmup.reps,
+                                    index: index
+                                )
+                            }
+                        }
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .disabled(execution.isWorking)
+                        .accessibilityIdentifier("watch-log-warmup-\(index)")
+                    }
                 }
-                Text("Optional. Log working sets below.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
             .accessibilityIdentifier("watch-warmups")
         }
@@ -231,24 +241,30 @@ struct WatchExerciseView: View {
 
     private var repsRow: some View {
         HStack {
-            Text("\(reps) reps").font(.body).monospacedDigit()
+            Text(isTimeBased ? "\(reps) sec" : "\(reps) reps")
+                .font(.body)
+                .monospacedDigit()
             Spacer()
-            Button("−") { reps = max(0, reps - 1) }
-            Button("+") { reps += 1 }
+            Button("−") { reps = max(0, reps - (isTimeBased ? 5 : 1)) }
+            Button("+") { reps += isTimeBased ? 5 : 1 }
         }
         .accessibilityIdentifier("watch-reps")
+    }
+
+    private var isTimeBased: Bool {
+        execution.selectedItem?.isTimeBased == true
     }
 
     private var completionSheet: some View {
         ScrollView {
             VStack(spacing: 4) {
                 Text("Reps in reserve").font(.headline)
-                Text("\(formatted(loadKg)) kg × \(reps)")
+                Text("\(formatted(loadKg)) kg × \(reps)\(isTimeBased ? "s" : "")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                // A calibrated lift always offers velocity; a swapped unknown-load lift has
-                // no target but can still record an optional measurement. Bodyweight work
-                // does not ask for bar speed.
+                // The watch records the measurement; the server supplies any target. Allow
+                // it for external-load work even when the plan has no target, but not for
+                // bodyweight work.
                 if offersVelocityInput {
                     TextField("Bar speed m/s", text: $velocityText)
                         .accessibilityIdentifier("watch-velocity")
@@ -318,9 +334,13 @@ struct WatchExerciseView: View {
     /// measurement for it, but keep bodyweight work free of a bar-speed prompt.
     private var offersVelocityInput: Bool {
         guard let item = execution.selectedItem else { return false }
-        if item.velocityTarget != nil { return true }
-        guard item.loadBasis != "bodyweight" else { return false }
-        return item.unknownLoadReason != nil
+        // The watch only records the measurement. A server target is optional; external-load
+        // work can always be measured, while bodyweight work is not asked for bar speed.
+        return !isBodyweight(item)
+    }
+
+    private func isBodyweight(_ item: PrescriptionItem) -> Bool {
+        item.loadBasis == "bodyweight" || item.loadBasis == "bodyweight_total"
     }
 
     /// A nil load after a swap is unknown, not bodyweight. Force an explicit entry before the
@@ -328,7 +348,7 @@ struct WatchExerciseView: View {
     private var loadEntryNeeded: Bool {
         guard let item = execution.selectedItem else { return false }
         return item.loadKg == nil
-            && item.loadBasis != "bodyweight"
+            && !isBodyweight(item)
             && loadKg <= 0
     }
 

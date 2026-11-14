@@ -120,6 +120,8 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
     public let sets: Int?
     public let repsLow: Int?
     public let repsHigh: Int?
+    /// "seconds" for a time-based hold; absent/legacy plans mean repetitions.
+    public let repsUnit: String?
     public let loadKg: Double?
     public let loadBasis: String?
     /// Present when the plan deliberately has no load for this item, e.g. a swap made during
@@ -141,6 +143,7 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         sets: Int?,
         repsLow: Int?,
         repsHigh: Int?,
+        repsUnit: String? = nil,
         loadKg: Double?,
         loadBasis: String?,
         unknownLoadReason: String? = nil,
@@ -157,6 +160,7 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         self.sets = sets
         self.repsLow = repsLow
         self.repsHigh = repsHigh
+        self.repsUnit = repsUnit
         self.loadKg = loadKg
         self.loadBasis = loadBasis
         self.unknownLoadReason = unknownLoadReason
@@ -172,20 +176,25 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
     public var id: String { "\(orderIndex ?? 0)-\(exerciseId ?? "")" }
 
     public var loadLabel: String {
-        if loadBasis == "bodyweight" || loadKg == 0 { return "bodyweight" }
+        if loadBasis == "bodyweight" || loadBasis == "bodyweight_total" || loadKg == 0 {
+            return "bodyweight"
+        }
         guard let loadKg else { return "Load not set" }
         guard loadKg > 0 else { return "bodyweight" }
         return String(format: "%.1f kg", loadKg)
     }
 
     public var repsLabel: String {
+        let suffix = repsUnit == "seconds" ? "s" : ""
         switch (repsLow, repsHigh) {
-        case let (low?, high?) where low == high: return "\(low)"
-        case let (low?, high?): return "\(low)-\(high)"
-        case let (low?, nil): return "\(low)+"
+        case let (low?, high?) where low == high: return "\(low)\(suffix)"
+        case let (low?, high?): return "\(low)-\(high)\(suffix)"
+        case let (low?, nil): return "\(low)+\(suffix)"
         default: return "—"
         }
     }
+
+    public var isTimeBased: Bool { repsUnit == "seconds" }
 
     public var effortLabel: String {
         if effortModel == "quality" { return "quality" }

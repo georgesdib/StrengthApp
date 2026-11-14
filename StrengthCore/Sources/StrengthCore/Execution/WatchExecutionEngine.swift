@@ -183,11 +183,13 @@ public final class WatchExecutionEngine {
 
     /// Descriptive tonnage of acknowledged plus queued sets. Not a training decision.
     public var tonnageKg: Double {
+        // RIR 6 is the warm-up role; it is work, but not working-set volume.
         let acknowledged = (workout?.sets ?? []).reduce(0.0) { total, set in
-            total + (set.loadKg ?? 0) * Double(set.reps ?? 0)
+            guard set.rir != 6 else { return total }
+            return total + (set.loadKg ?? 0) * Double(set.reps ?? 0)
         }
         let queued = pending.reduce(0.0) { total, operation in
-            guard case .addSet(let body) = operation.body else { return total }
+            guard case .addSet(let body) = operation.body, body.rir != 6 else { return total }
             return total + (body.loadKg ?? 0) * Double(body.reps)
         }
         return acknowledged + queued
@@ -348,11 +350,11 @@ public final class WatchExecutionEngine {
 
     public func setsDone(planItemIndex: Int) -> Int {
         let acknowledged = workout?.sets?.filter {
-            ($0.planItemIndex ?? -1) == planItemIndex
+            ($0.planItemIndex ?? -1) == planItemIndex && $0.rir != 6
         }.count ?? 0
         let queued = pending.filter { operation in
             guard case .addSet(let body) = operation.body else { return false }
-            return body.planItemIndex == planItemIndex
+            return body.planItemIndex == planItemIndex && body.rir != 6
         }.count
         return acknowledged + queued
     }

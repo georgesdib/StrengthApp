@@ -109,6 +109,26 @@ final class WatchTodayTests: XCTestCase {
         XCTAssertEqual(bodyweight.loadLabel, "bodyweight")
     }
 
+    func testTimeBasedExerciseUsesSeconds() {
+        let item = PrescriptionItem(
+            orderIndex: 0,
+            exerciseId: "plank",
+            sets: 3,
+            repsLow: 30,
+            repsHigh: 30,
+            repsUnit: "seconds",
+            loadKg: 0,
+            loadBasis: "bodyweight",
+            rirTarget: 2,
+            effortModel: "rir",
+            refs: [],
+            restS: 60,
+            essential: false
+        )
+        XCTAssertEqual(item.repsLabel, "30s")
+        XCTAssertTrue(item.isTimeBased)
+    }
+
     func testPhoneTargetedPlanIsHidden() throws {
         XCTAssertEqual(
             WatchTodayMapper.map(try planState(target: "phone")),

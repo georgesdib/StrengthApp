@@ -236,18 +236,20 @@ Changing the Home Server and tapping **Save server settings** increments the wat
 version. When the watch has no active session, it updates its Home address without receiving a new
 token.
 
-The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR
-(mean velocity when the plan supplies a target, or optionally for a swapped lift that has no
-target). Warm-up rows are shown read-only above the working sets; the watch does not log them.
-The rest starts when you tap **End set**, so the RIR and velocity entry happens during the rest,
-not inside the set. Rest — **+15s** extends it, **−15s** shortens it, and a local notification fires
-when it ends if you allowed notifications — rate form at **End exercise**, and finish with
-editable sRPE and optional productivity. Total elapsed time and heart rate show at the top of the
-exercise screen. Exactly one HealthKit workout is saved.
+The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR.
+Warm-up rows have their own **Log** action; they are recorded with RIR 6 and stay out of
+working-set volume. Mean velocity is available for external-load work even when the plan has no
+target; the watch records the measurement and the server owns calibration. Time-based exercises
+show seconds (“30s”), not repetitions. The rest starts when you tap **End set**, so the RIR and
+velocity entry happens during the rest, not inside the set. Rest — **+15s** extends it, **−15s**
+shortens it, and a local notification fires when it ends if you allowed notifications — rate form
+at **End exercise**, and finish with editable sRPE and optional productivity. Total elapsed time
+and heart rate show at the top of the exercise screen. Exactly one HealthKit workout is saved.
 
-A swap deliberately clears the old lift's load, warm-up ramps and velocity target. The replacement
-shows **Load not set** rather than **bodyweight**; enter the load before starting. VBT remains
-optional for the swapped lift, but it is not presented as a calibrated target. Capture is local-first: without the
+A swap re-solves the replacement from its own history and calibration: load, warm-up ramps and
+VBT target when available. It never copies the old lift's load. If no load can be derived, the
+replacement shows **Load not set** rather than **bodyweight**, remains startable, and accepts a
+manual load. VBT is optional for external-load work and is measured, not calibrated, by the watch. Capture is local-first: without the
 network the sets queue on the watch and sync when it reconnects.
 
 Requested a workout for the wrong target? The ready card on Today offers **Request another

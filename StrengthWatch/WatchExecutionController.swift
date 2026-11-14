@@ -302,6 +302,29 @@ final class WatchExecutionController: ObservableObject {
         }
     }
 
+    /// Warm-up sets are ordinary logged sets with RIR 6 and no plan-item attribution, so they
+    /// stay out of working-set adherence and do not open a working-set rest timer.
+    func logWarmup(loadKg: Double?, reps: Int, index: Int) async {
+        guard let session = currentSession(), let item = engine.selectedItem else { return }
+        let entry = WatchExecutionEngine.SetEntry(
+            exerciseId: item.exerciseId ?? "",
+            planItemIndex: nil,
+            setIndex: 1000 + max(0, index),
+            loadKg: loadKg,
+            reps: reps,
+            rir: 6,
+            completedAt: Date()
+        )
+        isWorking = true
+        defer { isWorking = false }
+        let result = await engine.logSet(entry, session: session)
+        await handle(result.stop)
+        sync()
+        if result.persisted, result.stop == .allSent {
+            await reconcileNow()
+        }
+    }
+
     func undoLastSet() {
         guard engine.undoLastPendingSet() else { return }
         sync()

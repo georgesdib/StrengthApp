@@ -671,7 +671,7 @@ final class WatchExecutionController: ObservableObject {
         guard end != scheduledRestEnd else { return }
         scheduledRestEnd = end
         if let end, end.timeIntervalSinceNow > 0 {
-            Task { await WatchRestNotifications.shared.schedule(at: end) }
+            Task { WatchRestNotifications.shared.schedule(at: end) }
         } else {
             WatchRestNotifications.shared.cancel()
         }

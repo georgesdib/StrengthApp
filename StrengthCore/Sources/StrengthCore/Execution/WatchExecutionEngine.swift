@@ -936,7 +936,7 @@ public final class WatchExecutionEngine {
 
     /// Shortens the open rest by up to `seconds`, for the watch's −15s control.
     public func shortenRest(by seconds: Int) throws {
-        guard seconds > 0, let workout else { return }
+        guard seconds > 0 else { return }
         try mutate { capture in
             guard var record = capture.session, var rest = record.rest, rest.isOpen else { return }
             rest.shorten(by: seconds, at: stampedNow())

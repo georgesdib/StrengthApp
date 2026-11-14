@@ -59,19 +59,27 @@ final class RestTimerModel: ObservableObject {
 
     var isRunning: Bool { endDate != nil && !isComplete }
 
-    func start(seconds: Int, planItemIndex: Int? = nil, exerciseId: String? = nil) {
+    func start(
+        seconds: Int,
+        planItemIndex: Int? = nil,
+        exerciseId: String? = nil,
+        startedAt anchor: Date? = nil
+    ) {
         guard seconds > 0 else { return }
         ticker?.cancel()
-        let now = Date()
+        // The rest is anchored where the set ended (the first edit of the log sheet), not at
+        // save time, so the entry itself is rest.
+        let now = anchor ?? Date()
         startedAt = now
         prescribedSeconds = seconds
         addedSeconds = 0
-        endDate = now.addingTimeInterval(TimeInterval(seconds))
-        remainingSeconds = seconds
-        isComplete = false
+        let end = now.addingTimeInterval(TimeInterval(seconds))
+        endDate = end
+        remainingSeconds = max(0, Int(end.timeIntervalSinceNow.rounded(.up)))
+        isComplete = remainingSeconds == 0
         self.planItemIndex = planItemIndex
         self.exerciseId = exerciseId
-        RestNotificationManager.shared.scheduleRestEnd(after: seconds)
+        RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)

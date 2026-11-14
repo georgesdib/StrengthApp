@@ -86,7 +86,9 @@ raw 100.x address.
    visible before it is consumed. The server issues the plan; the phone never invents plan content.
 4. Open an exercise and tap **Start set** before the set.
 5. Enter load, reps and RIR. When the plan gives the lift a velocity target, optional mean and
-   per-rep velocity are offered; bodyweight work without a target does not ask for them.
+   per-rep velocity are offered; bodyweight work without a target does not ask for them. The rest
+   is anchored at your **first edit** of the sheet, so the time you spend entering numbers is rest,
+   not part of the set; the set keeps the time you started it.
 6. Each main lift lists its warm-up ramp, starting with the empty bar (the first rung is capped
    at 20 kg, or the first warm-up when that is lighter). Warm-up rows are optional: skipping them
    and logging the working sets is valid. To record one, use **Start another set** with RIR 6.

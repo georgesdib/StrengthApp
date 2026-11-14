@@ -268,8 +268,8 @@ struct ExerciseWorkoutView: View {
                 velocityApplicable: item?.velocityTarget != nil,
                 isSaving: model.isSaving,
                 error: addError
-            ) {
-                Task { await saveSet() }
+            ) { anchor in
+                Task { await saveSet(performedAt: anchor) }
             }
         }
         .alert(item: $pendingRemoval) { set in
@@ -330,7 +330,9 @@ struct ExerciseWorkoutView: View {
         showingLog = true
     }
 
-    private func saveSet() async {
+    /// `performedAt` is the first edit of the sheet: the set ended then, and the rest is
+    /// anchored there so the entry itself is rest rather than part of the set.
+    private func saveSet(performedAt anchor: Date) async {
         addError = nil
         let draft = draft.wrappedValue
         guard let reps = Int(draft.repsText.trimmingCharacters(in: .whitespaces)) else {
@@ -365,7 +367,7 @@ struct ExerciseWorkoutView: View {
             return
         }
         let localSetID = activeLocalSetID
-        let completedAt = ExecutionEvent.nowISO()
+        let completedAt = ServerClock.encodedISO(anchor)
         let request = AddSetRequest(
             exerciseId: exerciseId,
             loadKg: load,
@@ -374,7 +376,8 @@ struct ExerciseWorkoutView: View {
             velocityMps: velocity,
             setIndex: setIndex,
             planItemIndex: planIdentity,
-            repVelocities: repVelocities
+            repVelocities: repVelocities,
+            performedAt: completedAt
         )
         let key = addOperation.use(request)
         if await model.addSet(request, idempotencyKey: key) {
@@ -402,7 +405,8 @@ struct ExerciseWorkoutView: View {
                 model.startRest(
                     seconds: prescribed,
                     planItemIndex: planIdentity,
-                    exerciseId: exerciseId
+                    exerciseId: exerciseId,
+                    startedAt: anchor
                 )
             }
             showingLog = false
@@ -494,9 +498,17 @@ private struct LogSetSheet: View {
     let velocityApplicable: Bool
     let isSaving: Bool
     let error: String?
-    let onSave: () -> Void
+    /// The set ended when the first field changed; `Date` is that stamp (fallback: sheet open).
+    let onSave: (Date) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var anchor: Date?
+    @State private var openedAt = Date()
+
+    private func markAnchorIfNeeded() {
+        guard anchor == nil else { return }
+        anchor = Date()
+    }
 
     var body: some View {
         NavigationStack {
@@ -551,12 +563,18 @@ private struct LogSetSheet: View {
                 }
             }
             .navigationTitle("Log set")
+            // First edit is the End-set moment: reaching for the phone to record the set.
+            .onChange(of: draft.loadText) { markAnchorIfNeeded() }
+            .onChange(of: draft.repsText) { markAnchorIfNeeded() }
+            .onChange(of: draft.rirText) { markAnchorIfNeeded() }
+            .onChange(of: draft.velocityText) { markAnchorIfNeeded() }
+            .onChange(of: draft.repVelocityText) { markAnchorIfNeeded() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { onSave() }
+                    Button("Done") { onSave(anchor ?? openedAt) }
                         .accessibilityIdentifier("save-set")
                         .disabled(isSaving)
                 }

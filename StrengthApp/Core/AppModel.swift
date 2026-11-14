@@ -923,12 +923,18 @@ final class AppModel: ObservableObject {
 
     /// Starts the single app-level rest interval and records its telemetry in one place, so a
     /// rest that finishes on Today is indistinguishable from one that finishes in the workout.
-    func startRest(seconds: Int, planItemIndex: Int?, exerciseId: String?) {
+    func startRest(
+        seconds: Int,
+        planItemIndex: Int?,
+        exerciseId: String?,
+        startedAt: Date? = nil
+    ) {
         guard seconds > 0 else { return }
         restTimer.start(
             seconds: seconds,
             planItemIndex: planItemIndex,
-            exerciseId: exerciseId
+            exerciseId: exerciseId,
+            startedAt: startedAt
         )
         recordExecutionEvent(ExecutionEvent(
             eventType: .restStarted,

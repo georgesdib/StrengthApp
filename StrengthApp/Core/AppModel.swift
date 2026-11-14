@@ -1,5 +1,12 @@
 import Combine
 import Foundation
+import StrengthCore
+
+struct OfflineRecoveryConflict: Equatable {
+    let currentWorkoutID: String
+    let recoveredWorkoutID: String
+    let pendingOperationCount: Int
+}
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -51,12 +58,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var pairingError: String?
     @Published private(set) var activeWorkout: WorkoutDetail?
     @Published private(set) var offlineCapture: OfflineCapture?
+    @Published private(set) var offlineRecoveryError: OfflineCaptureStoreError?
+    @Published private(set) var offlinePersistenceError: String?
+    @Published private(set) var offlineTelemetryError: String?
+    @Published private(set) var offlineRecoveryConflict: OfflineRecoveryConflict?
     @Published private(set) var isOffline = false
     @Published private(set) var isSyncingOffline = false
     @Published private(set) var offlineSyncError: String?
     @Published private(set) var exerciseCatalogue: [ExerciseOption] = []
     @Published private(set) var isLoadingExerciseCatalogue = false
     @Published private(set) var exerciseCatalogueError: String?
+    @Published private(set) var exerciseCatalogueCachedAt: Date?
     @Published private(set) var exerciseDetail: ExerciseDetailResponse?
     @Published private(set) var isLoadingExerciseDetail = false
     @Published private(set) var exerciseDetailError: String?
@@ -76,6 +88,8 @@ final class AppModel: ObservableObject {
     private var planPollFailures = 0
     private static let maxPlanPollFailures = 10
     @Published private(set) var isSaving = false
+    /// One rest interval for the whole app; the tab shell renders it on every screen.
+    let restTimer = RestTimerModel()
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
     @Published private(set) var mutationFailureAmbiguous = false
@@ -91,9 +105,10 @@ final class AppModel: ObservableObject {
     @Published var serverURLText: String
     @Published var homeServerText: String
     @Published var awayServerText: String
-    @Published var homeWiFiText: String
+    @Published var preferHome: Bool
     @Published private(set) var activeServerRoute: ServerRoute?
-    @Published private(set) var detectedWiFiSSID: String?
+    @Published private(set) var homeServerReachable: Bool?
+    @Published private(set) var isCheckingHomeServer = false
     @Published private(set) var serverSettingsError: String?
     @Published var pairingCodeText: String = ""
     @Published var pairingLabelText: String
@@ -102,10 +117,10 @@ final class AppModel: ObservableObject {
     private let client: IOSAPIClient
     private let tokens: TokenStoring
     private let store: PairedStore
+    let watchPairing: WatchPairingCoordinator
     private let healthKit: any HealthKitReadinessProviding
     private let healthKitDefaults: UserDefaults
     private let offlineStore: OfflineCaptureStore
-    private let wifi: WiFiSSIDProviding
     private let pageSize = 50
     private var session: IOSSession?
     private var historyOffset = 0
@@ -113,8 +128,11 @@ final class AppModel: ObservableObject {
     private var healthKitOperation = OperationKey<HealthKitReadinessRequest>()
     private var healthKitFollowUp = false
     private var networkMonitor: NetworkMonitor?
+    private var restDoneCancellable: AnyCancellable?
     private var offlineRetryTask: Task<Void, Never>?
     private var offlineRetryAttempt = 0
+    private let exerciseCatalogueCache: ExerciseCatalogueCache
+    private var exerciseCatalogueLoadedServerURL: String?
     private var exerciseDetailCache: [String: ExerciseDetailResponse] = [:]
     private var exerciseHistoryExerciseId: String?
     private var refreshInFlight = false
@@ -130,21 +148,39 @@ final class AppModel: ObservableObject {
         healthKit: (any HealthKitReadinessProviding)? = nil,
         healthKitDefaults: UserDefaults = .standard,
         offlineStore: OfflineCaptureStore? = nil,
-        wifi: WiFiSSIDProviding? = nil
+        watchConnectivity: WatchConnectivitySession? = nil,
+        exerciseCatalogueCache: ExerciseCatalogueCache? = nil
     ) {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
         let readiness = healthKit ?? HealthKitReadinessService()
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
-        let initialCapture = try? captureStore.load()
-        self.client = client ?? IOSAPIClient(journal: MutationJournal())
+        let initialCapture: OfflineCapture?
+        let initialRecoveryError: OfflineCaptureStoreError?
+        do {
+            initialCapture = try captureStore.load()
+            initialRecoveryError = nil
+        } catch let error as OfflineCaptureStoreError {
+            initialCapture = nil
+            initialRecoveryError = error
+        } catch {
+            initialCapture = nil
+            initialRecoveryError = .io(error.localizedDescription)
+        }
+        let apiClient = client ?? IOSAPIClient(journal: MutationJournal())
+        self.client = apiClient
         self.tokens = tokens ?? KeychainTokenStore()
         self.store = store
+        self.watchPairing = WatchPairingCoordinator(
+            client: apiClient,
+            store: store,
+            connectivity: watchConnectivity
+        )
         self.healthKit = readiness
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
-        self.wifi = wifi ?? WiFiSSIDProvider()
+        self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
         self.healthKitEnabled = enabled
         self.healthKitState = enabled
             ? (readiness.isAvailable ? .enabled : .unavailable)
@@ -152,10 +188,25 @@ final class AppModel: ObservableObject {
         self.serverURLText = store.serverURL ?? AppConfig.defaultServerURL
         self.homeServerText = store.homeServerURL ?? ""
         self.awayServerText = store.awayServerURL ?? ""
-        self.homeWiFiText = store.homeWiFi ?? ""
+        self.preferHome = store.preferHome
         self.pairingLabelText = store.device?.label ?? "iPhone"
         self.offlineCapture = initialCapture
+        self.offlineRecoveryError = initialRecoveryError
         self.activeWorkout = initialCapture?.activeWorkout
+        restTimer.onFinish = { [weak self] result in
+            self?.recordRestResult(result)
+        }
+        restTimer.onExtend = { [weak self] seconds in
+            self?.recordRestExtension(seconds)
+        }
+        restDoneCancellable = NotificationCenter.default
+            .publisher(for: .restNotificationDone)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.handleRestNotificationDone()
+                }
+            }
     }
 
     var hasMoreHistory: Bool {
@@ -177,6 +228,10 @@ final class AppModel: ObservableObject {
     var pendingOfflineCount: Int { pendingOfflineOperations.count }
 
     var hasPendingOfflineCapture: Bool { !pendingOfflineOperations.isEmpty }
+
+    var offlineRecoveryUnavailable: Bool { offlineRecoveryError != nil }
+
+    var offlineRecoveryMessage: String? { offlineRecoveryError?.errorDescription }
 
     var offlineFinishPending: Bool {
         pendingOfflineOperations.contains {
@@ -217,15 +272,11 @@ final class AppModel: ObservableObject {
         guard phase == .loading else { return }
         homeServerText = store.homeServerURL ?? ""
         awayServerText = store.awayServerURL ?? ""
-        homeWiFiText = store.homeWiFi ?? ""
+        preferHome = store.preferHome
         let configuration = store.serverConfiguration
-        let ssid = await detectedSSIDIfConfigured(configuration)
-        let selection = ServerConfiguration.select(
-            homeURL: configuration.homeURL,
-            awayURL: configuration.awayURL,
-            homeWiFi: configuration.homeWiFi,
-            currentSSID: ssid
-        )
+        let token = tokens.load()
+        let pairedDevice = store.device
+        let selection = await chooseServerSelection(configuration, token: token)
         let savedURL = selection?.url ?? store.serverURL
         guard let savedURL,
               let baseURL = try? IOSAPIClient.validatedBaseURL(savedURL) else {
@@ -234,7 +285,7 @@ final class AppModel: ObservableObject {
         }
         serverURLText = baseURL.absoluteString
         activeServerRoute = selection?.route ?? .home
-        guard let token = tokens.load(), let pairedDevice = store.device else {
+        guard let token, let pairedDevice else {
             phase = .pairing
             return
         }
@@ -248,6 +299,9 @@ final class AppModel: ObservableObject {
         pairedServerURL = baseURL.absoluteString
         pairingLabelText = pairedDevice.label
         phase = .paired
+        if let session {
+            watchPairing.start(session: session, homeBaseURL: store.homeServerURL)
+        }
         let refreshed = await refresh()
         isOffline = !refreshed.succeeded
         await recoverPendingMutations()
@@ -257,14 +311,28 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func detectedSSIDIfConfigured(_ configuration: ServerConfiguration) async -> String? {
-        guard !configuration.homeWiFi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            detectedWiFiSSID = nil
-            return nil
+    private func chooseServerSelection(
+        _ configuration: ServerConfiguration,
+        token: String?
+    ) async -> (route: ServerRoute, url: String)? {
+        var homeReachable: Bool?
+        let home = configuration.homeURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let away = configuration.awayURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if configuration.preferHome, !home.isEmpty, !away.isEmpty, home != away,
+           let token, let homeURL = try? IOSAPIClient.validatedBaseURL(home) {
+            isCheckingHomeServer = true
+            homeReachable = await client.isServerReachable(
+                baseURL: homeURL, token: token
+            )
+            isCheckingHomeServer = false
         }
-        let ssid = await wifi.currentSSID()
-        detectedWiFiSSID = ssid
-        return ssid
+        homeServerReachable = homeReachable
+        return ServerConfiguration.select(
+            homeURL: configuration.homeURL,
+            awayURL: configuration.awayURL,
+            preferHome: configuration.preferHome,
+            homeReachable: homeReachable
+        )
     }
 
     // MARK: Pairing
@@ -315,12 +383,12 @@ final class AppModel: ObservableObject {
             }
             homeServerText = store.homeServerURL ?? ""
             awayServerText = store.awayServerURL ?? ""
-            homeWiFiText = store.homeWiFi ?? ""
+            preferHome = store.preferHome
             activeServerRoute = ServerConfiguration.select(
                 homeURL: store.homeServerURL ?? "",
                 awayURL: store.awayServerURL ?? "",
-                homeWiFi: store.homeWiFi ?? "",
-                currentSSID: detectedWiFiSSID
+                preferHome: store.preferHome,
+                homeReachable: nil
             )?.route ?? .home
             store.serverURL = baseURL.absoluteString
             store.device = paired
@@ -335,6 +403,11 @@ final class AppModel: ObservableObject {
                 deviceID: response.device.deviceId
             )
             phase = .paired
+            store.clearWatchLink()
+            watchPairing.reset()
+            if let session {
+                watchPairing.start(session: session, homeBaseURL: store.homeServerURL)
+            }
             let refreshed = await refresh()
             await recoverPendingMutations()
             if refreshed.succeeded, healthKitEnabled {
@@ -356,24 +429,27 @@ final class AppModel: ObservableObject {
         }
     }
 
-    var homeWiFiStatus: String {
-        let configured = (store.homeWiFi ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !configured.isEmpty else {
-            return "No Home Wi-Fi configured; Away Server is the fallback."
+    var homeServerStatus: String {
+        if !preferHome {
+            return "Prefer Home Server is off; Away Server is used when configured."
         }
-        guard let detectedWiFiSSID else {
-            return "Wi-Fi name unavailable. Allow Precise Location to detect Home Wi-Fi."
+        if isCheckingHomeServer {
+            return "Checking whether Home Server is reachable…"
         }
-        return detectedWiFiSSID == configured
-            ? "Connected to Home Wi-Fi: \(detectedWiFiSSID)"
-            : "Current Wi-Fi: \(detectedWiFiSSID)"
+        switch homeServerReachable {
+        case true:
+            return "Home Server is reachable."
+        case false:
+            return "Home Server is unreachable; Away Server is the fallback."
+        case nil:
+            return "Home Server is preferred; reachability is checked on launch, foreground and network changes."
+        }
     }
 
     func saveServerSettings() async -> Bool {
         serverSettingsError = nil
         var home = homeServerText.trimmingCharacters(in: .whitespacesAndNewlines)
         var away = awayServerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let wifiName = homeWiFiText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !home.isEmpty || !away.isEmpty else {
             serverSettingsError = "Enter at least a Home Server or an Away Server."
             return false
@@ -390,21 +466,21 @@ final class AppModel: ObservableObject {
                 return false
             }
         }
-        if !wifiName.isEmpty, home.isEmpty {
-            serverSettingsError = "Set a Home Server before naming a Home Wi-Fi."
-            return false
-        }
-        let ssid: String?
-        if wifiName.isEmpty {
-            detectedWiFiSSID = nil
-            ssid = nil
+        let configuration = ServerConfiguration(
+            homeURL: home, awayURL: away, preferHome: preferHome
+        )
+        let selected: (route: ServerRoute, url: String)?
+        if phase == .paired, let token = tokens.load() {
+            selected = await chooseServerSelection(configuration, token: token)
         } else {
-            ssid = await wifi.currentSSID()
-            detectedWiFiSSID = ssid
+            homeServerReachable = nil
+            isCheckingHomeServer = false
+            selected = ServerConfiguration.select(
+                homeURL: home, awayURL: away, preferHome: preferHome,
+                homeReachable: nil
+            )
         }
-        guard let selected = ServerConfiguration.select(
-            homeURL: home, awayURL: away, homeWiFi: wifiName, currentSSID: ssid
-        ) else {
+        guard let selected else {
             serverSettingsError = "Configure at least one valid server address."
             return false
         }
@@ -416,34 +492,30 @@ final class AppModel: ObservableObject {
         }
         store.homeServerURL = home
         store.awayServerURL = away
-        store.homeWiFi = wifiName
+        store.preferHome = preferHome
+        store.bumpWatchConfigVersion()
         homeServerText = home
         awayServerText = away
-        homeWiFiText = wifiName
         if phase == .pairing {
             serverURLText = selected.url
             activeServerRoute = selected.route
             return true
         }
         await recheckServerSelection(forceRefresh: true)
+        await watchPairing.configurationChanged(homeBaseURL: store.homeServerURL)
         return serverSettingsError == nil
     }
 
     func recheckServerSelection(forceRefresh: Bool = false) async {
         guard phase == .paired else { return }
         let configuration = store.serverConfiguration
-        let ssid = await detectedSSIDIfConfigured(configuration)
-        guard let selected = ServerConfiguration.select(
-            homeURL: configuration.homeURL,
-            awayURL: configuration.awayURL,
-            homeWiFi: configuration.homeWiFi,
-            currentSSID: ssid
-        ), let baseURL = try? IOSAPIClient.validatedBaseURL(selected.url) else {
+        guard let token = tokens.load() else { return }
+        guard let selected = await chooseServerSelection(configuration, token: token),
+              let baseURL = try? IOSAPIClient.validatedBaseURL(selected.url) else {
             serverSettingsError = "Configure at least one valid server address."
             return
         }
         guard let currentSession = session,
-              let token = tokens.load(),
               let pairedDevice = store.device else { return }
         let changed = currentSession.baseURL.absoluteString != baseURL.absoluteString
         if changed, hasPendingOfflineCapture || !pendingMutations.isEmpty {
@@ -461,6 +533,9 @@ final class AppModel: ObservableObject {
             store.serverURL = baseURL.absoluteString
             serverURLText = baseURL.absoluteString
             pairedServerURL = baseURL.absoluteString
+            if let session {
+                watchPairing.updateSession(session, homeBaseURL: store.homeServerURL)
+            }
         }
         if changed || forceRefresh {
             let outcome = await refresh()
@@ -471,6 +546,9 @@ final class AppModel: ObservableObject {
     func appBecameActive() async {
         await recheckServerSelection()
         await syncOfflineCapture()
+        if phase == .paired, let session {
+            await watchPairing.foreground(session: session, homeBaseURL: store.homeServerURL)
+        }
     }
 
     // MARK: Reads
@@ -537,11 +615,12 @@ final class AppModel: ObservableObject {
                 }
             }
             let previousActive = activeWorkout
+            var reconciled = previousActive
             if hasPendingOfflineCapture {
                 // Pending offline work owns the local active-workout view. A completed finish
                 // leaves this nil while failed/conflict operations remain; do not resurrect a
                 // server workout for that state.
-                activeWorkout = offlineCapture?.activeWorkout
+                reconciled = offlineCapture?.activeWorkout
                 workoutRefreshGrace = false
             } else if let serverActive = newToday.activeWorkout {
                 if previousActive?.workoutId != serverActive.workoutId {
@@ -550,27 +629,27 @@ final class AppModel: ObservableObject {
                         sessionType: serverActive.sessionType
                     )
                 }
-                activeWorkout = serverActive
+                reconciled = serverActive
                 workoutRefreshGrace = false
             } else if let previousActive, previousActive.status == "in_progress" {
                 if workoutRefreshGrace {
                     // A mutation just returned an in-progress workout. Keep it for this read;
                     // the next refresh can still reconcile an externally finished workout.
                     workoutRefreshGrace = false
-                    activeWorkout = previousActive
+                    reconciled = previousActive
                 } else {
                     // The server no longer has the workout this session was showing. Do not
                     // silently keep stale local state; surface it for reconciliation.
-                    activeWorkout = nil
+                    reconciled = nil
                     recoveryIssue = .workoutEndedElsewhere(
                         workoutId: previousActive.workoutId
                     )
                 }
             } else {
-                activeWorkout = nil
+                reconciled = nil
                 workoutRefreshGrace = false
             }
-            persistActiveWorkout()
+            _ = apply(.activeWorkoutChanged(reconciled))
             isOffline = false
             if !healthKitEnabled {
                 healthKitState = .featureDisabled
@@ -585,7 +664,7 @@ final class AppModel: ObservableObject {
         } catch {
             isOffline = true
             if activeWorkout == nil, let cached = offlineCapture?.activeWorkout {
-                activeWorkout = cached
+                _ = apply(.activeWorkoutChanged(cached))
             }
             handle(error)
             return .failure(message(for: error))
@@ -593,9 +672,133 @@ final class AppModel: ObservableObject {
     }
 
     private func persistActiveWorkout() {
-        guard activeWorkout != nil || offlineCapture == nil else { return }
-        if let updated = try? offlineStore.setActiveWorkout(activeWorkout) {
-            offlineCapture = updated
+        guard offlineRecoveryError == nil, offlineRecoveryConflict == nil else { return }
+        guard activeWorkout != nil
+                || offlineCapture?.activeWorkout != nil
+                || !(offlineCapture?.operations.isEmpty ?? true) else {
+            return
+        }
+        do {
+            offlineCapture = try offlineStore.setActiveWorkout(activeWorkout)
+            offlinePersistenceError = nil
+        } catch let error as OfflineCaptureStoreError {
+            offlinePersistenceError = error.errorDescription
+        } catch {
+            offlinePersistenceError = OfflineCaptureStoreError.io(
+                error.localizedDescription
+            ).errorDescription
+        }
+    }
+
+    /// Retry a failed initial recovery read. A successful read adopts the capture, but never
+    /// replaces an active workout that is already authoritative in memory.
+    @discardableResult
+    func retryOfflineRecovery() -> Bool {
+        do {
+            let recovered = try offlineStore.load()
+            offlineCapture = recovered
+            offlineRecoveryError = nil
+            if activeWorkout == nil {
+                offlineRecoveryConflict = nil
+                activeWorkout = recovered.activeWorkout
+                return true
+            }
+            if let currentID = activeWorkout?.workoutId,
+               let recoveredID = recovered.activeWorkout?.workoutId
+                    ?? recovered.operations.first?.workoutId,
+               currentID != recoveredID,
+               !recovered.operations.isEmpty {
+                offlineRecoveryConflict = OfflineRecoveryConflict(
+                    currentWorkoutID: currentID,
+                    recoveredWorkoutID: recoveredID,
+                    pendingOperationCount: recovered.operations.count
+                )
+                return true
+            }
+            offlineRecoveryConflict = nil
+            return true
+        } catch let error as OfflineCaptureStoreError {
+            offlineRecoveryError = error
+            return false
+        } catch {
+            offlineRecoveryError = .io(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Resolve the loaded-capture/current-workout mismatch without silently replaying work
+    /// against the wrong workout. This discards only the recovered capture and keeps the
+    /// server-authoritative workout that is already in memory.
+    @discardableResult
+    func keepCurrentWorkoutAndDiscardRecoveredWork() async -> Bool {
+        guard let current = activeWorkout, offlineRecoveryConflict != nil else {
+            return false
+        }
+        do {
+            try offlineStore.clear()
+        } catch let error as OfflineCaptureStoreError {
+            offlinePersistenceError = error.errorDescription
+            return false
+        } catch {
+            offlinePersistenceError = OfflineCaptureStoreError.io(
+                error.localizedDescription
+            ).errorDescription
+            return false
+        }
+        do {
+            offlineCapture = try offlineStore.load()
+            offlineRecoveryConflict = nil
+            offlineRecoveryError = nil
+            offlineTelemetryError = nil
+            activeWorkout = current
+            persistActiveWorkout()
+            await refresh()
+            return offlinePersistenceError == nil
+        } catch let error as OfflineCaptureStoreError {
+            offlineRecoveryError = error
+            return false
+        } catch {
+            offlineRecoveryError = .io(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Keep the recovered capture and make its workout the in-memory active workout. The next
+    /// refresh still reconciles it with the server's authoritative state.
+    @discardableResult
+    func useRecoveredWorkoutAfterConflict() -> Bool {
+        guard offlineRecoveryConflict != nil,
+              let recovered = offlineCapture?.activeWorkout else {
+            return false
+        }
+        activeWorkout = recovered
+        offlineRecoveryConflict = nil
+        offlineTelemetryError = nil
+        return true
+    }
+
+    /// Server-confirmed start/complete/abandon may clear the local capture only when recovery is
+    /// healthy. An unreadable file must not be overwritten by an automatic completion path.
+    private func clearOfflineCaptureAfterServerCompletion() {
+        guard offlineRecoveryError == nil, offlineRecoveryConflict == nil else { return }
+        do {
+            try offlineStore.clear()
+        } catch let error as OfflineCaptureStoreError {
+            offlinePersistenceError = error.errorDescription
+            return
+        } catch {
+            offlinePersistenceError = OfflineCaptureStoreError.io(
+                error.localizedDescription
+            ).errorDescription
+            return
+        }
+        do {
+            offlineCapture = try offlineStore.load()
+            offlinePersistenceError = nil
+        } catch let error as OfflineCaptureStoreError {
+            offlineRecoveryError = error
+        } catch {
+            offlineRecoveryError = .io(error.localizedDescription)
         }
     }
 
@@ -662,6 +865,130 @@ final class AppModel: ObservableObject {
             handle(error)
             throw error
         }
+    }
+
+    func workoutSummary(workoutId: String) async throws -> WorkoutSummary {
+        guard let session else { throw APIError.transport("Pair this device first.") }
+        do {
+            return try await client.workoutSummary(
+                workoutId: workoutId, session: session
+            ).summary
+        } catch {
+            handle(error)
+            throw error
+        }
+    }
+
+    func executionAnalytics(workoutId: String) async throws -> ExecutionAnalyticsResponse {
+        guard let session else { throw APIError.transport("Pair this device first.") }
+        do {
+            return try await client.executionAnalytics(
+                workoutId: workoutId, session: session
+            )
+        } catch {
+            handle(error)
+            throw error
+        }
+    }
+
+    /// Persist execution telemetry before the UI acknowledges the action. The existing Phase 4
+    /// outbox owns delivery, ordering and retry; this method never waits for the network.
+    func recordExecutionEvents(_ events: [ExecutionEvent]) {
+        guard offlineRecoveryError == nil, offlineRecoveryConflict == nil else {
+            offlineTelemetryError = "Execution timing was not recorded because offline recovery needs attention."
+            return
+        }
+        // A watch-owned session owns its telemetry as well; the phone mirror is read-only.
+        guard !isMirroringWatchSession else { return }
+        guard !events.isEmpty, let activeWorkout else { return }
+        do {
+            offlineCapture = try offlineStore.appendExecutionEvents(
+                workoutId: activeWorkout.workoutId,
+                events: events,
+                activeWorkout: activeWorkout
+            )
+            offlineSyncError = nil
+            offlineTelemetryError = nil
+            Task { await syncOfflineCapture() }
+        } catch {
+            offlineSyncError = message(for: error)
+        }
+    }
+
+    func recordExecutionEvent(_ event: ExecutionEvent) {
+        recordExecutionEvents([event])
+    }
+
+    // MARK: Rest timer
+
+    /// Starts the single app-level rest interval and records its telemetry in one place, so a
+    /// rest that finishes on Today is indistinguishable from one that finishes in the workout.
+    func startRest(
+        seconds: Int,
+        planItemIndex: Int?,
+        exerciseId: String?,
+        startedAt: Date? = nil
+    ) {
+        guard seconds > 0 else { return }
+        restTimer.start(
+            seconds: seconds,
+            planItemIndex: planItemIndex,
+            exerciseId: exerciseId,
+            startedAt: startedAt
+        )
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .restStarted,
+            planItemIndex: planItemIndex,
+            payload: [
+                "prescribed_rest_s": .number(Double(seconds)),
+            ]
+        ))
+    }
+
+    func interruptRest() {
+        _ = restTimer.finish(
+            outcome: "interrupted",
+            reason: "interrupted by next set"
+        )
+    }
+
+    private func recordRestResult(_ result: RestTimerResult) {
+        var payload: [String: JSONValue] = [
+            "prescribed_rest_s": .number(Double(result.prescribedSeconds)),
+            "actual_rest_s": .number(Double(result.actualSeconds)),
+            "outcome": .string(result.outcome),
+        ]
+        if let reason = result.reason {
+            payload["reason"] = .string(reason)
+        }
+        recordExecutionEvent(ExecutionEvent(
+            eventType: result.outcome == "completed" ? .restCompleted : .restSkipped,
+            occurredAt: restISO(result.endedAt),
+            planItemIndex: result.planItemIndex,
+            payload: payload
+        ))
+    }
+
+    private func recordRestExtension(_ seconds: Int) {
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .restExtended,
+            planItemIndex: restTimer.planItemIndex,
+            payload: ["added_s": .number(Double(seconds))]
+        ))
+    }
+
+    private func handleRestNotificationDone() {
+        if restTimer.startedAt != nil {
+            _ = restTimer.finish(outcome: "completed")
+        } else {
+            RestNotificationManager.shared.acknowledgeDelivered()
+        }
+    }
+
+    private func restISO(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     // MARK: Phase 2 mutations
@@ -820,6 +1147,7 @@ final class AppModel: ObservableObject {
         readinessAck: Bool,
         confirmations: [String: Bool]? = nil,
         settings: PlanSettings? = nil,
+        executionTarget: PrescriptionExecutionTarget = .phone,
         idempotencyKey: String
     ) async {
         guard !isSaving, let session else { return }
@@ -843,7 +1171,8 @@ final class AppModel: ObservableObject {
                 IssuePrescriptionRequest(
                     readinessAck: readinessAck,
                     confirmations: confirmations,
-                    settings: settings
+                    settings: settings,
+                    executionTarget: executionTarget
                 ),
                 session: session,
                 idempotencyKey: idempotencyKey
@@ -1031,28 +1360,24 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .startWorkout, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.startWorkout(
+            let workout = try await client.startWorkout(
                 issuedPlanId: issued.issuedPlanId,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            try? offlineStore.clear()
-            offlineCapture = try? offlineStore.load()
+            _ = apply(.operationSucceeded(workout))
+            clearOfflineCaptureAfterServerCompletion()
             persistActiveWorkout()
-            mutationError = nil
             recoveryIssue = nil
             workoutRefreshGrace = true
             await refresh()
             // The plan is consumed by the start. Clear the ready state after reconciliation so a
             // stale fake/current plan read cannot put the start affordance back on Today.
             prescriptionState = .idle
+            RestNotificationManager.shared.requestAuthorizationIfNeeded()
             return true
         } catch {
             if let api = error as? APIError, api.isAuthenticationFailure {
@@ -1079,26 +1404,26 @@ final class AppModel: ObservableObject {
 
     func addSet(_ body: AddSetRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        guard !isMirroringWatchSession else {
+            mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
+            return false
+        }
         if offlineCaptureActive {
             return queueAddSet(body, idempotencyKey: idempotencyKey, workout: workout)
         }
         guard permitsMutation(kind: .addSet, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.addSet(
+            let updated = try await client.addSet(
                 workoutId: workout.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1122,6 +1447,10 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async -> Bool {
         guard !isSaving, let session else { return false }
+        guard !isMirroringWatchSession else {
+            mutationError = "Sets are recorded on the Apple Watch. Take over logging to change them here."
+            return false
+        }
         guard !offlineCaptureActive else {
             mutationError = "Removing a server-confirmed set requires a connection. Pending local sets can still be removed."
             return false
@@ -1129,20 +1458,16 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .removeSet, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.removeSet(
+            let updated = try await client.removeSet(
                 workoutId: workoutId,
                 body: RemoveSetRequest(setId: setId),
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1158,26 +1483,28 @@ final class AppModel: ObservableObject {
 
     func rateForm(_ body: FormRatingRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        // Ownership is checked before the offline branch: a mirror must not queue a phone-side
+        // form rating that the server would reject later.
+        guard !isMirroringWatchSession else {
+            mutationError = "Form ratings are recorded on the Apple Watch. Take over logging to rate here."
+            return false
+        }
         if offlineCaptureActive {
             return queueForm(body, idempotencyKey: idempotencyKey, workout: workout)
         }
         guard permitsMutation(kind: .rateForm, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.rateForm(
+            let updated = try await client.rateForm(
                 workoutId: workout.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
             return true
@@ -1197,20 +1524,34 @@ final class AppModel: ObservableObject {
 
     func loadExerciseCatalogue(force: Bool = false) async {
         guard let session else { return }
+        let server = session.baseURL.absoluteString
         if !force && !exerciseCatalogue.isEmpty { return }
-        guard !isLoadingExerciseCatalogue else { return }
         if force {
             // Configuration is cached in memory for the session; an explicit catalogue
             // refresh invalidates it so detail screens do not keep showing old taxonomy.
             exerciseDetailCache.removeAll()
         }
+        if exerciseCatalogue.isEmpty, exerciseCatalogueLoadedServerURL != server {
+            if let cached = exerciseCatalogueCache.load(serverURL: server) {
+                exerciseCatalogue = cached.exercises
+                exerciseCatalogueCachedAt = cached.fetchedAt
+            }
+            exerciseCatalogueLoadedServerURL = server
+        }
+        guard !isLoadingExerciseCatalogue else { return }
         isLoadingExerciseCatalogue = true
         exerciseCatalogueError = nil
         defer { isLoadingExerciseCatalogue = false }
         do {
-            exerciseCatalogue = try await client.exerciseCatalogue(session: session).exercises
+            let exercises = try await client.exerciseCatalogue(session: session).exercises
+            exerciseCatalogue = exercises
+            exerciseCatalogueCachedAt = nil
+            exerciseCatalogueLoadedServerURL = server
+            try? exerciseCatalogueCache.save(serverURL: server, exercises: exercises)
         } catch {
-            exerciseCatalogueError = message(for: error)
+            if exerciseCatalogue.isEmpty {
+                exerciseCatalogueError = message(for: error)
+            }
             if let api = error as? APIError, api.isAuthenticationFailure {
                 forgetLocally(message: api.errorDescription)
             }
@@ -1371,17 +1712,14 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .planEdit, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await operation()
-            mutationError = nil
+            let updated = try await operation()
+            _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
+            pushExecutionIfMirroring()
             return true
         } catch {
             if let api = error as? APIError,
@@ -1400,34 +1738,40 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        guard !isMirroringWatchSession else {
+            mutationError = "This workout is logged on the Apple Watch. Take over logging to finish it here."
+            return false
+        }
         guard !offlineFinishPending else {
             mutationError = "This workout is already queued for finish."
             return false
         }
+        // Execution events queued before finish must reach the server first; the API accepts
+        // late events but the local replay path needs an active workout to flush them.
+        if hasPendingOfflineCapture {
+            await syncOfflineCapture()
+        }
         if offlineCaptureActive {
+            restTimer.dismiss()
             return queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
         }
         guard permitsMutation(kind: .completeWorkout, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
-        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.completeWorkout(
+            let updated = try await client.completeWorkout(
                 workoutId: workout.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
             recoveryIssue = nil
             workoutRefreshGrace = false
-            try? offlineStore.clear()
-            offlineCapture = try? offlineStore.load()
+            restTimer.dismiss()
+            clearOfflineCaptureAfterServerCompletion()
             await refresh()
             await loadHistory(reset: true)
             return true
@@ -1450,23 +1794,22 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .abandonWorkout, operationId: idempotencyKey) else {
             return false
         }
-        isSaving = true
-        mutationFailureAmbiguous = false
-        defer {
-            isSaving = false
-            refreshPendingMutations()
+        if hasPendingOfflineCapture {
+            await syncOfflineCapture()
         }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
         do {
-            activeWorkout = try await client.abandonWorkout(
+            let updated = try await client.abandonWorkout(
                 workoutId: workout.workoutId,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
-            try? offlineStore.clear()
-            offlineCapture = try? offlineStore.load()
-            mutationError = nil
+            _ = apply(.operationSucceeded(updated))
+            clearOfflineCaptureAfterServerCompletion()
             recoveryIssue = nil
             workoutRefreshGrace = false
+            restTimer.dismiss()
             await refresh()
             return true
         } catch {
@@ -1533,12 +1876,14 @@ final class AppModel: ObservableObject {
                     let ack: PlanAckEnvelope = try await client.replay(entry, session: session)
                     _ = ack
                     await reconcilePlanState()
-                case .startWorkout, .addSet, .removeSet, .rateForm, .planEdit:
+                case .startWorkout, .addSet, .removeSet, .rateForm, .planEdit, .takeover:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = true
                 case .completeWorkout, .abandonWorkout:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = false
+                case .executionEvents:
+                    break
                 }
             } catch let api as APIError {
                 if api.code == "idempotency_conflict" {
@@ -1583,6 +1928,7 @@ final class AppModel: ObservableObject {
         recoveryIssue = nil
         workoutRefreshGrace = false
         mutationError = nil
+        persistActiveWorkout()
     }
 
     func abandonRecoveredWorkout() async {
@@ -1590,6 +1936,34 @@ final class AppModel: ObservableObject {
         let key = UUID().uuidString.lowercased()
         if await abandonWorkout(idempotencyKey: key) {
             recoveryIssue = nil
+        }
+    }
+
+    @discardableResult
+    private func apply(_ event: SessionEvent) -> [SessionEffect] {
+        let current = SessionState(
+            activeWorkout: activeWorkout,
+            isSaving: isSaving,
+            mutationError: mutationError,
+            mutationFailureAmbiguous: mutationFailureAmbiguous
+        )
+        let (next, effects) = SessionReducer.reduce(current, event)
+        activeWorkout = next.activeWorkout
+        isSaving = next.isSaving
+        mutationError = next.mutationError
+        mutationFailureAmbiguous = next.mutationFailureAmbiguous
+        for effect in effects {
+            execute(effect)
+        }
+        return effects
+    }
+
+    private func execute(_ effect: SessionEffect) {
+        switch effect {
+        case .persistActiveWorkout:
+            persistActiveWorkout()
+        case .refreshPendingMutations:
+            refreshPendingMutations()
         }
     }
 
@@ -1623,11 +1997,22 @@ final class AppModel: ObservableObject {
         return formatter.string(from: Date())
     }
 
+    private func offlineRecoveryBlocksWrites() -> Bool {
+        if offlineRecoveryConflict != nil {
+            mutationError = "Resolve the offline recovery conflict before adding offline work."
+            return true
+        }
+        guard offlineRecoveryError != nil else { return false }
+        mutationError = "Offline recovery data could not be read. Retry recovery or discard the local capture before adding offline work."
+        return true
+    }
+
     private func queueAddSet(
         _ body: AddSetRequest,
         idempotencyKey: String,
         workout: WorkoutDetail
     ) -> Bool {
+        guard !offlineRecoveryBlocksWrites() else { return false }
         guard !offlineFinishPending else {
             mutationError = "This workout is already queued for finish."
             return false
@@ -1668,12 +2053,11 @@ final class AppModel: ObservableObject {
                 localSetId: localId
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
-            activeWorkout = updated
+            _ = apply(.operationQueued(updated))
             isOffline = true
-            mutationError = nil
             return true
         } catch {
-            mutationError = message(for: error)
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
             return false
         }
     }
@@ -1683,6 +2067,7 @@ final class AppModel: ObservableObject {
         idempotencyKey: String,
         workout: WorkoutDetail
     ) -> Bool {
+        guard !offlineRecoveryBlocksWrites() else { return false }
         guard !offlineFinishPending else {
             mutationError = "This workout is already queued for finish."
             return false
@@ -1709,12 +2094,11 @@ final class AppModel: ObservableObject {
                 localFormId: localId
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
-            activeWorkout = updated
+            _ = apply(.operationQueued(updated))
             isOffline = true
-            mutationError = nil
             return true
         } catch {
-            mutationError = message(for: error)
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
             return false
         }
     }
@@ -1724,6 +2108,7 @@ final class AppModel: ObservableObject {
         idempotencyKey: String,
         workout: WorkoutDetail
     ) -> Bool {
+        guard !offlineRecoveryBlocksWrites() else { return false }
         guard !offlineFinishPending else {
             mutationError = "This workout is already queued for finish."
             return false
@@ -1743,11 +2128,11 @@ final class AppModel: ObservableObject {
                 createdAt: Date()
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: workout)
+            _ = apply(.operationQueued(workout))
             isOffline = true
-            mutationError = nil
             return true
         } catch {
-            mutationError = message(for: error)
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
             return false
         }
     }
@@ -1760,6 +2145,7 @@ final class AppModel: ObservableObject {
     }
 
     func syncOfflineCapture() async {
+        guard offlineRecoveryError == nil, offlineRecoveryConflict == nil else { return }
         guard !isSaving, !isSyncingOffline,
               let session, let cached = activeWorkout,
               hasPendingOfflineCapture else { return }
@@ -1811,6 +2197,14 @@ final class AppModel: ObservableObject {
                         activeWorkout = updated
                         offlineCapture = try offlineStore.remove(operation.operationId)
                         offlineCapture = try offlineStore.setActiveWorkout(updated)
+                    case .executionEvents(let events):
+                        _ = try await client.submitExecutionEvents(
+                            workoutId: operation.workoutId,
+                            events: events,
+                            session: session,
+                            idempotencyKey: operation.operationId
+                        )
+                        offlineCapture = try offlineStore.remove(operation.operationId)
                     case .rateForm(let body):
                         let updated = try await client.rateForm(
                             workoutId: operation.workoutId,
@@ -1836,8 +2230,7 @@ final class AppModel: ObservableObject {
                         if hasPendingOfflineCapture {
                             offlineSyncError = "The workout finished on the server, but some local operations still need attention."
                         } else {
-                            try? offlineStore.clear()
-                            offlineCapture = try? offlineStore.load()
+                            clearOfflineCaptureAfterServerCompletion()
                         }
                         await refresh()
                         await loadHistory(reset: true)
@@ -1959,13 +2352,34 @@ final class AppModel: ObservableObject {
     func discardAllOfflineCapture() async -> Bool {
         do {
             try offlineStore.clear()
+        } catch let error as OfflineCaptureStoreError {
+            offlinePersistenceError = error.errorDescription
+            mutationError = message(for: error)
+            return false
+        } catch {
+            offlinePersistenceError = OfflineCaptureStoreError.io(
+                error.localizedDescription
+            ).errorDescription
+            mutationError = message(for: error)
+            return false
+        }
+        do {
             offlineCapture = try offlineStore.load()
+            offlineRecoveryError = nil
+            offlinePersistenceError = nil
+            offlineRecoveryConflict = nil
+            offlineTelemetryError = nil
             activeWorkout = nil
             offlineSyncError = nil
             isOffline = false
             await refresh()
             return true
+        } catch let error as OfflineCaptureStoreError {
+            offlineRecoveryError = error
+            mutationError = message(for: error)
+            return false
         } catch {
+            offlineRecoveryError = .io(error.localizedDescription)
             mutationError = message(for: error)
             return false
         }
@@ -2020,7 +2434,54 @@ final class AppModel: ObservableObject {
         return await cancelOfflineOperation(operation.operationId)
     }
 
+    /// A watch-owned session is logged on the watch; the phone mirrors it and may edit the plan.
+    var isMirroringWatchSession: Bool {
+        MirrorPolicy.isMirror(workout: activeWorkout, phoneDeviceID: device?.deviceID)
+    }
+
+    /// Nudges the watch with the new plan after a phone edit. Best effort and redundant by
+    /// design: the watch also refreshes on foreground and after each set (contract §10.2), so a
+    /// dropped payload costs one stale view, never a lost edit.
+    private func pushExecutionIfMirroring() {
+        guard isMirroringWatchSession, let workout = activeWorkout else { return }
+        watchPairing.pushExecution(workout)
+    }
+
+    /// Takes logging back from the watch. The watch turns read-only on its next refresh.
+    func takeOverLogging() async -> Bool {
+        guard let session, let workout = activeWorkout, !isSaving else { return false }
+        guard !offlineCaptureActive else {
+            mutationError = "Taking over logging requires the server."
+            return false
+        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
+        do {
+            let updated = try await client.takeover(
+                workoutId: workout.workoutId,
+                session: session,
+                idempotencyKey: UUID().uuidString.lowercased()
+            )
+            _ = apply(.operationSucceeded(updated))
+            workoutRefreshGrace = true
+            persistActiveWorkout()
+            mutationError = nil
+            return true
+        } catch {
+            mutationError = (error as? LocalizedError)?.errorDescription
+                ?? "Logging could not be taken over."
+            return false
+        }
+    }
+
     private func permitsMutation(kind: MutationKind, operationId: String) -> Bool {
+        // The server allows abandonment from any device (contract §9), and the watch turns
+        // read-only on the next refresh. Everything else that writes to a watch-owned session
+        // needs the take-over first.
+        if isMirroringWatchSession, kind != .planEdit, kind != .abandonWorkout {
+            mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
+            return false
+        }
         let unresolved = pendingMutations
         guard !unresolved.isEmpty else { return true }
         if unresolved.contains(where: {
@@ -2042,8 +2503,10 @@ final class AppModel: ObservableObject {
         if let session {
             client.discardAll(for: session)
         }
+        watchPairing.reset()
         tokens.delete()
         store.device = nil
+        store.clearWatchLink()
         device = nil
         session = nil
         bootstrap = nil
@@ -2053,12 +2516,37 @@ final class AppModel: ObservableObject {
         historyOffset = 0
         hasLoadedHistory = false
         activeWorkout = nil
-        try? offlineStore.clear()
-        offlineCapture = try? offlineStore.load()
+        var cleared = false
+        do {
+            try offlineStore.clear()
+            cleared = true
+        } catch let error as OfflineCaptureStoreError {
+            offlinePersistenceError = error.errorDescription
+        } catch {
+            offlinePersistenceError = OfflineCaptureStoreError.io(
+                error.localizedDescription
+            ).errorDescription
+        }
+        do {
+            offlineCapture = try offlineStore.load()
+            offlineRecoveryError = nil
+            offlineRecoveryConflict = nil
+            offlineTelemetryError = nil
+            if cleared {
+                offlinePersistenceError = nil
+            }
+        } catch let error as OfflineCaptureStoreError {
+            offlineRecoveryError = error
+        } catch {
+            offlineRecoveryError = .io(error.localizedDescription)
+        }
         isOffline = false
         exerciseCatalogue = []
         isLoadingExerciseCatalogue = false
         exerciseCatalogueError = nil
+        exerciseCatalogueCachedAt = nil
+        exerciseCatalogueLoadedServerURL = nil
+        exerciseCatalogueCache.clear()
         exerciseDetail = nil
         isLoadingExerciseDetail = false
         exerciseDetailError = nil
@@ -2098,11 +2586,13 @@ final class AppModel: ObservableObject {
 
     private func handleMutation(_ error: Error) {
         if let api = error as? APIError, api.isAuthenticationFailure {
-            mutationFailureAmbiguous = false
+            _ = apply(.mutationErrorCleared)
             forgetLocally(message: api.errorDescription)
         } else {
-            mutationError = message(for: error)
-            mutationFailureAmbiguous = Self.isAmbiguous(error)
+            _ = apply(.operationFailed(
+                message: message(for: error),
+                ambiguous: Self.isAmbiguous(error)
+            ))
         }
     }
 

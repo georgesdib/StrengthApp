@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import StrengthCore
 
 /// Read-only HealthKit adapter. It performs no writes, no observer queries and no background
 /// delivery. Query failures are surfaced; an empty result is never interpreted as denied access.

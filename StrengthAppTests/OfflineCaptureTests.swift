@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import StrengthApp
+import StrengthCore
 
 final class OfflineCaptureTests: XCTestCase {
     private var fileURL: URL!

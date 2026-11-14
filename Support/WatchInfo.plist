@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>Strength</string>
+    <key>WKApplication</key>
+    <true/>
+    <key>WKCompanionAppBundleIdentifier</key>
+    <string>com.georgesdibpersonalteam.StrengthApp</string>
+    <key>WKBackgroundModes</key>
+    <array>
+        <string>workout-processing</string>
+    </array>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+    <key>NSHealthShareUsageDescription</key>
+    <string>Strength reads your heart rate during a watch workout so the screen stays awake while you log sets.</string>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>Strength saves one strength-training workout for the session you log on the watch.</string>
+</dict>
+</plist>

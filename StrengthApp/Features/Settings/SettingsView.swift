@@ -1,8 +1,11 @@
 import SwiftUI
+import StrengthCore
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @State private var confirmingForget = false
+    @State private var isSavingServerSettings = false
+    @State private var serverSaveMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -22,19 +25,14 @@ struct SettingsView: View {
                             .autocorrectionDisabled()
                             .multilineTextAlignment(.trailing)
                     }
-                    LabeledContent("Home Wi-Fi") {
-                        TextField("Home network name", text: $model.homeWiFiText)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .multilineTextAlignment(.trailing)
-                    }
+                    Toggle("Prefer Home Server", isOn: $model.preferHome)
                     LabeledContent("Active") {
                         Text(model.serverSelectionSummary)
                             .foregroundStyle(.secondary)
                     }
                     Text(model.pairedServerURL ?? model.serverURLText)
                         .textSelection(.enabled)
-                    Text(model.homeWiFiStatus)
+                    Text(model.homeServerStatus)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     if let error = model.serverSettingsError {
@@ -42,16 +40,38 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
-                    Button("Save server settings") {
-                        Task { _ = await model.saveServerSettings() }
+                    if isSavingServerSettings {
+                        HStack {
+                            ProgressView()
+                            Text("Saving…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if let serverSaveMessage {
+                        Label(serverSaveMessage, systemImage: "checkmark.circle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.green)
+                            .accessibilityIdentifier("server-settings-saved")
                     }
-                    .disabled(model.isSaving)
+                    Button("Save server settings") {
+                        Task {
+                            isSavingServerSettings = true
+                            serverSaveMessage = nil
+                            let saved = await model.saveServerSettings()
+                            isSavingServerSettings = false
+                            if saved {
+                                serverSaveMessage = "Saved"
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("save-server-settings")
+                    .disabled(model.isSaving || isSavingServerSettings)
                 } header: {
                     Text("Server")
                 } footer: {
-                    Text("Home Server is used when the phone is on the named Home Wi-Fi; "
-                         + "Away Server is used otherwise. Wi-Fi name detection uses Precise "
-                         + "Location. Both addresses should reach the same paired strength-coach server.")
+                    Text("When Prefer Home Server is on, the app checks whether Home Server "
+                         + "is reachable and otherwise uses Away Server. Turn it off to use Away "
+                         + "Server manually. Both addresses should reach the same paired "
+                         + "strength-coach server.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -90,6 +110,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                WatchSettingsSection(model: model)
+
                 Section("This device") {
                     if let device = model.device {
                         LabeledContent("Label", value: device.label)
@@ -125,6 +147,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onChange(of: model.homeServerText) { _, _ in serverSaveMessage = nil }
+            .onChange(of: model.awayServerText) { _, _ in serverSaveMessage = nil }
+            .onChange(of: model.preferHome) { _, _ in serverSaveMessage = nil }
             .confirmationDialog(
                 "Forget this device?",
                 isPresented: $confirmingForget,

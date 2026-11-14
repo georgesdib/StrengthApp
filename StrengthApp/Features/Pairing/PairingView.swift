@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct PairingView: View {
     private enum Field: Hashable {
@@ -86,7 +87,7 @@ struct PairingView: View {
 
                 Section {
                     Text("The app talks only to the server address you enter. After pairing, "
-                         + "configure Home Server, Away Server and Home Wi-Fi in Settings.")
+                         + "configure Home Server and Away Server in Settings.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Text("The app uses the iPhone's local-network permission on the first "

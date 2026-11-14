@@ -1,43 +1,67 @@
 import Foundation
 
 /// One mutation that was sent but whose outcome was not acknowledged.
-struct PendingMutation: Codable, Equatable, Identifiable {
-    enum State: String, Codable {
+public struct PendingMutation: Codable, Equatable, Identifiable {
+    public enum State: String, Codable {
         case pending
         case conflict
     }
 
-    let operationId: String
-    let deviceId: String?
-    let serverURL: String
-    let kind: MutationKind
-    let targetId: String?
-    let path: String
-    let bodyData: Data
-    let createdAt: Date
-    var state: State
+    public let operationId: String
+    public let deviceId: String?
+    public let serverURL: String
+    public let kind: MutationKind
+    public let targetId: String?
+    public let path: String
+    public let bodyData: Data
+    public let createdAt: Date
+    public var state: State
 
-    var id: String { operationId }
+    public init(
+        operationId: String,
+        deviceId: String?,
+        serverURL: String,
+        kind: MutationKind,
+        targetId: String?,
+        path: String,
+        bodyData: Data,
+        createdAt: Date,
+        state: State = .pending
+    ) {
+        self.operationId = operationId
+        self.deviceId = deviceId
+        self.serverURL = serverURL
+        self.kind = kind
+        self.targetId = targetId
+        self.path = path
+        self.bodyData = bodyData
+        self.createdAt = createdAt
+        self.state = state
+    }
 
-    var isReplayable: Bool {
+    public var id: String { operationId }
+
+    public var isReplayable: Bool {
         state == .pending
             && Date().timeIntervalSince(createdAt) <= MutationJournal.replayWindow
     }
 }
 
-enum MutationKind: String, Codable, CaseIterable {
+public enum MutationKind: String, Codable, CaseIterable {
     case readiness
     case healthkitReadiness
     case prescription
     case startWorkout
     case addSet
     case removeSet
+    case executionEvents
     case rateForm
     case planEdit
     case completeWorkout
     case abandonWorkout
+    case takeover
 
-    var label: String {
+    public var label: String {
         switch self {
         case .readiness: return "Readiness"
         case .healthkitReadiness: return "HealthKit readiness"
@@ -45,20 +69,22 @@ enum MutationKind: String, Codable, CaseIterable {
         case .startWorkout: return "Start workout"
         case .addSet: return "Add set"
         case .removeSet: return "Remove set"
+        case .executionEvents: return "Execution events"
         case .rateForm: return "Form rating"
         case .planEdit: return "Plan edit"
         case .completeWorkout: return "Complete workout"
         case .abandonWorkout: return "Abandon workout"
+        case .takeover: return "Take over logging"
         }
     }
 }
 
-enum MutationJournalError: LocalizedError, Equatable {
+public enum MutationJournalError: LocalizedError, Equatable {
     case full
     case operationConflict
     case io(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .full:
             return "Too many unconfirmed operations are already waiting. Resolve them before trying again."
@@ -75,19 +101,19 @@ enum MutationJournalError: LocalizedError, Equatable {
 /// This is deliberately not an offline queue: entries are written immediately before the HTTP
 /// request, capped, aged out, and only replayed with the original UUID and exact encoded body.
 /// Files use iOS data protection and are excluded from backup.
-final class MutationJournal {
-    static let maxEntries = 16
-    static let retention: TimeInterval = 30 * 24 * 60 * 60
-    static let replayWindow: TimeInterval = 28 * 24 * 60 * 60
+public final class MutationJournal {
+    public static let maxEntries = 16
+    public static let retention: TimeInterval = 30 * 24 * 60 * 60
+    public static let replayWindow: TimeInterval = 28 * 24 * 60 * 60
 
     private let fileURL: URL
     private let lock = NSLock()
 
-    init(fileURL: URL? = nil) {
+    public init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultFileURL
     }
 
-    static var defaultFileURL: URL {
+    public static var defaultFileURL: URL {
         let base = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -97,7 +123,7 @@ final class MutationJournal {
             .appendingPathComponent("pending-mutations.json")
     }
 
-    func all(for deviceId: String?, serverURL: String) -> [PendingMutation] {
+    public func all(for deviceId: String?, serverURL: String) -> [PendingMutation] {
         lock.lock()
         defer { lock.unlock() }
         guard let entries = try? load() else { return [] }
@@ -106,7 +132,7 @@ final class MutationJournal {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
-    func record(_ entry: PendingMutation) throws {
+    public func record(_ entry: PendingMutation) throws {
         lock.lock()
         defer { lock.unlock() }
         var entries = try load()
@@ -128,11 +154,11 @@ final class MutationJournal {
         try save(entries)
     }
 
-    func acknowledge(_ entry: PendingMutation) throws {
+    public func acknowledge(_ entry: PendingMutation) throws {
         try remove(entry)
     }
 
-    func markConflict(_ entry: PendingMutation) throws {
+    public func markConflict(_ entry: PendingMutation) throws {
         lock.lock()
         defer { lock.unlock() }
         var entries = try load()
@@ -142,7 +168,7 @@ final class MutationJournal {
         }
     }
 
-    func remove(operationId: String) throws {
+    public func remove(operationId: String) throws {
         lock.lock()
         defer { lock.unlock() }
         var entries = try load()
@@ -153,7 +179,7 @@ final class MutationJournal {
         }
     }
 
-    func remove(_ entry: PendingMutation) throws {
+    public func remove(_ entry: PendingMutation) throws {
         lock.lock()
         defer { lock.unlock() }
         var entries = try load()
@@ -168,7 +194,7 @@ final class MutationJournal {
         }
     }
 
-    func removeAll(for deviceId: String?, serverURL: String) throws {
+    public func removeAll(for deviceId: String?, serverURL: String) throws {
         lock.lock()
         defer { lock.unlock() }
         var entries = try load()

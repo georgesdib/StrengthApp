@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct HistoryView: View {
     @ObservedObject var model: AppModel
@@ -106,9 +107,6 @@ private struct HistoryRow: View {
                 if let marks = session.marks, marks > 0 {
                     Text("\(marks) mark\(marks == 1 ? "" : "s")")
                 }
-                if session.needsReview == 1 {
-                    Text("needs review")
-                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -138,8 +136,11 @@ struct HistoryDetailView: View {
     @ObservedObject var model: AppModel
     let sessionID: String
     @State private var detail: HistoryDetail?
+    @State private var execution: ExecutionAnalyticsResponse?
+    @State private var executionUnavailable = false
     @State private var error: String?
     @State private var isLoading = false
+    @State private var showingReport = false
 
     var body: some View {
         List {
@@ -163,6 +164,21 @@ struct HistoryDetailView: View {
                         LabeledContent("Main lifts", value: lifts.map(Self.liftLabel).joined(separator: ", "))
                     }
                 }
+                Section("Coaching report") {
+                    if let workoutId = detail.workoutId, !workoutId.isEmpty {
+                        Button {
+                            showingReport = true
+                        } label: {
+                            Label("View session report", systemImage: "doc.text.magnifyingglass")
+                        }
+                        .accessibilityIdentifier("history-view-report")
+                    } else {
+                        Text("No coaching report is available for an imported session without a workout record.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                executionSection
                 Section("Outline") {
                     if groupedSets.isEmpty {
                         Text("No set detail recorded.")
@@ -192,6 +208,99 @@ struct HistoryDetailView: View {
         }
         .navigationTitle("Workout")
         .task { await load() }
+        .sheet(isPresented: $showingReport) {
+            if let workoutId = detail?.workoutId {
+                WorkoutReportView(model: model, workoutId: workoutId)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var executionSection: some View {
+        if let execution {
+            Section("Execution") {
+                if execution.events.isEmpty {
+                    Text("No execution events were recorded for this workout. Set and rest timing is unavailable.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LabeledContent("Active lifting", value: Self.secondsLabel(execution.summary.activeLiftingS))
+                    LabeledContent("Recorded rest", value: Self.secondsLabel(execution.summary.recordedRecoveryS))
+                    LabeledContent("Exercise transitions", value: Self.secondsLabel(execution.summary.exerciseTransitionS))
+                    LabeledContent("Total elapsed", value: Self.secondsLabel(execution.totalElapsedS))
+                    LabeledContent("Events", value: "\(execution.dataQuality.eventCount)")
+                    if let started = execution.dataQuality.setStartedEvents,
+                       let completed = execution.dataQuality.setCompletedEvents,
+                       started > completed {
+                        Text("\(started - completed) set start(s) have no completion timestamp; their duration is unavailable.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if let started = execution.dataQuality.restStartedEvents,
+                       let ended = execution.dataQuality.restEndedEvents,
+                       started > ended {
+                        Text("\(started - ended) rest start(s) have no end timestamp; their duration is unavailable.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+            if !execution.sets.isEmpty {
+                Section("Set timing") {
+                    ForEach(execution.sets) { set in
+                        LabeledContent(
+                            set.localSetId.map { "Set \($0.prefix(8))" } ?? "Set \(set.setId ?? 0)",
+                            value: Self.secondsLabel(set.durationS)
+                        )
+                    }
+                }
+            }
+            if !execution.rests.isEmpty {
+                Section("Rest comparison") {
+                    ForEach(execution.rests) { rest in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(rest.outcome == "completed" ? "Completed rest" : "Rest ended early")
+                                .font(.subheadline)
+                            Text("Prescribed \(rest.prescribedRestS.map(Self.secondsLabel) ?? "not recorded") · actual \(Self.secondsLabel(rest.actualRestS))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let deviation = rest.deviationS {
+                                Text("Deviation \(Self.signedSeconds(deviation))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            if !execution.events.isEmpty {
+                Section("Timeline") {
+                    ForEach(execution.events) { event in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text(Self.timeLabel(event.occurredAt))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(width: 62, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(Self.eventLabel(event.eventType))
+                                    .font(.subheadline)
+                                if let setId = event.setId {
+                                    Text("Set ID \(setId)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if executionUnavailable {
+            Section("Execution") {
+                Text("Execution timeline is unavailable for this workout. Historical workouts without execution events are not backfilled.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var groupedSets: [(String, [HistoryDetailSet])] {
@@ -211,9 +320,37 @@ struct HistoryDetailView: View {
         defer { isLoading = false }
         do {
             detail = try await model.historyDetail(sessionID: sessionID)
+            do {
+                execution = try await model.executionAnalytics(workoutId: sessionID)
+            } catch {
+                execution = nil
+                executionUnavailable = true
+            }
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    nonisolated private static func eventLabel(_ type: String) -> String {
+        type.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    nonisolated private static func timeLabel(_ iso: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = formatter.date(from: iso)
+            ?? ISO8601DateFormatter().date(from: iso)
+        guard let date else { return iso }
+        return date.formatted(date: .omitted, time: .shortened)
+    }
+
+    nonisolated private static func secondsLabel(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    nonisolated private static func signedSeconds(_ seconds: Double) -> String {
+        String(format: "%+.0f s", seconds)
     }
 
     nonisolated private static func sessionLabel(_ type: String?) -> String {

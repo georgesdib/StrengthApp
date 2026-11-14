@@ -1,10 +1,10 @@
 import SwiftUI
+import StrengthCore
 
 struct ExerciseWorkoutView: View {
     @ObservedObject var model: AppModel
     let exerciseId: String
     let planIndex: Int?
-    @ObservedObject var restTimer: RestTimerModel
     @ObservedObject var drafts: WorkoutDraftStore
 
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +14,13 @@ struct ExerciseWorkoutView: View {
     @State private var addError: String?
     @State private var pendingRemoval: WorkoutSet?
     @State private var removeError: String?
+    @State private var rating = 4
+    @State private var formOperation = OperationKey<FormRatingRequest>()
+    @State private var formError: String?
+    @State private var activeLocalSetID: String?
+    @State private var activeSetIndex: Int?
+    @State private var recordedExerciseStart = false
+    @State private var recordedExerciseCompletion = false
 
     private var workout: WorkoutDetail? { model.activeWorkout }
 
@@ -84,6 +91,72 @@ struct ExerciseWorkoutView: View {
                 }
             }
 
+            if let warmups = item?.warmup, !warmups.isEmpty {
+                Section("Warm-ups") {
+                    ForEach(Array(warmups.enumerated()), id: \.offset) { index, warmup in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(warmupTitle(index: index, warmup: warmup))
+                                    .font(.subheadline)
+                                Text("\(warmup.reps) reps @ \(warmup.loadLabel)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .accessibilityIdentifier("warmup-\(index)")
+                    }
+                    Text("Optional. Log the working sets; skipping a warm-up does not block them.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Form rating") {
+                if model.isMirroringWatchSession {
+                    Label("Form ratings are recorded on the Apple Watch.", systemImage: "applewatch")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("mirror-form-disabled")
+                    Text("Take over logging to rate form on the phone.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    if let existing = workout?.formRating(for: exerciseId) {
+                        LabeledContent("Current rating", value: "\(existing.rating) / 5")
+                            .accessibilityIdentifier("exercise-form-current")
+                        Text("Saving again records a correction. The earlier rating is retained; the latest is shown here.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Picker("Rating", selection: $rating) {
+                        ForEach(1...5, id: \.self) { value in
+                            Text("\(value)").tag(value)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("exercise-form-rating")
+                    if let formError {
+                        Text(formError).foregroundStyle(.red)
+                    }
+                    Button {
+                        Task { await saveForm() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if model.isSaving {
+                                ProgressView()
+                            } else {
+                                Text(workout?.formRating(for: exerciseId) == nil
+                                     ? "Save form rating" : "Save correction")
+                            }
+                            Spacer()
+                        }
+                    }
+                    .accessibilityIdentifier("exercise-save-form")
+                    .disabled(model.isSaving)
+                }
+            }
+
             if plannedSets > 0 {
                 Section("Planned sets") {
                     ForEach(1...plannedSets, id: \.self) { index in
@@ -107,12 +180,13 @@ struct ExerciseWorkoutView: View {
                                     .font(.caption)
                                     .foregroundStyle(.green)
                             } else {
-                                Button("Done") {
+                                Button("Start set") {
                                     beginLog(planSetIndex: index)
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
                                 .accessibilityIdentifier("log-planned-set-\(index)")
+                                .disabled(model.isMirroringWatchSession)
                             }
                         }
                     }
@@ -157,10 +231,10 @@ struct ExerciseWorkoutView: View {
                 Button {
                     beginLog(planSetIndex: nil)
                 } label: {
-                    Label("Add another set", systemImage: "plus")
+                    Label("Start another set", systemImage: "plus")
                 }
                 .accessibilityIdentifier("exercise-add-set")
-                .disabled(model.isSaving)
+                .disabled(model.isSaving || model.isMirroringWatchSession)
             }
 
             Section {
@@ -170,12 +244,20 @@ struct ExerciseWorkoutView: View {
             }
         }
         .navigationTitle(Self.label(exerciseId))
-        .safeAreaInset(edge: .bottom) {
-            RestTimerBar(timer: restTimer)
-        }
         .onAppear {
             if drafts.drafts[draftKey] == nil {
                 drafts.drafts[draftKey] = initialDraft
+            }
+            rating = workout?.formRating(for: exerciseId)?.rating ?? 4
+            if !recordedExerciseStart {
+                recordedExerciseStart = true
+                recordExerciseEvent(.exerciseStarted)
+            }
+        }
+        .onDisappear {
+            if !recordedExerciseCompletion {
+                recordedExerciseCompletion = true
+                recordExerciseEvent(.exerciseCompleted)
             }
         }
         .sheet(isPresented: $showingLog) {
@@ -183,10 +265,11 @@ struct ExerciseWorkoutView: View {
                 draft: draft,
                 exerciseLabel: Self.label(exerciseId),
                 target: logSetIndex.map { "Planned set \($0)" },
+                velocityApplicable: item?.velocityTarget != nil,
                 isSaving: model.isSaving,
                 error: addError
-            ) {
-                Task { await saveSet() }
+            ) { anchor in
+                Task { await saveSet(performedAt: anchor) }
             }
         }
         .alert(item: $pendingRemoval) { set in
@@ -209,6 +292,28 @@ struct ExerciseWorkoutView: View {
 
     private func beginLog(planSetIndex: Int?) {
         addError = nil
+        if model.restTimer.startedAt != nil {
+            model.interruptRest()
+        }
+        let localSetID = UUID().uuidString.lowercased()
+        activeLocalSetID = localSetID
+        // Unplanned and warm-up sets always sit above the planned range. Using max+1 alone can
+        // collide with a later planned set (or with a warm-up logged first), and the server treats
+        // a repeated index as a retry, so the working set would never be recorded.
+        let setIndex = planSetIndex ?? Self.nextUnplannedSetIndex(
+            planned: item?.sets ?? 0,
+            existing: performed.compactMap(\.setIndex)
+        )
+        activeSetIndex = setIndex
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .setStarted,
+            planItemIndex: planIdentity,
+            localSetId: localSetID,
+            payload: [
+                "set_index": .number(Double(setIndex)),
+                "exercise_id": .string(exerciseId),
+            ]
+        ))
         logSetIndex = planSetIndex
         if planSetIndex != nil {
             drafts.drafts[draftKey] = WorkoutDraftStore.Draft(
@@ -225,7 +330,9 @@ struct ExerciseWorkoutView: View {
         showingLog = true
     }
 
-    private func saveSet() async {
+    /// `performedAt` is the first edit of the sheet: the set ended then, and the rest is
+    /// anchored there so the entry itself is rest rather than part of the set.
+    private func saveSet(performedAt anchor: Date) async {
         addError = nil
         let draft = draft.wrappedValue
         guard let reps = Int(draft.repsText.trimmingCharacters(in: .whitespaces)) else {
@@ -255,7 +362,12 @@ struct ExerciseWorkoutView: View {
             addError = error.localizedDescription
             return
         }
-        let setIndex = logSetIndex ?? (performed.compactMap(\.setIndex).max() ?? 0) + 1
+        guard let setIndex = activeSetIndex else {
+            addError = "The set index is unavailable. Close the form and start the set again."
+            return
+        }
+        let localSetID = activeLocalSetID
+        let completedAt = ServerClock.encodedISO(anchor)
         let request = AddSetRequest(
             exerciseId: exerciseId,
             loadKg: load,
@@ -264,13 +376,38 @@ struct ExerciseWorkoutView: View {
             velocityMps: velocity,
             setIndex: setIndex,
             planItemIndex: planIdentity,
-            repVelocities: repVelocities
+            repVelocities: repVelocities,
+            performedAt: completedAt
         )
         let key = addOperation.use(request)
         if await model.addSet(request, idempotencyKey: key) {
             addOperation.acknowledged()
+            let savedSet = (model.activeWorkout?.sets ?? []).last {
+                $0.exerciseId == exerciseId
+                    && $0.setIndex == setIndex
+                    && $0.planItemIndex == planIdentity
+            }
+            recordExecutionEvent(ExecutionEvent(
+                eventType: .setCompleted,
+                occurredAt: completedAt,
+                planItemIndex: planIdentity,
+                setId: savedSet?.setId.flatMap { $0 > 0 ? $0 : nil },
+                localSetId: localSetID,
+                payload: [
+                    "set_index": .number(Double(setIndex)),
+                    "exercise_id": .string(exerciseId),
+                ]
+            ))
+            activeLocalSetID = nil
+            activeSetIndex = nil
             if rir != 6 {
-                restTimer.start(seconds: item?.restS ?? 120)
+                let prescribed = item?.restS ?? 120
+                model.startRest(
+                    seconds: prescribed,
+                    planItemIndex: planIdentity,
+                    exerciseId: exerciseId,
+                    startedAt: anchor
+                )
             }
             showingLog = false
         } else {
@@ -297,6 +434,40 @@ struct ExerciseWorkoutView: View {
         }
     }
 
+    private func warmupTitle(index: Int, warmup: WarmupSet) -> String {
+        if index == 0, warmup.loadKg == 20 {
+            return "Empty bar"
+        }
+        return "Warm-up \(index + 1)"
+    }
+
+    private func saveForm() async {
+        formError = nil
+        let request = FormRatingRequest(
+            exerciseId: exerciseId,
+            rating: rating,
+            note: nil
+        )
+        let key = formOperation.use(request)
+        if await model.rateForm(request, idempotencyKey: key) {
+            formOperation.acknowledged()
+        } else {
+            formError = model.mutationError
+        }
+    }
+
+    private func recordExerciseEvent(_ type: ExecutionEventType) {
+        recordExecutionEvent(ExecutionEvent(
+            eventType: type,
+            planItemIndex: planIdentity,
+            payload: ["exercise_id": .string(exerciseId)]
+        ))
+    }
+
+    private func recordExecutionEvent(_ event: ExecutionEvent) {
+        model.recordExecutionEvent(event)
+    }
+
     private func parseDouble(_ text: String) -> Double? {
         let value = text.trimmingCharacters(in: .whitespaces)
             .replacingOccurrences(of: ",", with: ".")
@@ -308,6 +479,13 @@ struct ExerciseWorkoutView: View {
         return value.isEmpty ? nil : Int(value)
     }
 
+    /// Unplanned and warm-up sets sit above the whole planned range. A plain max+1 can collide
+    /// with a later planned set (or a warm-up logged first), and the server treats a repeated
+    /// index as a retry, so the working set would never be recorded.
+    nonisolated static func nextUnplannedSetIndex(planned: Int, existing: [Int]) -> Int {
+        max(planned, existing.max() ?? 0) + 1
+    }
+
     private static func label(_ value: String) -> String {
         value.replacingOccurrences(of: "_", with: " ").capitalized
     }
@@ -317,11 +495,20 @@ private struct LogSetSheet: View {
     @Binding var draft: WorkoutDraftStore.Draft
     let exerciseLabel: String
     let target: String?
+    let velocityApplicable: Bool
     let isSaving: Bool
     let error: String?
-    let onSave: () -> Void
+    /// The set ended when the first field changed; `Date` is that stamp (fallback: sheet open).
+    let onSave: (Date) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var anchor: Date?
+    @State private var openedAt = Date()
+
+    private func markAnchorIfNeeded() {
+        guard anchor == nil else { return }
+        anchor = Date()
+    }
 
     var body: some View {
         NavigationStack {
@@ -349,20 +536,22 @@ private struct LogSetSheet: View {
                             .multilineTextAlignment(.trailing)
                             .accessibilityIdentifier("set-rir")
                     }
-                    LabeledContent("Mean velocity (m/s)") {
-                        TextField("optional", text: $draft.velocityText)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .accessibilityIdentifier("set-velocity")
-                    }
-                    DisclosureGroup(
-                        "Per-rep velocity (optional)",
-                        isExpanded: $draft.showingRepVelocity
-                    ) {
-                        TextField("e.g. 0.62, 0.58, 0.55", text: $draft.repVelocityText)
-                            .keyboardType(.numbersAndPunctuation)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                    if velocityApplicable {
+                        LabeledContent("Mean velocity (m/s)") {
+                            TextField("optional", text: $draft.velocityText)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .accessibilityIdentifier("set-velocity")
+                        }
+                        DisclosureGroup(
+                            "Per-rep velocity (optional)",
+                            isExpanded: $draft.showingRepVelocity
+                        ) {
+                            TextField("e.g. 0.62, 0.58, 0.55", text: $draft.repVelocityText)
+                                .keyboardType(.numbersAndPunctuation)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
                     }
                 } header: {
                     Text(exerciseLabel)
@@ -374,12 +563,18 @@ private struct LogSetSheet: View {
                 }
             }
             .navigationTitle("Log set")
+            // First edit is the End-set moment: reaching for the phone to record the set.
+            .onChange(of: draft.loadText) { markAnchorIfNeeded() }
+            .onChange(of: draft.repsText) { markAnchorIfNeeded() }
+            .onChange(of: draft.rirText) { markAnchorIfNeeded() }
+            .onChange(of: draft.velocityText) { markAnchorIfNeeded() }
+            .onChange(of: draft.repVelocityText) { markAnchorIfNeeded() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { onSave() }
+                    Button("Done") { onSave(anchor ?? openedAt) }
                         .accessibilityIdentifier("save-set")
                         .disabled(isSaving)
                 }

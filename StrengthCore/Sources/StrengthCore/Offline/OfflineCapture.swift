@@ -5,21 +5,23 @@ import Foundation
 /// This file deliberately contains storage and operation state only. It does not call the API,
 /// render UI, or replay operations. Chunk 3/4 wire those behaviours on top of this contract.
 
-enum OfflineOperationKind: String, Codable, CaseIterable {
+public enum OfflineOperationKind: String, Codable, CaseIterable {
     case addSet
+    case executionEvents
     case rateForm
     case completeWorkout
 
-    var label: String {
+    public var label: String {
         switch self {
         case .addSet: return "Add set"
+        case .executionEvents: return "Execution events"
         case .rateForm: return "Form rating"
         case .completeWorkout: return "Finish workout"
         }
     }
 }
 
-enum OfflineOperationState: String, Codable {
+public enum OfflineOperationState: String, Codable {
     case pending
     case synced
     case failed
@@ -27,43 +29,45 @@ enum OfflineOperationState: String, Codable {
     case expired
 }
 
-enum OfflineOperationBody: Codable, Equatable {
+public enum OfflineOperationBody: Codable, Equatable {
     case addSet(AddSetRequest)
+    case executionEvents([ExecutionEvent])
     case rateForm(FormRatingRequest)
     case completeWorkout(CompleteWorkoutRequest)
 
-    var kind: OfflineOperationKind {
+    public var kind: OfflineOperationKind {
         switch self {
         case .addSet: return .addSet
+        case .executionEvents: return .executionEvents
         case .rateForm: return .rateForm
         case .completeWorkout: return .completeWorkout
         }
     }
 }
 
-struct OfflineOperation: Codable, Equatable, Identifiable {
-    let operationId: String
-    let workoutId: String
-    let body: OfflineOperationBody
-    let createdAt: Date
-    let localSetId: Int?
-    let localFormId: Int?
-    var state: OfflineOperationState
-    var lastError: String?
-    var attemptedAt: Date?
+public struct OfflineOperation: Codable, Equatable, Identifiable {
+    public let operationId: String
+    public let workoutId: String
+    public var body: OfflineOperationBody
+    public let createdAt: Date
+    public let localSetId: Int?
+    public let localFormId: Int?
+    public var state: OfflineOperationState
+    public var lastError: String?
+    public var attemptedAt: Date?
 
-    var id: String { operationId }
-    var kind: OfflineOperationKind { body.kind }
-    var isCancellable: Bool {
+    public var id: String { operationId }
+    public var kind: OfflineOperationKind { body.kind }
+    public var isCancellable: Bool {
         state == .pending && attemptedAt == nil
     }
 
-    func isReplayable(now: Date = Date()) -> Bool {
+    public func isReplayable(now: Date = Date()) -> Bool {
         state == .pending
             && now.timeIntervalSince(createdAt) <= OfflineCaptureStore.replayWindow
     }
 
-    init(
+    public init(
         operationId: String,
         workoutId: String,
         body: OfflineOperationBody,
@@ -86,35 +90,40 @@ struct OfflineOperation: Codable, Equatable, Identifiable {
     }
 }
 
-struct OfflineCapture: Codable {
-    static let currentVersion = 1
+public struct OfflineCapture: Codable {
+    public static let currentVersion = 1
 
-    var version: Int
-    var activeWorkout: WorkoutDetail?
-    var operations: [OfflineOperation]
-    var updatedAt: Date
+    public var version: Int
+    public var activeWorkout: WorkoutDetail?
+    public var operations: [OfflineOperation]
+    public var updatedAt: Date
+    /// The watch's execution record for the active session (Phase 6.3). Nil on the phone and in
+    /// files written before 6.3; optional so an older capture file still decodes at version 1.
+    public var session: WatchSessionRecord?
 
-    init(
+    public init(
         version: Int = OfflineCapture.currentVersion,
         activeWorkout: WorkoutDetail? = nil,
         operations: [OfflineOperation] = [],
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        session: WatchSessionRecord? = nil
     ) {
         self.version = version
         self.activeWorkout = activeWorkout
         self.operations = operations
         self.updatedAt = updatedAt
+        self.session = session
     }
 }
 
-enum OfflineCaptureStoreError: LocalizedError, Equatable {
+public enum OfflineCaptureStoreError: LocalizedError, Equatable {
     case unsupportedVersion(Int)
     case full
     case invalidOperation(String)
     case operationNotFound(String)
     case io(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .unsupportedVersion(let version):
             return "The offline capture file uses unsupported version \(version)."
@@ -131,21 +140,21 @@ enum OfflineCaptureStoreError: LocalizedError, Equatable {
 }
 
 /// One protected, backup-excluded file holding the active-workout snapshot and ordered operations.
-final class OfflineCaptureStore {
-    static let maxOperations = 128
-    static let retention: TimeInterval = 30 * 24 * 60 * 60
-    static let replayWindow: TimeInterval = 28 * 24 * 60 * 60
+public final class OfflineCaptureStore {
+    public static let maxOperations = 128
+    public static let retention: TimeInterval = 30 * 24 * 60 * 60
+    public static let replayWindow: TimeInterval = 28 * 24 * 60 * 60
 
     private let fileURL: URL
     private let now: () -> Date
     private let lock = NSLock()
 
-    init(fileURL: URL? = nil, now: @escaping () -> Date = Date.init) {
+    public init(fileURL: URL? = nil, now: @escaping () -> Date = Date.init) {
         self.fileURL = fileURL ?? Self.defaultFileURL
         self.now = now
     }
 
-    static var defaultFileURL: URL {
+    public static var defaultFileURL: URL {
         let base = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -155,7 +164,7 @@ final class OfflineCaptureStore {
             .appendingPathComponent("offline-capture.json")
     }
 
-    func load() throws -> OfflineCapture {
+    public func load() throws -> OfflineCapture {
         lock.lock()
         defer { lock.unlock() }
         let capture = try loadUnlocked()
@@ -168,13 +177,13 @@ final class OfflineCaptureStore {
         return normalized
     }
 
-    func save(_ capture: OfflineCapture) throws {
+    public func save(_ capture: OfflineCapture) throws {
         lock.lock()
         defer { lock.unlock() }
         try saveUnlocked(capture)
     }
 
-    func setActiveWorkout(_ workout: WorkoutDetail?) throws -> OfflineCapture {
+    public func setActiveWorkout(_ workout: WorkoutDetail?) throws -> OfflineCapture {
         lock.lock()
         defer { lock.unlock() }
         var capture = try loadUnlocked()
@@ -191,12 +200,106 @@ final class OfflineCaptureStore {
         return try loadUnlocked()
     }
 
-    func record(_ operation: OfflineOperation) throws -> OfflineCapture {
+    /// One atomic write: apply several related changes to the capture and persist it once, so a
+    /// termination cannot leave a half-updated session or outbox.
+    public func perform(
+        _ body: (inout OfflineCapture) throws -> Void
+    ) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        try body(&capture)
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Appends events inside a caller's capture mutation, merging only into the newest operation
+    /// so a completion can never overtake the set it describes.
+    public static func appendExecutionEvents(
+        _ events: [ExecutionEvent],
+        workoutId: String,
+        activeWorkout: WorkoutDetail?,
+        to capture: inout OfflineCapture,
+        now: Date
+    ) throws {
+        guard !events.isEmpty else { return }
+        if let activeWorkout {
+            if let current = capture.activeWorkout?.workoutId,
+               current != activeWorkout.workoutId,
+               !capture.operations.isEmpty {
+                throw OfflineCaptureStoreError.invalidOperation(
+                    "Resolve queued work before switching to a different active workout."
+                )
+            }
+            capture.activeWorkout = activeWorkout
+        }
+        if let index = capture.operations.indices.last,
+           capture.operations[index].workoutId == workoutId,
+           capture.operations[index].state == .pending,
+           capture.operations[index].attemptedAt == nil,
+           case .executionEvents(var queued) = capture.operations[index].body,
+           queued.count + events.count <= 100 {
+            queued.append(contentsOf: events)
+            capture.operations[index].body = .executionEvents(queued)
+        } else {
+            guard capture.operations.count < maxOperations else {
+                throw OfflineCaptureStoreError.full
+            }
+            capture.operations.append(OfflineOperation(
+                operationId: UUID().uuidString.lowercased(),
+                workoutId: workoutId,
+                body: .executionEvents(events),
+                createdAt: now
+            ))
+        }
+    }
+
+    /// Drops queued telemetry that belongs to a set whose capture was undone before it was ever
+    /// sent. Attempted batches are left alone so the server and the queue never disagree.
+    public func removeExecutionEvents(localSetID: String) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        var kept: [OfflineOperation] = []
+        var changed = false
+        for operation in capture.operations {
+            guard operation.state == .pending, operation.attemptedAt == nil,
+                  case .executionEvents(let events) = operation.body,
+                  events.contains(where: { $0.localSetId == localSetID }) else {
+                kept.append(operation)
+                continue
+            }
+            let remaining = events.filter { $0.localSetId != localSetID }
+            changed = true
+            guard !remaining.isEmpty else { continue }
+            var updated = operation
+            updated.body = .executionEvents(remaining)
+            kept.append(updated)
+        }
+        guard changed else { return capture }
+        capture.operations = kept
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Persists the watch session record without touching the operation queue or the active
+    /// workout snapshot. Passing nil clears it, for example after a finished summary is
+    /// acknowledged.
+    public func setSession(_ session: WatchSessionRecord?) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        capture.session = session
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    public func record(_ operation: OfflineOperation) throws -> OfflineCapture {
         try record(operation, activeWorkout: nil)
     }
 
     /// Atomically append an operation and the optimistic workout it belongs to.
-    func record(_ operation: OfflineOperation, activeWorkout: WorkoutDetail?) throws -> OfflineCapture {
+    public func record(_ operation: OfflineOperation, activeWorkout: WorkoutDetail?) throws -> OfflineCapture {
         lock.lock()
         defer { lock.unlock() }
         var capture = try loadUnlocked()
@@ -217,7 +320,7 @@ final class OfflineCaptureStore {
                 "Operation \(operation.operationId) is already queued."
             )
         }
-        try validate(operation, against: capture)
+        try Self.validateOperation(operation, against: capture)
         guard capture.operations.count < Self.maxOperations else {
             throw OfflineCaptureStoreError.full
         }
@@ -226,7 +329,53 @@ final class OfflineCaptureStore {
         return try loadUnlocked()
     }
 
-    func updateState(
+    /// Appends execution events to the newest unsent batch for this workout, or creates a
+    /// new durable batch. Individual events keep their original occurrence timestamps and IDs.
+    public func appendExecutionEvents(
+        workoutId: String,
+        events: [ExecutionEvent],
+        activeWorkout: WorkoutDetail?
+    ) throws -> OfflineCapture {
+        guard !events.isEmpty else { return try load() }
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        if let activeWorkout {
+            if let current = capture.activeWorkout?.workoutId,
+               current != activeWorkout.workoutId,
+               !capture.operations.isEmpty {
+                throw OfflineCaptureStoreError.invalidOperation(
+                    "Resolve queued work before switching to a different active workout."
+                )
+            }
+            capture.activeWorkout = activeWorkout
+        }
+        // Merge only into the newest operation: batching into an older batch would move these
+        // events ahead of a set queued after it, breaking original order and set-id enrichment.
+        if let index = capture.operations.indices.last,
+           capture.operations[index].workoutId == workoutId,
+           capture.operations[index].state == .pending,
+           capture.operations[index].attemptedAt == nil,
+           case .executionEvents(var queued) = capture.operations[index].body,
+           queued.count + events.count <= 100 {
+            queued.append(contentsOf: events)
+            capture.operations[index].body = .executionEvents(queued)
+        } else {
+            guard capture.operations.count < Self.maxOperations else {
+                throw OfflineCaptureStoreError.full
+            }
+            capture.operations.append(OfflineOperation(
+                operationId: UUID().uuidString.lowercased(),
+                workoutId: workoutId,
+                body: .executionEvents(events),
+                createdAt: now()
+            ))
+        }
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    public func updateState(
         operationId: String,
         state: OfflineOperationState,
         error: String? = nil,
@@ -249,7 +398,7 @@ final class OfflineCaptureStore {
         return try loadUnlocked()
     }
 
-    func markAttempted(_ operationId: String) throws -> OfflineCapture {
+    public func markAttempted(_ operationId: String) throws -> OfflineCapture {
         try updateState(
             operationId: operationId,
             state: .pending,
@@ -259,7 +408,7 @@ final class OfflineCaptureStore {
 
     /// Removes an operation only while it has never been sent. Once attempted, server
     /// acknowledgement/conflict resolution owns it.
-    func cancel(_ operationId: String) throws -> OfflineCapture {
+    public func cancel(_ operationId: String) throws -> OfflineCapture {
         lock.lock()
         defer { lock.unlock() }
         var capture = try loadUnlocked()
@@ -278,7 +427,7 @@ final class OfflineCaptureStore {
         return try loadUnlocked()
     }
 
-    func remove(_ operationId: String) throws -> OfflineCapture {
+    public func remove(_ operationId: String) throws -> OfflineCapture {
         lock.lock()
         defer { lock.unlock() }
         var capture = try loadUnlocked()
@@ -292,12 +441,12 @@ final class OfflineCaptureStore {
         return try loadUnlocked()
     }
 
-    func replayable(now: Date? = nil) throws -> [OfflineOperation] {
+    public func replayable(now: Date? = nil) throws -> [OfflineOperation] {
         let current = now ?? self.now()
         return try load().operations.filter { $0.isReplayable(now: current) }
     }
 
-    func nextLocalSetId() throws -> Int {
+    public func nextLocalSetId() throws -> Int {
         let capture = try load()
         let used = Set(capture.operations.compactMap(\.localSetId))
         var candidate = -1
@@ -307,7 +456,7 @@ final class OfflineCaptureStore {
         return candidate
     }
 
-    func clear() throws {
+    public func clear() throws {
         lock.lock()
         defer { lock.unlock() }
         try saveUnlocked(OfflineCapture(updatedAt: now()))
@@ -326,7 +475,10 @@ final class OfflineCaptureStore {
         return result
     }
 
-    private func validate(_ operation: OfflineOperation, against capture: OfflineCapture) throws {
+    public static func validateOperation(
+        _ operation: OfflineOperation,
+        against capture: OfflineCapture
+    ) throws {
         if let localSetId = operation.localSetId {
             guard operation.kind == .addSet, localSetId < 0 else {
                 throw OfflineCaptureStoreError.invalidOperation(

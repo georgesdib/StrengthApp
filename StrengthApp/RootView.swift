@@ -1,8 +1,15 @@
 import SwiftUI
+import StrengthCore
 
 struct RootView: View {
-    @StateObject private var model = AppModel()
+    @StateObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        _model = StateObject(wrappedValue: AppModel(
+            watchConnectivity: LiveWatchConnectivitySession()
+        ))
+    }
 
     var body: some View {
         Group {
@@ -43,6 +50,9 @@ struct MainTabView: View {
                 .tabItem { Label("Progress", systemImage: "chart.line.uptrend.xyaxis") }
             SettingsView(model: model)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+        }
+        .safeAreaInset(edge: .bottom) {
+            RestTimerBar(timer: model.restTimer)
         }
     }
 }

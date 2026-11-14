@@ -1,5 +1,10 @@
 import SwiftUI
 import UIKit
+import StrengthCore
+
+private struct WorkoutReportTarget: Identifiable {
+    let id: String
+}
 
 struct ActiveWorkoutView: View {
     @ObservedObject var model: AppModel
@@ -35,10 +40,13 @@ struct ActiveWorkoutView: View {
     @State private var planPicker: PlanPickerMode?
     @State private var pendingRemoval: PlanRemoval?
     @State private var planEditError: String?
-    @StateObject private var restTimer = RestTimerModel()
+    @State private var confirmingTakeOver = false
+    @State private var takeOverError: String?
     @StateObject private var drafts = WorkoutDraftStore()
     @State private var otherExerciseId: String?
     @State private var showingOtherExercisePicker = false
+    @State private var reportTarget: WorkoutReportTarget?
+    @State private var finishAcknowledged = false
 
     private var workout: WorkoutDetail? { model.activeWorkout }
 
@@ -80,12 +88,62 @@ struct ActiveWorkoutView: View {
                             }
                         }
 
+                        if let error = model.offlinePersistenceError {
+                            Section("Offline capture write failed") {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        if let error = model.offlineTelemetryError {
+                            Section("Execution timing") {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+
                         Section("Workout") {
                             LabeledContent("Session", value: Self.label(workout.sessionType ?? "workout"))
                             LabeledContent("Date", value: workout.forDate ?? "—")
                             LabeledContent("Status", value: Self.label(workout.status))
                             if let elapsed = workout.elapsedSeconds {
                                 LabeledContent("Elapsed", value: Self.durationLabel(elapsed))
+                            }
+                        }
+
+                        if model.isMirroringWatchSession {
+                            Section("Logged on Apple Watch") {
+                                Label(
+                                    "This session is logged on the Apple Watch.",
+                                    systemImage: "applewatch"
+                                )
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("mirror-banner")
+                                Text("Sets are recorded on the watch. Plan edits here reach it at the next idle point, never mid-set.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                if let takeOverError {
+                                    Text(takeOverError)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                        .accessibilityIdentifier("take-over-error")
+                                }
+                                Button {
+                                    confirmingTakeOver = true
+                                } label: {
+                                    HStack {
+                                        Spacer()
+                                        if model.isSaving {
+                                            ProgressView()
+                                        } else {
+                                            Text("Take over logging")
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                                .disabled(model.isSaving)
+                                .accessibilityIdentifier("take-over-logging")
                             }
                         }
 
@@ -167,7 +225,6 @@ struct ActiveWorkoutView: View {
                                             model: model,
                                             exerciseId: exercise,
                                             planIndex: index,
-                                            restTimer: restTimer,
                                             drafts: drafts
                                         )
                                     } label: {
@@ -203,7 +260,7 @@ struct ActiveWorkoutView: View {
                             } label: {
                                 Label("Log an exercise not in the plan", systemImage: "plus.circle")
                             }
-                            .disabled(model.isSaving)
+                            .disabled(model.isSaving || model.isMirroringWatchSession)
                             .accessibilityIdentifier("log-outside-exercise")
                             Text("The set is recorded as performed work without changing the prescription.")
                                 .font(.footnote)
@@ -275,47 +332,56 @@ struct ActiveWorkoutView: View {
                         }
 
                         Section("Form rating") {
-                            Picker("Exercise", selection: $ratingExercise) {
-                                Text("Choose").tag("")
-                                ForEach(exerciseOptions, id: \.self) { id in
-                                    Text(Self.label(id)).tag(id)
-                                }
-                            }
-                            .onChange(of: ratingExercise) { _, id in
-                                rating = workout.formRating(for: id)?.rating ?? 4
-                            }
-                            if let existing = workout.formRating(for: ratingExercise) {
-                                LabeledContent("Current rating", value: "\(existing.rating) / 5")
-                                    .accessibilityIdentifier("form-current-rating")
-                                Text("Saving again records a correction. The earlier rating is retained in the record; the latest is shown here.")
+                            if model.isMirroringWatchSession {
+                                Label("Form ratings are recorded on the Apple Watch.", systemImage: "applewatch")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("mirror-form-disabled")
+                                Text("Take over logging to rate form on the phone.")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
-                                    .accessibilityIdentifier("form-correction-note")
-                            }
-                            Picker("Rating", selection: $rating) {
-                                ForEach(1...5, id: \.self) { value in
-                                    Text("\(value)").tag(value)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            if let error = formError {
-                                Text(error).foregroundStyle(.red)
-                            }
-                            Button {
-                                Task { await saveForm(workout) }
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    if model.isSaving {
-                                        ProgressView()
-                                    } else {
-                                        Text(workout.formRating(for: ratingExercise) == nil ? "Save form rating" : "Save correction")
+                            } else {
+                                Picker("Exercise", selection: $ratingExercise) {
+                                    Text("Choose").tag("")
+                                    ForEach(exerciseOptions, id: \.self) { id in
+                                        Text(Self.label(id)).tag(id)
                                     }
-                                    Spacer()
                                 }
+                                .onChange(of: ratingExercise) { _, id in
+                                    rating = workout.formRating(for: id)?.rating ?? 4
+                                }
+                                if let existing = workout.formRating(for: ratingExercise) {
+                                    LabeledContent("Current rating", value: "\(existing.rating) / 5")
+                                        .accessibilityIdentifier("form-current-rating")
+                                    Text("Saving again records a correction. The earlier rating is retained in the record; the latest is shown here.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityIdentifier("form-correction-note")
+                                }
+                                Picker("Rating", selection: $rating) {
+                                    ForEach(1...5, id: \.self) { value in
+                                        Text("\(value)").tag(value)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                if let error = formError {
+                                    Text(error).foregroundStyle(.red)
+                                }
+                                Button {
+                                    Task { await saveForm(workout) }
+                                } label: {
+                                    HStack {
+                                        Spacer()
+                                        if model.isSaving {
+                                            ProgressView()
+                                        } else {
+                                            Text(workout.formRating(for: ratingExercise) == nil ? "Save form rating" : "Save correction")
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                                .accessibilityIdentifier("save-form")
+                                .disabled(model.isSaving || ratingExercise.isEmpty)
                             }
-                            .accessibilityIdentifier("save-form")
-                            .disabled(model.isSaving || ratingExercise.isEmpty)
                         }
 
                         Section("Finish") {
@@ -379,9 +445,14 @@ struct ActiveWorkoutView: View {
                             }
                         }
                     }
-                    .onAppear { prepare(workout) }
+                    .onAppear {
+                        prepare(workout)
+                        // Opening a recovered server workout resolves the prompt that led here.
+                        model.clearRecoveryIssue()
+                    }
                     .onChange(of: workout.status) { _, status in
-                        if status == "completed" || status == "abandoned" {
+                        if (status == "completed" || status == "abandoned"),
+                           !finishAcknowledged {
                             dismiss()
                         }
                     }
@@ -394,15 +465,11 @@ struct ActiveWorkoutView: View {
                 }
             }
             .navigationTitle("Workout")
-            .safeAreaInset(edge: .bottom) {
-                RestTimerBar(timer: restTimer)
-            }
             .navigationDestination(item: $otherExerciseId) { id in
                 ExerciseWorkoutView(
                     model: model,
                     exerciseId: id,
                     planIndex: nil,
-                    restTimer: restTimer,
                     drafts: drafts
                 )
             }
@@ -433,6 +500,18 @@ struct ActiveWorkoutView: View {
             } message: {
                 Text("Logged sets stay in this workout, but the session will not be completed.")
             }
+            .confirmationDialog(
+                "Take over logging on this iPhone?",
+                isPresented: $confirmingTakeOver,
+                titleVisibility: .visible
+            ) {
+                Button("Take over logging", role: .destructive) {
+                    Task { await takeOverLogging() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The watch stops logging and becomes read-only. Sets it already recorded stay in the session; anything still queued on the watch is sent when it reconnects.")
+            }
             .sheet(item: $planPicker) { mode in
                 ExercisePickerSheet(model: model, title: mode.title) { exerciseId in
                     planPicker = nil
@@ -455,6 +534,11 @@ struct ActiveWorkoutView: View {
                     },
                     secondaryButton: .cancel()
                 )
+            }
+            .fullScreenCover(item: $reportTarget, onDismiss: {
+                dismiss()
+            }) { target in
+                WorkoutReportView(model: model, workoutId: target.id)
             }
     }
 
@@ -520,7 +604,44 @@ struct ActiveWorkoutView: View {
             repVelocities: repVelocities
         )
         let key = addOperation.use(request)
+        let localSetID = UUID().uuidString.lowercased()
+        let completedAt = ExecutionEvent.nowISO()
+        model.recordExecutionEvent(ExecutionEvent(
+            eventType: .setStarted,
+            planItemIndex: planIndex,
+            localSetId: localSetID,
+            payload: [
+                "set_index": .number(Double(index)),
+                "exercise_id": .string(exerciseId),
+            ]
+        ))
         if await model.addSet(request, idempotencyKey: key) {
+            let savedSet = (model.activeWorkout?.sets ?? []).last {
+                $0.exerciseId == exerciseId
+                    && $0.setIndex == index
+                    && $0.planItemIndex == planIndex
+            }
+            model.recordExecutionEvent(ExecutionEvent(
+                eventType: .setCompleted,
+                occurredAt: completedAt,
+                planItemIndex: planIndex,
+                setId: savedSet?.setId.flatMap { $0 > 0 ? $0 : nil },
+                localSetId: localSetID,
+                payload: [
+                    "set_index": .number(Double(index)),
+                    "exercise_id": .string(exerciseId),
+                ]
+            ))
+            let plannedRest = workout.plan?.items.first {
+                ($0.orderIndex ?? -1) == planIndex
+            }?.restS ?? 120
+            if rir != 6 {
+                model.startRest(
+                    seconds: plannedRest,
+                    planItemIndex: planIndex,
+                    exerciseId: exerciseId
+                )
+            }
             loadText = ""
             repsText = ""
             rirText = ""
@@ -653,10 +774,19 @@ struct ActiveWorkoutView: View {
             productivity: productivity
         )
         let key = finishLocked ? finishOperation.key : finishOperation.use(request)
+        // The status callback must not dismiss the workout while the report is being presented.
+        finishAcknowledged = true
         if await model.completeWorkout(request, idempotencyKey: key) {
             finishOperation.acknowledged()
-            dismiss()
+            if model.offlineFinishPending {
+                // No authoritative summary exists until the queued finish syncs. The report
+                // remains reachable from History after that acknowledgement.
+                dismiss()
+            } else {
+                reportTarget = WorkoutReportTarget(id: workout.workoutId)
+            }
         } else {
+            finishAcknowledged = false
             finishError = model.mutationError
             // A lost response is ambiguous: lock the body and retry the exact operation.
             // A definitive 4xx can still be corrected with a new body.
@@ -673,6 +803,13 @@ struct ActiveWorkoutView: View {
             dismiss()
         } else {
             abandonError = model.mutationError
+        }
+    }
+
+    private func takeOverLogging() async {
+        takeOverError = nil
+        if !(await model.takeOverLogging()) {
+            takeOverError = model.mutationError
         }
     }
 

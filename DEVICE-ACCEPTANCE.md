@@ -119,8 +119,8 @@ record of what was exercised.
 
 ## Before you start
 
-- [ ] Take a consistent backup of the live database before applying migration 0053 (the plan in the
-      server repository docs/IOS-CLIENT-PLAN.md §13.1); use a temporary database for the rehearsal.
+- [ ] Take a consistent backup of the live database before applying migration 0053 (the plan in this
+      repository, [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.1); use a temporary database for the rehearsal.
 - [ ] The server is running over plain HTTP on the trusted home LAN and is not Internet-reachable.
 - [ ] config/ios.v1.yaml has mutations_enabled: true; bootstrap reports readiness_write,
       prescription and workout_write as true.
@@ -143,14 +143,16 @@ record of what was exercised.
 - [ ] When the server asks for a scheduled deload or drop confirmation, the app shows the choice;
       Accept and Proceed without both produce a plan, and Cancel creates none.
 - [ ] When the server finishes building, Today shows **Workout ready** with the session type,
-      date, exercise count and any warnings; no preview sheet opens automatically.
+      date, exercise count and any warnings. **Review workout** opens the full plan; no sheet opens
+      automatically, and Start is only on the review screen.
 - [ ] The plan is server-issued: the ready card and active workout show no editable load/set/RIR
       controls before logging.
 - [ ] Issuing a second plan supersedes the first; starting the older plan is rejected.
 
 ## Start, workout and finish
 
-- [ ] Start workout opens the active workout directly and shows the plan and logged sets.
+- [ ] Start workout on the review screen opens the active workout directly and shows the plan and
+      logged sets.
 - [ ] Force-quit and relaunch with an active workout; Resume workout returns to the same workout
       and logged sets.
 - [ ] Add a set with load, reps and RIR; the logged set appears with the same values.
@@ -171,10 +173,33 @@ record of what was exercised.
 - [ ] Finish with a session RPE 1-10; the workout completes, appears in History and contributes to
       Progress. Repeating the completion request does not create a second session.
 - [ ] Finish with Session RPE not recorded; the session completes without inventing an RPE.
+- [ ] An acknowledged completion opens the **Session report**; **Done** returns to Today and no
+      second completion request is sent.
+- [ ] The report shows adherence, velocity, session feedback, quality flags and evidence; a plan
+      edited during the workout shows the original and final prescription; unavailable data shows
+      its explicit reason rather than a zero.
+- [ ] Stop the server after completion or corrupt the report read: the report shows **Report
+      unavailable**, **Try again** retries only the read, and **Done** still leaves the flow.
+- [ ] From History, open the completed session and tap **View session report**; the same report
+      opens read-only. An imported session without a workout record explains why no report exists.
+- [ ] When the summary carries a per-workout observation, the report shows **What stood out** with
+      its gate, sample size and limitations; when the server returns none, the section is absent.
+- [ ] Queue a finish offline; the app dismisses as before with no report. After sync, the report is
+      available from History.
 - [ ] Abandon asks for confirmation; the workout becomes abandoned, leaves the active state and
       cannot later be completed.
 - [ ] Attempting to start while another workout is active shows a clear workout-active error and
       offers the active workout instead.
+- [ ] The exercise screen shows the warm-up ramp including the empty-bar first set; a working set
+      can be logged without logging any warm-up.
+- [ ] Rate form on the exercise screen; the current rating and correction label behave as on the
+      workout screen.
+- [ ] Start a rest, return to Today: the countdown stays visible above the tab bar, then dismisses
+      itself at zero.
+- [ ] Lock the phone during a rest: the rest-end notification appears; **Done** clears it and
+      returns to the app.
+- [ ] With Wi-Fi off, open Exercise Library and an exercise picker: the cached catalogue still lists
+      and selects exercises; plan editing still reports that it needs the server.
 
 ## Progress and settings
 
@@ -230,8 +255,8 @@ iOS 27.2  ·  Simulator: iPhone 18 Pro, iOS 27.2
 
 **Status: physically tested and owner-confirmed 2026-11-08.** The implementation is also
 unit/simulator/live-server verified. The canonical server-side commands, backup, migration,
-pairing-code and rollback runbook is `docs/IOS-CLIENT-PLAN.md` §13.3 in the
-`strength-training-app` repository.
+pairing-code and rollback runbook is [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.3 in
+this repository.
 
 ## Before you start
 

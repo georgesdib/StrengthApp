@@ -1,4 +1,5 @@
 import SwiftUI
+import StrengthCore
 
 struct TodayView: View {
     @ObservedObject var model: AppModel
@@ -7,11 +8,13 @@ struct TodayView: View {
     @State private var lastIssueAck = false
     @State private var lastIssueConfirmations: [String: Bool]?
     @State private var lastIssueSettings = PlanSettings()
+    @State private var lastIssueTarget: PrescriptionExecutionTarget = .phone
     @State private var draftSettings = PlanSettings()
+    @State private var draftTarget: PrescriptionExecutionTarget = .phone
     @State private var showingPlanSettings = false
     @State private var showingWorkout = false
-    @State private var startKey = UUID().uuidString.lowercased()
-    @State private var startError: String?
+    @State private var showingReview = false
+    @State private var startAfterReview = false
     @State private var confirmingDiscardOffline = false
 
     var body: some View {
@@ -99,11 +102,8 @@ struct TodayView: View {
                             NavigationLink {
                                 ActiveWorkoutView(model: model)
                             } label: {
-                                Label("Resume server workout", systemImage: "arrow.clockwise")
+                                Label("Open on this iPhone", systemImage: "iphone")
                             }
-                            .simultaneousGesture(TapGesture().onEnded {
-                                model.clearRecoveryIssue()
-                            })
                             Button("Abandon server workout", role: .destructive) {
                                 Task { await model.abandonRecoveredWorkout() }
                             }
@@ -133,6 +133,56 @@ struct TodayView: View {
                             }
                             Button("Dismiss") { model.clearRecoveryIssue() }
                         }
+                    }
+                }
+
+                if let message = model.offlineRecoveryMessage {
+                    Section("Offline recovery") {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                        Text("The local recovery file could not be read. Offline capture is paused; retry or explicitly discard the unreadable file.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Retry recovery load") {
+                            _ = model.retryOfflineRecovery()
+                        }
+                        Button("Discard unreadable recovery data", role: .destructive) {
+                            confirmingDiscardOffline = true
+                        }
+                    }
+                }
+
+                if let conflict = model.offlineRecoveryConflict {
+                    Section("Offline recovery conflict") {
+                        Text("The active workout is \(conflict.currentWorkoutID), but the recovered capture belongs to \(conflict.recoveredWorkoutID) with \(conflict.pendingOperationCount) pending operation(s).")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                        Text("Choose which work to keep. The other side is discarded explicitly.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Keep current workout and discard recovered work", role: .destructive) {
+                            Task { _ = await model.keepCurrentWorkoutAndDiscardRecoveredWork() }
+                        }
+                        Button("Use recovered workout") {
+                            _ = model.useRecoveredWorkoutAfterConflict()
+                        }
+                    }
+                }
+
+                if let error = model.offlinePersistenceError {
+                    Section("Offline capture write failed") {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if let error = model.offlineTelemetryError {
+                    Section("Execution timing") {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
                     }
                 }
 
@@ -268,14 +318,24 @@ struct TodayView: View {
             .navigationDestination(isPresented: $showingWorkout) {
                 ActiveWorkoutView(model: model)
             }
-            .onChange(of: currentIssuedPlanId) { _, _ in
-                startKey = UUID().uuidString.lowercased()
-                startError = nil
-            }
             .sheet(isPresented: $showingPlanSettings) {
-                PlanSettingsView(settings: $draftSettings) {
+                PlanSettingsView(
+                    settings: $draftSettings,
+                    executionTarget: $draftTarget
+                ) {
                     showingPlanSettings = false
-                    beginPrescription(with: draftSettings)
+                    beginPrescription(with: draftSettings, target: draftTarget)
+                }
+            }
+            .sheet(isPresented: $showingReview, onDismiss: {
+                if startAfterReview {
+                    startAfterReview = false
+                    showingWorkout = true
+                }
+            }) {
+                PrescriptionPreviewView(model: model) {
+                    startAfterReview = true
+                    showingReview = false
                 }
             }
             .alert("Discard all offline capture?", isPresented: $confirmingDiscardOffline) {
@@ -374,13 +434,6 @@ struct TodayView: View {
         }
     }
 
-    private var currentIssuedPlanId: String? {
-        if case .issued(let issued) = model.prescriptionState {
-            return issued.issuedPlanId
-        }
-        return nil
-    }
-
     @ViewBuilder
     private func readyCard(_ issued: IssuedPlanResponse) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -399,43 +452,33 @@ struct TodayView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
-            if let startError {
-                Text(startError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-            Button {
-                startReadyWorkout()
-            } label: {
-                HStack {
-                    Spacer()
-                    if model.isSaving {
-                        ProgressView()
-                    } else {
-                        Text("Start workout")
-                    }
-                    Spacer()
-                }
-            }
-            .accessibilityIdentifier("start-ready-workout")
-            .disabled(model.isSaving || model.isOffline || model.hasPendingOfflineCapture)
-            if model.isOffline || model.hasPendingOfflineCapture {
-                Text("Starting requires the server.")
+            if issued.executionTarget == "watch" {
+                Text("Requested for Apple Watch. Review it here; start it on the watch.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("watch-targeted-plan")
             }
-        }
-    }
-
-    private func startReadyWorkout() {
-        guard case .issued = model.prescriptionState else { return }
-        startError = nil
-        Task {
-            if await model.startWorkout(idempotencyKey: startKey) {
-                startKey = UUID().uuidString.lowercased()
-                showingWorkout = true
-            } else {
-                startError = model.mutationError
+            // Borderless keeps the two buttons independent; the default list style made
+            // either tap fire both of them.
+            Button {
+                showingReview = true
+            } label: {
+                Label("Review workout", systemImage: "list.bullet.clipboard")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("review-workout")
+            Button {
+                startPrescription()
+            } label: {
+                Label("Request another workout", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("replace-workout")
+            .disabled(model.isSaving || model.isOffline || model.hasPendingOfflineCapture)
+            if model.isOffline || model.hasPendingOfflineCapture {
+                Text("Replacing the workout requires the server.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -515,19 +558,27 @@ struct TodayView: View {
             return
         }
         draftSettings = model.planSettings
+        draftTarget = .phone
         showingPlanSettings = true
     }
 
-    private func beginPrescription(with settings: PlanSettings) {
+    private func beginPrescription(
+        with settings: PlanSettings,
+        target: PrescriptionExecutionTarget
+    ) {
         pendingReadinessAck = false
         lastIssueAck = false
         lastIssueConfirmations = nil
         lastIssueSettings = settings
+        lastIssueTarget = target
         lastIssueKey = UUID().uuidString.lowercased()
         guard let key = lastIssueKey else { return }
         Task {
             await model.issuePrescription(
-                readinessAck: false, settings: settings, idempotencyKey: key
+                readinessAck: false,
+                settings: settings,
+                executionTarget: target,
+                idempotencyKey: key
             )
         }
     }
@@ -542,6 +593,7 @@ struct TodayView: View {
             await model.issuePrescription(
                 readinessAck: acknowledge,
                 settings: lastIssueSettings,
+                executionTarget: lastIssueTarget,
                 idempotencyKey: key
             )
         }
@@ -564,6 +616,7 @@ struct TodayView: View {
                 readinessAck: pendingReadinessAck,
                 confirmations: confirmations,
                 settings: lastIssueSettings,
+                executionTarget: lastIssueTarget,
                 idempotencyKey: key
             )
         }
@@ -576,6 +629,7 @@ struct TodayView: View {
                 readinessAck: lastIssueAck,
                 confirmations: lastIssueConfirmations,
                 settings: lastIssueSettings,
+                executionTarget: lastIssueTarget,
                 idempotencyKey: key
             )
         }
@@ -763,6 +817,7 @@ struct TodayView: View {
 /// with the server; this only picks which session and whether a minimum session is acceptable.
 struct PlanSettingsView: View {
     @Binding var settings: PlanSettings
+    @Binding var executionTarget: PrescriptionExecutionTarget
     var onRequest: () -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -810,6 +865,17 @@ struct PlanSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Device") {
+                    Picker("Run on", selection: $executionTarget) {
+                        ForEach(PrescriptionExecutionTarget.allCases, id: \.self) { target in
+                            Text(target.label).tag(target)
+                        }
+                    }
+                    .accessibilityIdentifier("prescription-execution-target")
+                    Text("Watch-targeted plans appear on the Apple Watch Today screen and cannot be started on the iPhone.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Section("Session") {
                     Picker("Session type", selection: $settings.sessionType) {
                         ForEach(sessionTypes) { option in

@@ -7,6 +7,7 @@ final class StrengthAppUITests: XCTestCase {
         }
         continueAfterFailure = false
         let app = XCUIApplication()
+        configureLaunch(app)
         app.launch()
 
         // Start from a known unpaired state if a previous run left a token behind.
@@ -55,7 +56,12 @@ final class StrengthAppUITests: XCTestCase {
 
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Device id"].waitForExistence(timeout: 10))
+        let deviceID = app.staticTexts["Device id"]
+        for _ in 0..<8 {
+            if deviceID.exists && deviceID.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(deviceID.waitForExistence(timeout: 10))
         attachScreenshot(app, name: "03-settings")
 
         // Relaunch: the Keychain token must restore the paired state.
@@ -75,6 +81,7 @@ final class StrengthAppUITests: XCTestCase {
         }
         continueAfterFailure = false
         let app = XCUIApplication()
+        configureLaunch(app)
         app.launch()
 
         if app.tabBars.buttons["Settings"].waitForExistence(timeout: 3) {
@@ -133,7 +140,11 @@ final class StrengthAppUITests: XCTestCase {
         }
         XCTAssertTrue(app.staticTexts["Workout ready"].waitForExistence(timeout: 60))
         attachScreenshot(app, name: "10-workout-ready")
-        let readyStart = app.buttons["start-ready-workout"]
+        let review = app.buttons["review-workout"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        review.tap()
+        XCTAssertTrue(app.navigationBars["Review workout"].waitForExistence(timeout: 10))
+        let readyStart = app.buttons["preview-start"]
         XCTAssertTrue(readyStart.waitForExistence(timeout: 10))
         readyStart.tap()
         XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 25))
@@ -214,7 +225,33 @@ final class StrengthAppUITests: XCTestCase {
         let finish = app.buttons["finish-workout"]
         scrollTo(finish, in: app)
         finish.tap()
+        XCTAssertTrue(
+            app.navigationBars["Session report"].waitForExistence(timeout: 20),
+            "an acknowledged completion opens the report before returning to Today"
+        )
+        let reportDone = app.buttons["report-done"]
+        XCTAssertTrue(reportDone.waitForExistence(timeout: 10))
+        reportDone.tap()
         XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 20))
+
+        app.tabBars.buttons["History"].tap()
+        XCTAssertTrue(app.navigationBars["History"].waitForExistence(timeout: 10))
+        let reportDatePredicate = NSPredicate(
+            format: "label CONTAINS %@", LiveConfig.expectedSessionDate
+        )
+        let completedSession = app.descendants(matching: .any)
+            .matching(reportDatePredicate).firstMatch
+        XCTAssertTrue(completedSession.waitForExistence(timeout: 10))
+        completedSession.tap()
+        XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 10))
+        let historyReport = app.buttons["history-view-report"]
+        scrollTo(historyReport, in: app)
+        XCTAssertTrue(historyReport.waitForExistence(timeout: 10))
+        historyReport.tap()
+        XCTAssertTrue(app.navigationBars["Session report"].waitForExistence(timeout: 20))
+        app.buttons["report-done"].tap()
+        XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["History"].tap()
 
         app.tabBars.buttons["Settings"].tap()
         let exerciseLibrary = app.descendants(matching: .any)["exercise-library-link"]
@@ -231,7 +268,18 @@ final class StrengthAppUITests: XCTestCase {
             if latestE1RM.exists { break }
             app.swipeUp()
         }
-        XCTAssertTrue(latestE1RM.waitForExistence(timeout: 10))
+        // A clean throwaway database has no previous competition-squat history, so the
+        // library can legitimately show "No e1RM data available". The detail screen itself
+        // is still the contract under test; a seeded database exercises the latest row.
+        if !latestE1RM.waitForExistence(timeout: 3) {
+            let empty = app.staticTexts.containing(
+                NSPredicate(format: "label CONTAINS %@", "Eligible observations, 0")
+            ).firstMatch
+            XCTAssertTrue(
+                empty.waitForExistence(timeout: 5),
+                "expected either an e1RM observation or the explicit empty observation state"
+            )
+        }
         for _ in 0..<5 {
             if app.descendants(matching: .any)["exercise-history-header"].exists { break }
             app.swipeUp()
@@ -264,6 +312,15 @@ final class StrengthAppUITests: XCTestCase {
         add(attachment)
     }
 
+    private func configureLaunch(_ app: XCUIApplication) {
+        // Argument-domain defaults override the previous app container so a live run cannot
+        // accidentally pair against the real default server after a forget/relaunch.
+        app.launchArguments = [
+            "-ios.serverURL", LiveConfig.serverURL,
+            "-ios.server.homeURL", LiveConfig.serverURL,
+        ]
+    }
+
     private func clearAndType(_ field: XCUIElement, text: String) {
         field.tap()
         if let current = field.value as? String, !current.isEmpty {
@@ -277,6 +334,12 @@ final class StrengthAppUITests: XCTestCase {
     private func forgetDevice(in app: XCUIApplication) {
         app.tabBars.buttons["Settings"].tap()
         let button = app.buttons["forget-device"]
+        // The button is below the server and exercise-library sections on a 6.3-inch phone;
+        // waitForExistence does not scroll a lazy SwiftUI List.
+        for _ in 0..<8 {
+            if button.exists && button.isHittable { break }
+            app.swipeUp()
+        }
         XCTAssertTrue(button.waitForExistence(timeout: 10))
         button.tap()
         let confirm = app.sheets.buttons["Forget this device"]

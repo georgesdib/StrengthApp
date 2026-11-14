@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import StrengthApp
+import StrengthCore
 
 final class MutationJournalTests: XCTestCase {
     private func tempURL() -> URL {

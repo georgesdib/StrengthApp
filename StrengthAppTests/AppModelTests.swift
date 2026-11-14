@@ -1,6 +1,8 @@
 import XCTest
+import WatchConnectivity
 
 @testable import StrengthApp
+import StrengthCore
 
 @MainActor
 final class AppModelTests: XCTestCase {
@@ -93,6 +95,149 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.pairedServerURL, "http://127.0.0.1:8000")
     }
 
+    func testInitialPhonePairingImmediatelyEnablesWatchPairing() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        let tokens = InMemoryTokenStore()
+        let connectivity = RecordingWatchConnectivity()
+        let model = AppModel(
+            client: IOSAPIClient(transport: watchTransport()),
+            tokens: tokens,
+            store: store,
+            watchConnectivity: connectivity
+        )
+        preparePhonePairing(model)
+
+        await model.pair()
+
+        XCTAssertEqual(model.phase, .paired)
+        XCTAssertTrue(model.watchPairing.canPair)
+        await model.watchPairing.pair()
+        XCTAssertEqual(model.watchPairing.link?.deviceID, "watch-1")
+        XCTAssertEqual(connectivity.updates.last?["token"] as? String, "watch-token")
+    }
+
+    func testExistingPairedLaunchEnablesWatchPairing() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        store.serverURL = "http://127.0.0.1:8000"
+        store.device = PairingDevice(deviceID: "device-1", label: "iPhone")
+        let tokens = InMemoryTokenStore(token: "token-abc")
+        let connectivity = RecordingWatchConnectivity()
+        let model = AppModel(
+            client: IOSAPIClient(transport: watchTransport()),
+            tokens: tokens,
+            store: store,
+            watchConnectivity: connectivity
+        )
+
+        await model.onLaunch()
+
+        XCTAssertEqual(model.phase, .paired)
+        XCTAssertTrue(model.watchPairing.canPair)
+    }
+
+    func testPhoneRepairResetsAndReinitializesWatchPairing() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        let tokens = InMemoryTokenStore()
+        let connectivity = RecordingWatchConnectivity()
+        let model = AppModel(
+            client: IOSAPIClient(transport: watchTransport()),
+            tokens: tokens,
+            store: store,
+            watchConnectivity: connectivity
+        )
+        preparePhonePairing(model)
+        await model.pair()
+        await model.watchPairing.pair()
+        XCTAssertEqual(model.watchPairing.link?.deviceID, "watch-1")
+
+        model.forgetDevice()
+        preparePhonePairing(model)
+        await model.pair()
+
+        XCTAssertEqual(model.phase, .paired)
+        XCTAssertNil(model.watchPairing.link)
+        XCTAssertTrue(model.watchPairing.canPair)
+    }
+
+    func testWatchPairingFailsSafelyWhenHomeWatchEndpointIsUnavailable() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        let tokens = InMemoryTokenStore()
+        let connectivity = RecordingWatchConnectivity()
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/pair":
+                return (200, Data(Fixtures.pair.utf8))
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrap.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/devices/watch":
+                throw URLError(.cannotConnectToHost)
+            default:
+                return (404, Data())
+            }
+        }
+        let model = AppModel(
+            client: IOSAPIClient(transport: transport),
+            tokens: tokens,
+            store: store,
+            watchConnectivity: connectivity
+        )
+        preparePhonePairing(model)
+        await model.pair()
+
+        await model.watchPairing.pair()
+
+        XCTAssertNil(model.watchPairing.link)
+        XCTAssertTrue(model.watchPairing.errorMessage?.contains("Home Server") == true)
+    }
+
+    func testRepeatedForegroundDoesNotMintWithoutAPairedWatch() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        let tokens = InMemoryTokenStore()
+        let connectivity = RecordingWatchConnectivity()
+        var watchMintCount = 0
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/pair":
+                return (200, Data(Fixtures.pair.utf8))
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrap.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/devices/watch":
+                watchMintCount += 1
+                return (201, Data("{}".utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let model = AppModel(
+            client: IOSAPIClient(transport: transport),
+            tokens: tokens,
+            store: store,
+            watchConnectivity: connectivity
+        )
+        preparePhonePairing(model)
+        await model.pair()
+
+        await model.appBecameActive()
+        await model.appBecameActive()
+
+        XCTAssertEqual(watchMintCount, 0)
+        XCTAssertNil(model.watchPairing.link)
+    }
+
     func testPairingInputErrorsDoNotCreateADevice() async {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -156,3 +301,45 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.pairingError)
     }
 }
+
+@MainActor
+private final class RecordingWatchConnectivity: WatchConnectivitySession {
+    weak var delegate: WatchConnectivitySessionDelegate?
+    var isSupported = true
+    var isPaired = true
+    var isWatchAppInstalled = true
+    var activationState: WCSessionActivationState = .activated
+    var receivedApplicationContext: [String: Any] = [:]
+    private(set) var updates: [[String: Any]] = []
+
+    func activate() {}
+    func updateApplicationContext(_ context: [String: Any]) throws {
+        updates.append(context)
+    }
+    func transferUserInfo(_ userInfo: [String: Any]) {}
+}
+
+    @MainActor
+    private func watchTransport() -> StubTransport {
+        StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/pair":
+                return (200, Data(Fixtures.pair.utf8))
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrap.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/devices/watch":
+                return (201, Data("{\n  \"device\": {\n    \"device_id\": \"watch-1\",\n    \"label\": \"Apple Watch\",\n    \"kind\": \"watch\",\n    \"parent_device_id\": \"device-1\",\n    \"credential_epoch\": 1\n  },\n  \"token\": \"watch-token\",\n  \"created_at\": \"2026-11-10T20:00:00+00:00\",\n  \"replaced_device_id\": null\n}".utf8))
+            default:
+                return (404, Data())
+            }
+        }
+    }
+
+    @MainActor
+    private func preparePhonePairing(_ model: AppModel) {
+        model.serverURLText = "http://127.0.0.1:8000/"
+        model.pairingCodeText = "1234 5678"
+        model.pairingLabelText = "Gym iPhone"
+    }

@@ -33,7 +33,7 @@ never overrides or restates the contract.
    No server change is needed, so 6.3 stays iOS-only.
 6. **Evidence.** 6.3 closes on package/unit tests plus the watch simulator build that
    `scripts/ci.sh` already performs. Dim/background/termination/relaunch on hardware is
-   owner-run in 6.7; a simulator is not proof.
+   owner-run in 6.7 and confirmed on 2026-11-14; a simulator is not proof.
 7. **Slices.** Three reviewable chunks, each stopping for review (below).
 8. **Idle warning (3h) and abandonment surfacing** stay with 6.6.
 9. **Retry window.** Automatic flush retries stop after 15 minutes from the first failure of a

@@ -21,6 +21,7 @@ Shared iOS phase contracts are canonical in the portfolio repository: https://gi
 - [iOS R7 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R7-CONTRACT.md)
 - [iOS R8 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R8-CONTRACT.md)
 - [watchOS Phase 6 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
+- [Training Intelligence contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/TRAINING-INTELLIGENCE-CONTRACT.md) — proposed; the intelligence envelopes are additive read-only payloads, and the client must not compute any metric, gate, evidence id or comparison from them.
 
 The backend API reference and data-model implementation details remain in this repository: [`docs/API.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/API.md) and [`docs/DATA-MODEL.md`](https://github.com/georgesdib/strength-training-app/blob/development/docs/DATA-MODEL.md). The shared phase plan is [canonical in the portfolio](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md); it does not replace these implementation references.
 
@@ -67,6 +68,9 @@ For API, schema, authentication or client/server behaviour changes:
 - Unknown response fields must not break decoding unless the contract is intentionally closed.
 - Error codes are part of the contract; preserve useful server messages.
 - Add fixtures/tests for new payload shapes.
+- Intelligence payloads (if INT-3 lands) decode into `StrengthCore/Intelligence`; unknown fields must
+  not break decoding, and no Swift code may derive a metric, percentage, gate or evidence id from a
+  fact block. Model-specific code stays in `StrengthApp/Intelligence`, never in `StrengthCore`.
 
 ## 7. Documentation
 

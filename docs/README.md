@@ -25,6 +25,13 @@ app presents and records that authority.
 - [iOS R7 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R7-CONTRACT.md)
 - [iOS R8 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R8-CONTRACT.md)
 - [watchOS Phase 6 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
+- [Training Intelligence plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/TRAINING-INTELLIGENCE.md)
+  — proposed cross-repository plan for the read-only intelligence capability layer, the standalone
+  MCP server and the on-device Foundation Models adapters. **Not implemented**; INT-1 requires owner
+  approval. Apple Intelligence, PCC and Siri remain deferred per the client plan.
+- [Training Intelligence contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/TRAINING-INTELLIGENCE-CONTRACT.md)
+  — response envelope, MCP tool/resource catalogue and the native iOS adapter rules (five-tool cap,
+  no Swift calculation).
 - [Watch 6.3 execution-lifecycle slice plan](WATCH-6.3-PLAN.md) — client-side slices, files and tests for Phase 6.3; the contract above stays authoritative.
 - [Watch 6.6 active-session plan](WATCH-6.6-PLAN.md) — client-side destinations, refresh/reconnect, ownership corrections and acceptance pointers; the contract above stays authoritative.
 

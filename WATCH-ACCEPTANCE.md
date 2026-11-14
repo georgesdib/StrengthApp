@@ -256,12 +256,17 @@ suspension or the Digital Crown.
 
 ---
 
-# Phase 6.6/6.7 watch acceptance checklist — pending
+# Phase 6.6/6.7 watch acceptance checklist — owner-confirmed 2026-11-14
 
-**Status: not yet run.** Script prepared 2026-11-12 against the Phase 6.6 corrections. Automated
-coverage is listed in [WATCH-6.6-PLAN.md](docs/WATCH-6.6-PLAN.md) and contract §17; the steps below
-are the physical half. Run on the Ultra, fill in the sign-off table, and record the build SHA and
-date. Nothing here may be claimed from simulator evidence.
+**Status: physical half run and confirmed by the owner on 2026-11-14**, build `8c26af0`, Apple Watch
+Ultra 4. The run surfaced real defects that were fixed during it (the finish idempotency key, the
+session-report decode, the split Today buttons); those fixes are post-acceptance commits and are listed
+below the sign-off rather than reopening the phase. Automated coverage is listed in
+[WATCH-6.6-PLAN.md](docs/WATCH-6.6-PLAN.md) and contract §17; the simulator UI smoke
+(`StrengthWatchUITests`) covers fetch → start → log → finish.
+
+Three items were not part of the accepted run and remain follow-ups: **W11** patchy Wi-Fi, **W12**
+home config refresh, and **R** rollback dry run.
 
 ## Before you start
 
@@ -367,17 +372,19 @@ date. Nothing here may be claimed from simulator evidence.
 
 | Check | Result | Notes |
 |---|---|---|
-| W1 credential delivery | pending | |
-| W2 relaunch with pending sets | pending | |
-| W3 backgrounding | pending | |
-| W4 phone edit while offline | pending | |
-| W5 active session/refresh/reconnect | pending | |
-| W6 take-over and read-only | pending | |
-| W7 HealthKit exactly once | pending | |
-| W8 clock skew | pending | |
-| W10 execution target | pending | |
-| W11 patchy Wi-Fi | pending | |
-| W12 home config refresh | pending | |
-| R rollback dry run | pending | |
+| W1 credential delivery | passed 2026-11-14 (owner) | owner sign-off |
+| W2 relaunch with pending sets | passed 2026-11-14 (owner) | owner sign-off |
+| W3 backgrounding | passed 2026-11-14 (owner) | owner sign-off |
+| W4 phone edit while offline | passed 2026-11-14 (owner) | owner sign-off |
+| W5 active session/refresh/reconnect | passed 2026-11-14 (owner) | owner sign-off |
+| W6 take-over and read-only | passed 2026-11-14 (owner) | owner sign-off |
+| W7 HealthKit exactly once | passed 2026-11-14 (owner) | owner sign-off |
+| W8 clock skew | passed 2026-11-14 (owner) | owner sign-off |
+| W10 execution target | passed 2026-11-14 (owner) | owner sign-off |
+| W11 patchy Wi-Fi | follow-up | not part of the accepted run |
+| W12 home config refresh | follow-up | not part of the accepted run |
+| R rollback dry run | follow-up | not part of the accepted run |
 
-Owner confirmation: pending · Build: 6.6/6.7 corrections · Device: Apple Watch Ultra 4, watchOS 27.x
+Owner confirmation: 2026-11-14 · Build: 8c26af0 · Device: Apple Watch Ultra 4, watchOS 27.x
+Follow-ups: W11 patchy Wi-Fi, W12 home config refresh, R rollback dry run (owner-run, not blockers).
+Post-acceptance fixes: finish idempotency key (8c26af0), report decode and Today button split (9dd8329), watch rest notification (8254e4a).

@@ -177,15 +177,34 @@ final class WatchHealthKitRecorder: NSObject, WatchLivenessAnchor, HealthKitSavi
         guard let type = HKQuantityType.quantityType(forIdentifier: .workoutEffortScore) else {
             throw HealthKitSaveFailure.definitive("Workout effort is not supported here.")
         }
+        let sample = HKQuantitySample(
+            type: type,
+            quantity: HKQuantity(unit: .appleEffortScore(), doubleValue: effort),
+            start: workout.startDate,
+            end: workout.endDate
+        )
         do {
-            let sample = HKQuantitySample(
-                type: type,
-                quantity: HKQuantity(unit: .appleEffortScore(), doubleValue: effort),
-                start: workout.startDate,
-                end: workout.endDate
-            )
             try await healthStore.save(sample)
+            // Saving the score is not enough: Health only associates it with the workout
+            // through the explicit effort relationship.
+            try await withCheckedThrowingContinuation { continuation in
+                healthStore.relateWorkoutEffortSample(
+                    sample, with: workout, activity: nil
+                ) { success, error in
+                    if success {
+                        continuation.resume()
+                    } else {
+                        continuation.resume(
+                            throwing: error ?? HealthKitSaveFailure.transient(
+                                "The effort score could not be related to the workout."
+                            )
+                        )
+                    }
+                }
+            }
         } catch {
+            // Do not leave an orphan score that a retry would duplicate.
+            try? await healthStore.delete(sample)
             throw Self.classify(error)
         }
     }

@@ -245,7 +245,8 @@ velocity entry happens during the rest, not inside the set. Rest — **+15s** ex
 shortens it, and a local notification fires when it ends if you allowed notifications — rate form
 at **End exercise**, and finish with editable sRPE and optional productivity. Total elapsed time
 and heart rate show at the top of the exercise screen; heart rate follows the latest HealthKit
-sample and clears after 10 seconds without a new one. Exactly one HealthKit workout is saved.
+sample and clears after 10 seconds without a new one. Exactly one HealthKit workout is saved, and
+the session sRPE is written as the workout's Apple effort score.
 
 A swap re-solves the replacement from its own history and calibration: load, warm-up ramps and
 VBT target when available. It never copies the old lift's load. If no load can be derived, the

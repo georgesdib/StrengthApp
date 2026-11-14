@@ -265,7 +265,9 @@ struct ExerciseWorkoutView: View {
                 draft: draft,
                 exerciseLabel: Self.label(exerciseId),
                 target: logSetIndex.map { "Planned set \($0)" },
-                velocityApplicable: item?.velocityTarget != nil,
+                isTimeBased: item?.isTimeBased == true,
+                velocityApplicable: item?.loadBasis != "bodyweight"
+                    && item?.loadBasis != "bodyweight_total",
                 isSaving: model.isSaving,
                 error: addError
             ) { anchor in
@@ -336,7 +338,7 @@ struct ExerciseWorkoutView: View {
         addError = nil
         let draft = draft.wrappedValue
         guard let reps = Int(draft.repsText.trimmingCharacters(in: .whitespaces)) else {
-            addError = "Reps are required."
+            addError = item?.isTimeBased == true ? "Seconds are required." : "Reps are required."
             return
         }
         let load = parseDouble(draft.loadText)
@@ -495,6 +497,7 @@ private struct LogSetSheet: View {
     @Binding var draft: WorkoutDraftStore.Draft
     let exerciseLabel: String
     let target: String?
+    let isTimeBased: Bool
     let velocityApplicable: Bool
     let isSaving: Bool
     let error: String?
@@ -524,7 +527,7 @@ private struct LogSetSheet: View {
                             .multilineTextAlignment(.trailing)
                             .accessibilityIdentifier("set-load")
                     }
-                    LabeledContent("Reps") {
+                    LabeledContent(isTimeBased ? "Seconds" : "Reps") {
                         TextField("required", text: $draft.repsText)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)

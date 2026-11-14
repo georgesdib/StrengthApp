@@ -5,15 +5,15 @@
 **Status: Phase 1 complete 2026-11-07; Phase 2 complete and accepted 2026-11-07; Phase 3A
 closed 2026-11-08** — Phase 3A is unit/simulator/live-server and physical-iPhone verified. Phase 4
 offline capture and replay are closed 2026-11-08 (snapshot/outbox, add set/form/finish, ordered
-sync, conflict handling and cancellation); physical offline acceptance was owner-confirmed. R1 durable pending-mutation journal, R3 explicit plan-item selection,
-R4 form-rating correction UX, R5 recovery/reconciliation and R8 active-workout plan editing are
-closed. Phase 6.0 (the shared watch core) and 6.1 (the server watch contract) are complete. Phase
-6.2 is complete and closed 2026-11-10: 6.2a embedded watch target and CI, 6.2b credential/config
-handoff and phone-side Pair/Status/Revoke, and 6.2c read-only Today from the Home server. Phases
-6.3–6.5 add the watch execution lifecycle, offline conflicts and heart rate with one HealthKit
-workout. 6.6 adds the phone mirror with plan-revision pushes and take-over, the active Set,
-Session and Plan destinations, refresh/reconnect reconciliation, idle and ended-elsewhere
-messaging, and the mirror form controls. Physical Apple Watch acceptance was owner-confirmed 2026-11-14.
+sync, conflict handling and cancellation); physical offline acceptance was owner-confirmed.
+R1-R5 and R7-R10 are closed (R11 was dropped). Phase 6.0-6.7 are complete: 6.0 shared watch core,
+6.1 server watch contract, 6.2a-6.2c embedded watch target and CI, credential/config handoff,
+phone-side Pair/Status/Revoke and read-only Today (closed 2026-11-10), 6.3-6.5 the watch
+execution lifecycle, offline conflicts and heart rate with one HealthKit workout, and 6.6 the
+phone mirror with plan-revision pushes, take-over, the active Set/Session/Plan destinations,
+refresh/reconnect reconciliation, idle and ended-elsewhere messaging and the mirror form
+controls. Physical Apple Watch acceptance was owner-confirmed 2026-11-14. The AFC-2i session
+report is implemented.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
@@ -122,10 +122,11 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   Apple Watch Pair/Status/Revoke, device id/label, app version, opt-in HealthKit readiness, Forget
   this device (local token only), re-pair instructions.
 - **Apple Watch** — credential status plus the Home server's watch-targeted work. A watch-targeted
-  plan is started, logged and finished on the watch (sets, form rating, mean velocity only when
-  the plan supplies a velocity target, rest with +15s/−15s and a local end-of-rest notification,
-  heart rate, one HealthKit workout, sRPE and optional productivity at finish, local-first
-  outbox); phone-targeted plans are hidden. While
+  plan is started, logged and finished on the watch (working sets and loggable warm-up sets,
+  form rating, mean velocity for external-load work even without a target, rest with +15s/−15s
+  and a local end-of-rest notification, total elapsed time beside heart rate, one HealthKit
+  workout, editable sRPE and optional productivity at finish, local-first outbox);
+  phone-targeted plans are hidden. While
   the watch owns the session the phone shows a **Logged on Apple Watch** banner, keeps set logging
   and form ratings disabled, and remains read-only for capture; plan edits still work and are
   pushed to the watch at its next idle point, never mid-set. **Take over logging** asks for

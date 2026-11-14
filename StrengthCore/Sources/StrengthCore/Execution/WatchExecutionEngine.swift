@@ -915,6 +915,17 @@ public final class WatchExecutionEngine {
         }
     }
 
+    /// Shortens the open rest by up to `seconds`, for the watch's −15s control.
+    public func shortenRest(by seconds: Int) throws {
+        guard seconds > 0, let workout else { return }
+        try mutate { capture in
+            guard var record = capture.session, var rest = record.rest, rest.isOpen else { return }
+            rest.shorten(by: seconds, at: stampedNow())
+            record.rest = rest
+            capture.session = record
+        }
+    }
+
     public func extendRest(by seconds: Int) throws {
         guard seconds > 0, let workout else { return }
         let stamp = stampedNow()
@@ -936,7 +947,11 @@ public final class WatchExecutionEngine {
     // MARK: - Finish
 
     @discardableResult
-    public func finish(sessionRpe: Double?, session: IOSSession) async -> WatchFlushStop {
+    public func finish(
+        sessionRpe: Double?,
+        productivity: Int? = nil,
+        session: IOSSession
+    ) async -> WatchFlushStop {
         guard phase == .active || phase == .finishing, sessionRecord != nil else {
             return .conflict(code: "not_active", message: "This session cannot be finished.")
         }
@@ -955,7 +970,7 @@ public final class WatchExecutionEngine {
                 durationMin: nil,
                 notes: nil,
                 endedAt: ServerClock.encodedISO(endedAt),
-                productivity: nil
+                productivity: productivity
             )),
             createdAt: endedAt
         )
@@ -1095,6 +1110,20 @@ public final class WatchExecutionEngine {
                 nextRetryAt = nil
                 markOnline(session)
             } catch {
+                // A finish whose first response was lost comes back as 409 workout_not_active:
+                // the server already holds the session. Acknowledge it instead of stranding the
+                // watch on the progress screen with nothing left in the queue.
+                if operation.kind == .completeWorkout,
+                   let api = error as? APIError,
+                   case let .server(status, code, _, _, _) = api,
+                   status == 409, code == "workout_not_active" {
+                    _ = try? store.remove(operation.operationId)
+                    markFinishAcknowledged()
+                    sentAny = true
+                    ladder.succeeded()
+                    nextRetryAt = nil
+                    continue
+                }
                 if !offPlanRetried.contains(operation.operationId),
                    isPlanItemMismatch(error),
                    case .addSet(let body) = operation.body,

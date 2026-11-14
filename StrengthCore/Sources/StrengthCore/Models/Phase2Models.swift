@@ -128,6 +128,9 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
     public let restS: Int?
     public let essential: Bool?
     public let warmup: [WarmupSet]?
+    /// Present only for lifts with a velocity calibration; nil means the plan asks for no
+    /// bar speed, so the client must not offer the field.
+    public let velocityTarget: Double?
 
     public init(
         orderIndex: Int?,
@@ -142,7 +145,8 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         refs: [String]?,
         restS: Int?,
         essential: Bool?,
-        warmup: [WarmupSet]? = nil
+        warmup: [WarmupSet]? = nil,
+        velocityTarget: Double? = nil
     ) {
         self.orderIndex = orderIndex
         self.exerciseId = exerciseId
@@ -157,6 +161,7 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         self.restS = restS
         self.essential = essential
         self.warmup = warmup
+        self.velocityTarget = velocityTarget
     }
 
     public var id: String { "\(orderIndex ?? 0)-\(exerciseId ?? "")" }

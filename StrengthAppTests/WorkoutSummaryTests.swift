@@ -37,6 +37,20 @@ final class WorkoutSummaryTests: XCTestCase {
         )
     }
 
+    func testAdherenceVersionDecodesAsTheServerSendsIt() throws {
+        // The server sends "version": 1, a number. Declaring String made the live report
+        // undecodable ("server response could not be read").
+        let json = """
+        {"summary": {"workout_id": "w", "adherence": {"version": 1, "status": "available"}}}
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let envelope = try decoder.decode(
+            WorkoutSummaryEnvelope.self, from: Data(json.utf8)
+        )
+        XCTAssertEqual(envelope.summary.adherence?.version, 1)
+    }
+
     func testUnavailableAdherenceCarriesItsReason() throws {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase

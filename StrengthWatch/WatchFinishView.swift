@@ -8,6 +8,7 @@ struct WatchFinishView: View {
 
     @State private var sessionRpe = 7.0
     @State private var notRecorded = false
+    @State private var productivity: Int?
     @State private var confirmingDiscard = false
     @State private var isSaving = false
 
@@ -30,10 +31,24 @@ struct WatchFinishView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Toggle("Not recorded", isOn: $notRecorded)
+                Text("Productivity").font(.headline)
+                HStack(spacing: 2) {
+                    ForEach(1...5, id: \.self) { value in
+                        Button("\(value)") { productivity = value }
+                            .buttonStyle(.bordered)
+                            .tint(productivity == value ? .accentColor : .gray)
+                            .accessibilityIdentifier("watch-productivity-\(value)")
+                    }
+                }
+                Button("Not recorded") { productivity = nil }
+                    .font(.caption2)
                 Button("Finish") {
                     isSaving = true
                     Task {
-                        await execution.finish(sessionRpe: notRecorded ? nil : sessionRpe)
+                        await execution.finish(
+                            sessionRpe: notRecorded ? nil : sessionRpe,
+                            productivity: productivity
+                        )
                         isSaving = false
                         dismiss()
                     }

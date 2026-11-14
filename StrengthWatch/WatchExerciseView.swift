@@ -1,5 +1,6 @@
 import StrengthCore
 import SwiftUI
+import WatchKit
 
 /// One exercise at a time: Start set → perform → End set (RIR) → rest → next set.
 struct WatchExerciseView: View {
@@ -203,20 +204,24 @@ struct WatchExerciseView: View {
                 Text("\(formatted(loadKg)) kg × \(reps)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                TextField("Bar speed m/s", text: $velocityText)
-                    .accessibilityIdentifier("watch-velocity")
-                if !velocityText.trimmingCharacters(in: .whitespaces).isEmpty,
-                   parsedVelocity == nil {
-                    Text("Speed must be a positive number.")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                }
-                TextField("Per-rep m/s", text: $repVelocityText)
-                    .accessibilityIdentifier("watch-rep-velocity")
-                if let repVelocityError {
-                    Text(repVelocityError)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
+                // Only a calibrated lift has a velocity target; bodyweight work must not ask
+                // for bar speed (contract: the plan decides, the client displays).
+                if execution.selectedItem?.velocityTarget != nil {
+                    TextField("Bar speed m/s", text: $velocityText)
+                        .accessibilityIdentifier("watch-velocity")
+                    if !velocityText.trimmingCharacters(in: .whitespaces).isEmpty,
+                       parsedVelocity == nil {
+                        Text("Speed must be a positive number.")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                    TextField("Per-rep m/s", text: $repVelocityText)
+                        .accessibilityIdentifier("watch-rep-velocity")
+                    if let repVelocityError {
+                        Text(repVelocityError)
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
                 }
                 ForEach(0...6, id: \.self) { value in
                     Button("\(value)") { save(rir: value) }
@@ -366,11 +371,13 @@ struct WatchExerciseView: View {
 struct WatchRestBar: View {
     @ObservedObject var execution: WatchExecutionController
     var rest: RestInterval
+    @State private var announced = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
+            let complete = execution.restIsComplete(at: context.date)
             VStack(alignment: .leading, spacing: 4) {
-                if execution.restIsComplete(at: context.date) {
+                if complete {
                     Text("Rest complete").font(.subheadline)
                 } else {
                     let remaining = Int((execution.restRemaining(at: context.date) ?? 0).rounded(.up))
@@ -380,9 +387,18 @@ struct WatchRestBar: View {
                 }
                 HStack {
                     Button("+15s") { execution.extendRest(by: 15) }
-                    Button("End rest") { execution.endRest() }
+                    Button("−15s") { execution.shortenRest(by: 15) }
                 }
                 .font(.caption2)
+            }
+            // The timer is a local clock; buzz the wrist the moment it reaches zero.
+            .onChange(of: complete) { _, isComplete in
+                if isComplete, !announced {
+                    announced = true
+                    WKInterfaceDevice.current().play(.notification)
+                } else if !isComplete {
+                    announced = false
+                }
             }
         }
     }

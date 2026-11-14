@@ -265,6 +265,7 @@ struct ExerciseWorkoutView: View {
                 draft: draft,
                 exerciseLabel: Self.label(exerciseId),
                 target: logSetIndex.map { "Planned set \($0)" },
+                velocityApplicable: item?.velocityTarget != nil,
                 isSaving: model.isSaving,
                 error: addError
             ) {
@@ -490,6 +491,7 @@ private struct LogSetSheet: View {
     @Binding var draft: WorkoutDraftStore.Draft
     let exerciseLabel: String
     let target: String?
+    let velocityApplicable: Bool
     let isSaving: Bool
     let error: String?
     let onSave: () -> Void
@@ -522,20 +524,22 @@ private struct LogSetSheet: View {
                             .multilineTextAlignment(.trailing)
                             .accessibilityIdentifier("set-rir")
                     }
-                    LabeledContent("Mean velocity (m/s)") {
-                        TextField("optional", text: $draft.velocityText)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .accessibilityIdentifier("set-velocity")
-                    }
-                    DisclosureGroup(
-                        "Per-rep velocity (optional)",
-                        isExpanded: $draft.showingRepVelocity
-                    ) {
-                        TextField("e.g. 0.62, 0.58, 0.55", text: $draft.repVelocityText)
-                            .keyboardType(.numbersAndPunctuation)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                    if velocityApplicable {
+                        LabeledContent("Mean velocity (m/s)") {
+                            TextField("optional", text: $draft.velocityText)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .accessibilityIdentifier("set-velocity")
+                        }
+                        DisclosureGroup(
+                            "Per-rep velocity (optional)",
+                            isExpanded: $draft.showingRepVelocity
+                        ) {
+                            TextField("e.g. 0.62, 0.58, 0.55", text: $draft.repVelocityText)
+                                .keyboardType(.numbersAndPunctuation)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
                     }
                 } header: {
                     Text(exerciseLabel)

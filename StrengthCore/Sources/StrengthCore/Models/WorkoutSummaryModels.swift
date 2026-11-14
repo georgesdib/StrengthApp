@@ -37,7 +37,8 @@ public struct WorkoutObservation: Decodable {
 }
 
 public struct WorkoutAdherence: Decodable {
-    public let version: String?
+    /// The server sends a number here; declaring it String made every report undecodable.
+    public let version: Int?
     public let status: String
     public let reason: String?
     public let original: AdherenceView?

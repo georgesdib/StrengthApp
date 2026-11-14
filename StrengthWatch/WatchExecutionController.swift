@@ -382,6 +382,16 @@ final class WatchExecutionController: ObservableObject {
         try? engine.updateActiveSetDraft(loadKg: draftLoad, reps: draftReps)
     }
 
+    /// −15s on the watch: shortens what is left, and simply ends the rest if that is all of it.
+    func shortenRest(by seconds: Int) {
+        let remaining = engine.sessionRecord?.rest.map { $0.endsAt.timeIntervalSinceNow } ?? 0
+        if remaining <= Double(seconds) {
+            try? engine.endRest()
+        } else {
+            try? engine.shortenRest(by: seconds)
+        }
+    }
+
     func extendRest(by seconds: Int) {
         try? engine.extendRest(by: seconds)
         sync()
@@ -394,14 +404,16 @@ final class WatchExecutionController: ObservableObject {
 
     // MARK: - Finish and discard
 
-    func finish(sessionRpe: Double?) async {
+    func finish(sessionRpe: Double?, productivity: Int? = nil) async {
         guard let session = currentSession() else {
             credentialsMissing()
             return
         }
         isWorking = true
         defer { isWorking = false }
-        let stop = await engine.finish(sessionRpe: sessionRpe, session: session)
+        let stop = await engine.finish(
+            sessionRpe: sessionRpe, productivity: productivity, session: session
+        )
         #if DEBUG
         if WatchSmokeMode.isEnabled {
             NSLog("SMOKE-FINISH stop=\(stop) error=\(engine.lastError ?? "-") pending=\(engine.pendingCount)")

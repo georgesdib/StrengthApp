@@ -458,17 +458,21 @@ struct TodayView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("watch-targeted-plan")
             }
+            // Borderless keeps the two buttons independent; the default list style made
+            // either tap fire both of them.
             Button {
                 showingReview = true
             } label: {
                 Label("Review workout", systemImage: "list.bullet.clipboard")
             }
+            .buttonStyle(.borderless)
             .accessibilityIdentifier("review-workout")
             Button {
                 startPrescription()
             } label: {
                 Label("Request another workout", systemImage: "arrow.triangle.2.circlepath")
             }
+            .buttonStyle(.borderless)
             .accessibilityIdentifier("replace-workout")
             .disabled(model.isSaving || model.isOffline || model.hasPendingOfflineCapture)
             if model.isOffline || model.hasPendingOfflineCapture {

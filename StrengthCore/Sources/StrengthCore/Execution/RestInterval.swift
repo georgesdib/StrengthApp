@@ -60,6 +60,16 @@ public struct RestInterval: Codable, Equatable, Sendable {
         return endsAt
     }
 
+    /// Shortens the open rest, never below its own start. No server event is emitted: the
+    /// interval that the eventual completion records is simply shorter, which is the truth.
+    public mutating func shorten(by seconds: Int, at date: Date) -> Date {
+        let cut = max(0, seconds)
+        guard cut > 0 else { return endsAt }
+        // Never rewrite history: the shortened end stays inside [start, now, old end].
+        endsAt = max(max(startedAt, date), endsAt.addingTimeInterval(-TimeInterval(cut)))
+        return endsAt
+    }
+
     /// Closes the rest and returns the observed interval, or nil when it was already closed.
     @discardableResult
     public mutating func finish(at date: Date, outcome: RestOutcome) -> RestInterval? {

@@ -16,6 +16,9 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var selectedItem: PrescriptionItem?
     /// True only once the server acknowledged the finish; an empty queue is not proof.
     @Published private(set) var finishAcknowledged = false
+    /// The rest end the pending notification was scheduled for, so sync() only re-schedules
+    /// when the interval actually changes.
+    private var scheduledRestEnd: Date?
     @Published private(set) var lastError: String?
     @Published private(set) var isOffline = false
     @Published private(set) var isWorking = false
@@ -214,6 +217,7 @@ final class WatchExecutionController: ObservableObject {
         isWorking = true
         defer { isWorking = false }
 
+        Task { await WatchRestNotifications.shared.requestAuthorizationIfNeeded() }
         if WatchSmokeMode.isEnabled {
             // Simulator smoke: no HealthKit workout session exists there.
             authorization = .authorized
@@ -646,5 +650,19 @@ final class WatchExecutionController: ObservableObject {
         isOffline = engine.network == .offline
         finishAcknowledged = engine.sessionRecord?.finish?.serverAcked ?? false
         lastError = engine.lastError
+        syncRestNotification()
+    }
+
+    /// Keeps one pending notification pointed at the open rest's end, and none otherwise.
+    private func syncRestNotification() {
+        let rest = engine.sessionRecord?.rest
+        let end = rest?.isOpen == true ? rest?.endsAt : nil
+        guard end != scheduledRestEnd else { return }
+        scheduledRestEnd = end
+        if let end, end.timeIntervalSinceNow > 0 {
+            Task { await WatchRestNotifications.shared.schedule(at: end) }
+        } else {
+            WatchRestNotifications.shared.cancel()
+        }
     }
 }

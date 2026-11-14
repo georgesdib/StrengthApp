@@ -16,6 +16,8 @@ final class WatchHealthKitRecorder: NSObject, WatchLivenessAnchor, HealthKitSavi
     private var startContinuation: CheckedContinuation<Void, Error>?
     private var startGate: HealthKitStartGate?
     private var timeoutTask: Task<Void, Never>?
+    private var heartRateQuery: HKAnchoredObjectQuery?
+    private var heartRateSince: Date?
 
     /// Called with the current heart rate, or nil when it is unavailable.
     var onHeartRate: ((Int?) -> Void)?
@@ -65,6 +67,7 @@ final class WatchHealthKitRecorder: NSObject, WatchLivenessAnchor, HealthKitSavi
         )
         self.session = session
         self.builder = builder
+        self.heartRateSince = date
         self.startGate = HealthKitStartGate()
         try await withCheckedThrowingContinuation { continuation in
             startContinuation = continuation
@@ -239,9 +242,55 @@ final class WatchHealthKitRecorder: NSObject, WatchLivenessAnchor, HealthKitSavi
     }
 
     private func clearSession() {
+        stopHeartRateQuery()
         session = nil
         builder = nil
+        heartRateSince = nil
         onHeartRate?(nil)
+    }
+
+    // MARK: - Heart rate
+
+    /// The live builder's statistics are the fallback; an anchored query surfaces each new
+    /// heart-rate sample as soon as HealthKit stores it, without changing the sensor cadence.
+    private func startHeartRateQuery(from date: Date) {
+        stopHeartRateQuery()
+        guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
+            return
+        }
+        let predicate = HKQuery.predicateForSamples(
+            withStart: date, end: nil, options: .strictStartDate
+        )
+        let query = HKAnchoredObjectQuery(
+            type: type,
+            predicate: predicate,
+            anchor: nil,
+            limit: HKObjectQueryNoLimit
+        ) { [weak self] _, samples, _, _, _ in
+            Task { @MainActor in self?.consumeHeartRate(samples) }
+        }
+        query.updateHandler = { [weak self] _, samples, _, _, _ in
+            Task { @MainActor in self?.consumeHeartRate(samples) }
+        }
+        heartRateQuery = query
+        healthStore.execute(query)
+    }
+
+    private func stopHeartRateQuery() {
+        if let query = heartRateQuery {
+            healthStore.stop(query)
+        }
+        heartRateQuery = nil
+    }
+
+    private func consumeHeartRate(_ samples: [HKSample]?) {
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let latest = samples?
+            .compactMap { $0 as? HKQuantitySample }
+            .filter { $0.quantityType == HKQuantityType.quantityType(forIdentifier: .heartRate) }
+            .max { $0.endDate < $1.endDate }
+        guard let value = latest?.quantity.doubleValue(for: unit) else { return }
+        onHeartRate?(Int(value.rounded()))
     }
 
     private func collectionBegan() {
@@ -261,6 +310,9 @@ final class WatchHealthKitRecorder: NSObject, WatchLivenessAnchor, HealthKitSavi
     private func applyStartOutcome(_ outcome: HealthKitStartGate.Outcome) {
         switch outcome {
         case .ready:
+            if heartRateQuery == nil, let since = heartRateSince {
+                startHeartRateQuery(from: since)
+            }
             finishStart(.success(()))
         case .failed:
             finishStart(.failure(LivenessError.notRunning))

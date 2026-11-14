@@ -226,7 +226,6 @@ final class WatchHealthKitFinalizerTests: XCTestCase {
         let observed = Date(timeIntervalSince1970: 1_800_000_000)
         let reading = HeartRateReading(bpm: 128, observedAt: observed)
         XCTAssertTrue(reading.isFresh(at: observed.addingTimeInterval(10)))
-        XCTAssertTrue(reading.isFresh(at: observed.addingTimeInterval(30)))
-        XCTAssertFalse(reading.isFresh(at: observed.addingTimeInterval(31)))
+        XCTAssertFalse(reading.isFresh(at: observed.addingTimeInterval(11)))
     }
 }

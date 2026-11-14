@@ -204,8 +204,8 @@ HealthKit readiness is optional and off by default. When enabled, the app reads 
 Manual readiness takes precedence over HealthKit, which takes precedence over imported
 readiness. The app never writes to HealthKit and does not import sleep or workouts.
 
-**Workout heart rate is not implemented.** The app does not request or store workout HR samples,
-and HR is not used for readiness, fatigue, progression or prescriptions.
+**Workout heart rate is read only on Apple Watch**, for the live session display and the one
+saved HealthKit workout. It is not used for readiness, fatigue, progression or prescriptions.
 
 ## 9. Settings and maintenance
 
@@ -244,7 +244,8 @@ show seconds (“30s”), not repetitions. The rest starts when you tap **End se
 velocity entry happens during the rest, not inside the set. Rest — **+15s** extends it, **−15s**
 shortens it, and a local notification fires when it ends if you allowed notifications — rate form
 at **End exercise**, and finish with editable sRPE and optional productivity. Total elapsed time
-and heart rate show at the top of the exercise screen. Exactly one HealthKit workout is saved.
+and heart rate show at the top of the exercise screen; heart rate follows the latest HealthKit
+sample and clears after 10 seconds without a new one. Exactly one HealthKit workout is saved.
 
 A swap re-solves the replacement from its own history and calibration: load, warm-up ramps and
 VBT target when available. It never copies the old lift's load. If no load can be derived, the

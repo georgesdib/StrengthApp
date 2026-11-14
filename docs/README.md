@@ -10,7 +10,7 @@ app presents and records that authority.
 - [USER-GUIDE.md](../USER-GUIDE.md) — owner-facing pairing, workout, HealthKit and troubleshooting guide.
 - [DEVICE-ACCEPTANCE.md](../DEVICE-ACCEPTANCE.md) — physical iPhone acceptance checklists and records.
 - [WATCH-ACCEPTANCE.md](../WATCH-ACCEPTANCE.md) — the owner-confirmed 6.7 acceptance record
-  (W1–W12, 2026-11-14) and the R rollback dry-run follow-up.
+  (W1–W12 and R, 2026-11-14).
 
 ## Client plan and contracts
 

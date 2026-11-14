@@ -29,7 +29,7 @@ companion contract is
 [`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md);
 Phase 6.0–6.7 are complete: 6.2 closed 2026-11-10 (shared core, server contract, watch target,
 credential handoff and read-only Today), 6.3–6.6 followed, and 6.7 physical acceptance was
-owner-confirmed 2026-11-14. Only the R rollback dry run remains a follow-up. The client plan is
+owner-confirmed 2026-11-14 (W1–W12 and R). The client plan is
 [the canonical iOS client phase plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md);
 start with [`docs/README.md`](docs/README.md) for the client documentation map.
 

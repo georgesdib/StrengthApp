@@ -265,8 +265,8 @@ below the sign-off rather than reopening the phase. Automated coverage is listed
 [WATCH-6.6-PLAN.md](docs/WATCH-6.6-PLAN.md) and contract §17; the simulator UI smoke
 (`StrengthWatchUITests`) covers fetch → start → log → finish.
 
-**W11** patchy Wi-Fi and **W12** home config refresh were confirmed in the same run. Only **R**
-(rollback dry run) remains a follow-up.
+**W11** patchy Wi-Fi, **W12** home config refresh and **R** rollback dry run were confirmed in the
+same run; no follow-ups remain.
 
 ## Before you start
 
@@ -383,8 +383,8 @@ below the sign-off rather than reopening the phase. Automated coverage is listed
 | W10 execution target | passed 2026-11-14 (owner) | owner sign-off |
 | W11 patchy Wi-Fi | passed 2026-11-14 (owner) | owner sign-off |
 | W12 home config refresh | passed 2026-11-14 (owner) | owner sign-off |
-| R rollback dry run | follow-up | not part of the accepted run |
+| R rollback dry run | passed 2026-11-14 (owner) | owner sign-off |
 
 Owner confirmation: 2026-11-14 · Build: 8c26af0 · Device: Apple Watch Ultra 4, watchOS 27.x
-Follow-up: R rollback dry run (owner-run, not a blocker).
+No follow-ups: W1–W12 and R are all confirmed.
 Post-acceptance fixes: finish idempotency key (8c26af0), report decode and Today button split (9dd8329), watch rest notification (8254e4a).

@@ -197,9 +197,10 @@ Completed 2026-11-12 (client) against the new execution envelope.
 - **Effort.** The session RPE is written as a `workoutEffortScore` sample after the workout;
   failure to write it never invalidates the workout.
 - **Limits.** No simulator or physical acceptance was performed in this slice. The §22.2 device
-  spike (backdated minimal workout, UUID query, forced finish failure) remains owner-run.
-- **Deferred to 6.7:** the watchOS unit-test target and the §17 simulator smoke (fetch → start →
-  log → finish). Both are test infrastructure and belong with the acceptance/CI slice.
+  spike (backdated minimal workout, UUID query, forced finish failure) was owner-run as part of the
+  6.7 acceptance on 2026-11-14.
+- **Delivered in 6.7:** the watch UI test target and the §17 simulator smoke (fetch → start → log →
+  finish), both part of the acceptance/CI slice.
 
 ### HealthKit spike results — 2026-11-12, watchOS simulator
 

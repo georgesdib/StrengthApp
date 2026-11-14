@@ -140,16 +140,16 @@ suspension or the Digital Crown.
       Digital Crown (±2.5 kg) and reps with −/+.
 - [ ] **End set** opens the RIR sheet (prescribed default, 0–6, *Not recorded*). Saving captures
       the set as pending, then clears once the home server acknowledges it.
-- [ ] The rest bar appears and survives a wrist drop. **+15s** extends it and **End rest** closes
-      it; it stays until tapped.
+- [ ] The rest bar appears and survives a wrist drop. **+15s** extends it and **−15s** shortens
+      it (ending the rest when that is all that remains); it stays until tapped.
 - [ ] **Add set** on the last prescribed set starts an extra set prefilled with the previous
       values; the list counts it without changing the prescription.
 - [ ] **End exercise** returns to the list with the completed sets; starting exercise 2 before
       exercise 1 works and the server's telemetry shows both blocks separately.
 - [ ] The phone adds or removes an exercise: as of 6.6 the watch's plan refreshes at the next
       idle point (see W4/W5); nothing on the watch breaks.
-- [ ] Let the countdown reach zero: it reads **Rest complete** and **End rest** is still there.
-      Nothing closes the rest by itself.
+- [ ] Let the countdown reach zero: it reads **Rest complete**, a local notification fires if
+      permission was granted, and the rest itself stays open until the next set.
 - [ ] Start the next set without ending the rest: the rest closes at that moment and the set is
       logged. There is no rest-skipped state anywhere.
 - [ ] Background the app for several minutes mid-session, return, log a set: elapsed time and
@@ -265,8 +265,8 @@ below the sign-off rather than reopening the phase. Automated coverage is listed
 [WATCH-6.6-PLAN.md](docs/WATCH-6.6-PLAN.md) and contract §17; the simulator UI smoke
 (`StrengthWatchUITests`) covers fetch → start → log → finish.
 
-Three items were not part of the accepted run and remain follow-ups: **W11** patchy Wi-Fi, **W12**
-home config refresh, and **R** rollback dry run.
+**W11** patchy Wi-Fi and **W12** home config refresh were confirmed in the same run. Only **R**
+(rollback dry run) remains a follow-up.
 
 ## Before you start
 
@@ -381,10 +381,10 @@ home config refresh, and **R** rollback dry run.
 | W7 HealthKit exactly once | passed 2026-11-14 (owner) | owner sign-off |
 | W8 clock skew | passed 2026-11-14 (owner) | owner sign-off |
 | W10 execution target | passed 2026-11-14 (owner) | owner sign-off |
-| W11 patchy Wi-Fi | follow-up | not part of the accepted run |
-| W12 home config refresh | follow-up | not part of the accepted run |
+| W11 patchy Wi-Fi | passed 2026-11-14 (owner) | owner sign-off |
+| W12 home config refresh | passed 2026-11-14 (owner) | owner sign-off |
 | R rollback dry run | follow-up | not part of the accepted run |
 
 Owner confirmation: 2026-11-14 · Build: 8c26af0 · Device: Apple Watch Ultra 4, watchOS 27.x
-Follow-ups: W11 patchy Wi-Fi, W12 home config refresh, R rollback dry run (owner-run, not blockers).
+Follow-up: R rollback dry run (owner-run, not a blocker).
 Post-acceptance fixes: finish idempotency key (8c26af0), report decode and Today button split (9dd8329), watch rest notification (8254e4a).

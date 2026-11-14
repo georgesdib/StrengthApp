@@ -85,7 +85,8 @@ raw 100.x address.
    load, RIR, rest and any warnings. **Start workout** is on that screen, so the plan is always
    visible before it is consumed. The server issues the plan; the phone never invents plan content.
 4. Open an exercise and tap **Start set** before the set.
-5. Enter load, reps, RIR, and optional mean/per-rep velocity, then save.
+5. Enter load, reps and RIR. When the plan gives the lift a velocity target, optional mean and
+   per-rep velocity are offered; bodyweight work without a target does not ask for them.
 6. Each main lift lists its warm-up ramp, starting with the empty bar (the first rung is capped
    at 20 kg, or the first warm-up when that is lighter). Warm-up rows are optional: skipping them
    and logging the working sets is valid. To record one, use **Start another set** with RIR 6.
@@ -233,9 +234,11 @@ Changing the Home Server and tapping **Save server settings** increments the wat
 version. When the watch has no active session, it updates its Home address without receiving a new
 token.
 
-The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR with
-optional mean velocity, rest, rate form at **End exercise**, and finish with sRPE. Heart rate shows
-during the session and exactly one HealthKit workout is saved. Capture is local-first: without the
+The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR
+(mean velocity only when the plan asks for it), rest — **+15s** extends it, **−15s** shortens it,
+and a local notification fires when it ends if you allowed notifications — rate form at
+**End exercise**, and finish with sRPE and optional productivity. Heart rate shows during the
+session and exactly one HealthKit workout is saved. Capture is local-first: without the
 network the sets queue on the watch and sync when it reconnects.
 
 Requested a workout for the wrong target? The ready card on Today offers **Request another

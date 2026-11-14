@@ -13,7 +13,7 @@ handoff and phone-side Pair/Status/Revoke, and 6.2c read-only Today from the Hom
 6.3–6.5 add the watch execution lifecycle, offline conflicts and heart rate with one HealthKit
 workout. 6.6 adds the phone mirror with plan-revision pushes and take-over, the active Set,
 Session and Plan destinations, refresh/reconnect reconciliation, idle and ended-elsewhere
-messaging, and the mirror form controls. Physical Apple Watch acceptance remains owner-run.
+messaging, and the mirror form controls. Physical Apple Watch acceptance was owner-confirmed 2026-11-14.
 
 A small native SwiftUI client for the owner's local `strength-coach` server. Phase 2 adds the
 online strength workflow: manual readiness, a server-issued prescription, start-by-id, active
@@ -27,9 +27,9 @@ The shared iOS phase contracts and client plan are canonical in the portfolio re
 [client docs index](docs/README.md) lists the client-specific documentation. The Phase 6 watchOS
 companion contract is
 [`IOS-WATCH-CONTRACT.md`](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md);
-Phase 6.2 is complete and closed 2026-11-10 (6.0 shared core, 6.1 server contract, 6.2a watch
-target, 6.2b credential handoff and 6.2c read-only Today). Physical Apple Watch acceptance remains
-owner-run. The client plan is
+Phase 6.0–6.7 are complete: 6.2 closed 2026-11-10 (shared core, server contract, watch target,
+credential handoff and read-only Today), 6.3–6.6 followed, and 6.7 physical acceptance was
+owner-confirmed 2026-11-14. Only the R rollback dry run remains a follow-up. The client plan is
 [the canonical iOS client phase plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md);
 start with [`docs/README.md`](docs/README.md) for the client documentation map.
 
@@ -95,7 +95,8 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   **iPhone** or **Apple Watch** as the execution target. A watch-targeted plan shows a notice on
   the phone and is started on the watch; it never exposes the phone Start button.
 - **Workout** — exercise-first list with an exercise detail screen, prepopulated planned sets,
-  performed-set logging with load/reps/RIR, optional mean velocity, optional per-rep velocity with
+  performed-set logging with load/reps/RIR, optional mean velocity when the plan supplies a
+  velocity target, optional per-rep velocity with
   comma/space-separated input, explicit Start set and set-completion timestamps, performed-set
   add/remove, outside-plan exercise logging through the authenticated catalogue, a working-set
   rest timer using the plan’s `rest_s` with prescribed/actual comparison, observable skip and
@@ -120,8 +121,10 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   Apple Watch Pair/Status/Revoke, device id/label, app version, opt-in HealthKit readiness, Forget
   this device (local token only), re-pair instructions.
 - **Apple Watch** — credential status plus the Home server's watch-targeted work. A watch-targeted
-  plan is started, logged and finished on the watch (sets, form rating, optional mean velocity,
-  heart rate, one HealthKit workout, local-first outbox); phone-targeted plans are hidden. While
+  plan is started, logged and finished on the watch (sets, form rating, mean velocity only when
+  the plan supplies a velocity target, rest with +15s/−15s and a local end-of-rest notification,
+  heart rate, one HealthKit workout, sRPE and optional productivity at finish, local-first
+  outbox); phone-targeted plans are hidden. While
   the watch owns the session the phone shows a **Logged on Apple Watch** banner, keeps set logging
   and form ratings disabled, and remains read-only for capture; plan edits still work and are
   pushed to the watch at its next idle point, never mid-set. **Take over logging** asks for

@@ -1839,6 +1839,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// The weekly review reads through the same paired session; the view owns its load state.
+    func makeWeeklyReviewModel() -> WeeklyReviewViewModel {
+        WeeklyReviewViewModel { [weak self] weekEnd in
+            guard let self, let session = self.session else {
+                throw APIError.unauthorized
+            }
+            return try await self.client.weeklyReview(session: session, weekEnd: weekEnd)
+        }
+    }
+
     // MARK: Durable pending operations
 
     func recoverPendingMutations() async {

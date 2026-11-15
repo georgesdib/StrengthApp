@@ -40,14 +40,14 @@ public struct LastWorkoutSummary: Equatable {
     }
 
     /// A readable label for the stored session type; the raw value is used when it is unknown.
-    static func label(_ sessionType: String?) -> String? {
+    public static func label(_ sessionType: String?) -> String? {
         guard let sessionType, !sessionType.isEmpty else { return nil }
         return sessionType
             .replacingOccurrences(of: "_", with: " ")
             .capitalized
     }
 
-    static func minutesText(_ minutes: Double) -> String {
+    public static func minutesText(_ minutes: Double) -> String {
         let rounded = minutes.rounded()
         if abs(minutes - rounded) < 0.05 {
             return String(Int(rounded)) + " minutes"

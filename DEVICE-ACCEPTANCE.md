@@ -383,6 +383,9 @@ simulator (iOS 27.2). The physical-device Siri checks below are **not yet signed
 - [x] Digest tests: overview numbers, empty-window wording, weekly-review sessions and progression,
       progression fallback name, last-workout sentence.
 - [x] Entity query resolves through the registered provider and filters by identifier.
+- [x] Snippet cards render through `ImageRenderer` for weekly review, overview, progression and last
+      workout (with and without data), and `Metadata.appintents` is embedded in the app bundle.
+- [x] `scripts/check-shortcut-phrases.sh` passes: every phrase carries the app-name token.
 
 ## Physical device (owner to confirm)
 
@@ -395,6 +398,7 @@ simulator (iOS 27.2). The physical-device Siri checks below are **not yet signed
 - [ ] "How is <exercise> progressing in StrengthApp" asks for the exercise when it is missing and
       answers with direction, change and session count when it is supplied.
 - [ ] Shortcuts lists the four actions with their phrases.
+- [ ] Siri shows the snippet card as well as speaking the dialog (weekly review and overview).
 - [ ] Unpaired or offline: the dialog says to pair or that the request failed; no crash, no hang.
 - [ ] No intent starts a workout or writes to the server (read-only).
 

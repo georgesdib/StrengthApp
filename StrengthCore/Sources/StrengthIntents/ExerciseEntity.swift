@@ -23,7 +23,9 @@ public struct ExerciseEntity: AppEntity, Identifiable, Hashable {
 
 /// Exercises are the only entity indexed for Spotlight: they carry a name and an id, not training
 /// data. Completed sessions stay inside the app (plan §7.6, decision 14).
+#if os(iOS)
 extension ExerciseEntity: IndexedEntity {}
+#endif
 
 /// Resolves exercises from the server catalogue through the registered provider.
 public struct ExerciseEntityQuery: EntityQuery {

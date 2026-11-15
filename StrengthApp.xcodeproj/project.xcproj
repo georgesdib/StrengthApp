@@ -195,6 +195,7 @@
       "product-type": "application",
       "dependencies": [
         { "kind": "package", "package": "StrengthCore", "product-name": "StrengthCore" },
+        { "kind": "package", "package": "StrengthCore", "product-name": "StrengthIntents" },
       ],
       "build-phases": [
         "compile-sources",
@@ -205,6 +206,11 @@
         {
           "package": "StrengthCore",
           "product-name": "StrengthCore",
+          "build-phase": { "build-phase": "frameworks" },
+        },
+        {
+          "package": "StrengthCore",
+          "product-name": "StrengthIntents",
           "build-phase": { "build-phase": "frameworks" },
         },
       ],

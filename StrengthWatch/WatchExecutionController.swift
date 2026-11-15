@@ -255,6 +255,8 @@ final class WatchExecutionController: ObservableObject {
             await endLiveness()
         } else if let sessionID = engine.sessionRecord?.sessionUUID {
             await WatchSceneAutomation.run(event: "started", sessionID: sessionID)
+            // The Action button's next press should bring the session forward for sRPE.
+            try? await ActionButtonOpenFinishIntent().donate()
         }
         sync()
     }

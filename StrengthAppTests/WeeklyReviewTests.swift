@@ -75,6 +75,18 @@ final class WeeklyReviewTests: XCTestCase {
         XCTAssertNil(WeeklyReviewDates.shift("not-a-date", byDays: -7))
     }
 
+    func testWeekLabelIsNatural() {
+        XCTAssertEqual(
+            WeeklyReviewDates.weekLabel(start: "2026-11-02", end: "2026-11-08"),
+            "2–8 November 2026"
+        )
+        XCTAssertEqual(
+            WeeklyReviewDates.weekLabel(start: "2026-09-28", end: "2026-10-04"),
+            "28 September – 4 October 2026"
+        )
+        XCTAssertNil(WeeklyReviewDates.weekLabel(start: "bad", end: "2026-10-04"))
+    }
+
     @MainActor
     func testViewModelLoadsAndStepsBack() async throws {
         let envelope = try decode(fixture)

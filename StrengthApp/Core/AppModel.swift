@@ -1888,7 +1888,8 @@ final class AppModel: ObservableObject {
                     facts: ChatToolbox(client: client, session: session),
                     includePlan: chatPlanEnabled
                 ),
-                modelLabel: "DeepSeek"
+                modelLabel: "DeepSeek",
+                planEnabled: chatPlanEnabled
             )
         }
         return TrainingChatModel(
@@ -1896,7 +1897,8 @@ final class AppModel: ObservableObject {
                 facts: ChatToolbox(client: client, session: session),
                 includePlan: chatPlanEnabled
             ),
-            modelLabel: "On-device"
+            modelLabel: "On-device",
+            planEnabled: chatPlanEnabled
         )
     }
 

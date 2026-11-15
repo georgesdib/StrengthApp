@@ -302,6 +302,13 @@ extension IntelligenceNarrativeTests {
         XCTAssertNil(PlanQuery.isoDate(from: "", now: now, calendar: calendar))
     }
 
+    func testPlanIntentRequiresATool() {
+        XCTAssertTrue(ChatIntent.requiresPlan("what was prescribed yesterday"))
+        XCTAssertTrue(ChatIntent.requiresPlan("how is my adherence"))
+        XCTAssertTrue(ChatIntent.requiresPlan("what does my programme look like"))
+        XCTAssertFalse(ChatIntent.requiresPlan("how has my squat progressed"))
+    }
+
     func testPlanToolsAreOnlyAddedWhenEnabled() throws {
         let base = IntelligenceTools.make(provider: StubProvider())
         let withPlan = IntelligenceTools.make(provider: StubProvider(), includePlan: true)

@@ -17,10 +17,16 @@ final class TrainingChatModel: ObservableObject {
 
     private let generator: any TrainingChatGenerating
     let modelLabel: String
+    let planEnabled: Bool
 
-    init(generator: any TrainingChatGenerating, modelLabel: String = "On-device") {
+    init(
+        generator: any TrainingChatGenerating,
+        modelLabel: String = "On-device",
+        planEnabled: Bool = false
+    ) {
         self.generator = generator
         self.modelLabel = modelLabel
+        self.planEnabled = planEnabled
     }
 
     var availability: NarrativeAvailability { generator.availability() }

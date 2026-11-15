@@ -10,7 +10,7 @@ struct TrainingChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Model: \(chat.modelLabel)")
+            Text("Model: \(chat.modelLabel) · Plan data: \(chat.planEnabled ? "on" : "off")")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(.top, 6)

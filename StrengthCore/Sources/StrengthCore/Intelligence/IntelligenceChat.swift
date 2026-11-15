@@ -88,6 +88,14 @@ public protocol TrainingChatGenerating {
     func reply(to question: String, history: [ChatMessage]) async throws -> ChatReply
 }
 
+public enum ChatIntent {
+    public static func requiresPlan(_ question: String) -> Bool {
+        let text = question.lowercased()
+        return ["prescription", "prescribed", "programme", "program ", "adherence", " plan"]
+            .contains { text.contains($0) }
+    }
+}
+
 public enum ChatPrompt {
     /// Numbers used as a time window ("last 3 months") are not data claims. They only ground when
     /// the answer also uses them as a time window, so "3 sessions" cannot borrow "3 months".
@@ -218,7 +226,12 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                 instructions: instructions
             )
             do {
-                let response = try await session.respond(to: prompt, generating: ChatAnswer.self)
+                let options = includePlan && ChatIntent.requiresPlan(question)
+                    ? GenerationOptions(toolCallingMode: .required)
+                    : GenerationOptions()
+                let response = try await session.respond(
+                    to: prompt, generating: ChatAnswer.self, options: options
+                )
                 let content = response.content
                 let text = content.answer
                 let suggestions = Array(content.suggestions.prefix(3)).map {
@@ -268,7 +281,8 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         + "suggestions field, never in the answer: they are proposals, not facts, and they are never "
         + "applied. If the tools cannot answer, say so plainly. If a tool says it could not find "
         + "something, ask the athlete to clarify; never repeat a raw tool error. Convert today and "
-        + "yesterday to a YYYY-MM-DD date before calling a plan tool. Keep the answer under 150 words."
+        + "yesterday to a YYYY-MM-DD date before calling a plan tool. When asked for a prescription, list "
+        + "every item, not just the first. Keep the answer under 150 words."
     }
 
     private func isContextOverflow(_ error: Error) -> Bool {

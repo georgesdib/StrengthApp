@@ -65,8 +65,8 @@ final class IntelligenceNarrativeTests: XCTestCase {
     func testValidatorRejectsInventedNumbers() throws {
         let context = NarrativeContext.weeklyReview(try envelope(), detail: .standard)
         let narrative = GeneratedNarrative(
-            headline: "Five of three sessions",
-            observations: ["Five sessions completed."],
+            headline: "9 of three sessions",
+            observations: ["9 sessions completed."],
             limitation: "Attendance is target-based."
         )
         XCTAssertThrowsError(try NarrativeValidator.validate(narrative, context: context)) { error in
@@ -74,6 +74,16 @@ final class IntelligenceNarrativeTests: XCTestCase {
                 return XCTFail("expected notGrounded, got \(error)")
             }
         }
+    }
+
+    func testNumberWordsAreProseNotDataClaims() throws {
+        let context = NarrativeContext.weeklyReview(try envelope(), detail: .standard)
+        let narrative = GeneratedNarrative(
+            headline: "Five sessions this week",
+            observations: ["Five sessions were completed."],
+            limitation: "Attendance is target-based."
+        )
+        XCTAssertNoThrow(try NarrativeValidator.validate(narrative, context: context))
     }
 
     func testValidatorRejectsOverlongOutput() throws {

@@ -46,14 +46,27 @@ final class TrainingChatTests: XCTestCase {
 
     func testFailureIsShownAndSessionCanBeReset() async {
         let model = TrainingChatModel(
-            generator: StubChatGenerator(error: .notGrounded("999"))
+            generator: StubChatGenerator(error: .failed("No answer"))
         )
         await model.send("What changed?")
         XCTAssertEqual(model.messages.count, 1)
-        XCTAssertTrue(model.errorMessage?.contains("999") ?? false)
+        XCTAssertTrue(model.errorMessage?.contains("No answer") ?? false)
         model.reset()
         XCTAssertTrue(model.messages.isEmpty)
         XCTAssertNil(model.errorMessage)
+    }
+
+    func testUnverifiedNumbersAreCarriedToTheMessage() async {
+        let model = TrainingChatModel(
+            generator: StubChatGenerator(
+                reply: ChatReply(
+                    text: "Five sessions and 9 sets.", sources: ["weekly review"],
+                    unverifiedNumbers: ["9"]
+                )
+            )
+        )
+        await model.send("What changed?")
+        XCTAssertEqual(model.messages.last?.unverifiedNumbers, ["9"])
     }
 
     func testPromptKeepsOnlyTheRecentTurns() {

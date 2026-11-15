@@ -9,21 +9,31 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     public let role: Role
     public let text: String
     public let sources: [String]
+    public let unverifiedNumbers: [String]
 
-    public init(id: UUID = UUID(), role: Role, text: String, sources: [String] = []) {
+    public init(
+        id: UUID = UUID(),
+        role: Role,
+        text: String,
+        sources: [String] = [],
+        unverifiedNumbers: [String] = []
+    ) {
         self.id = id
         self.role = role
         self.text = text
         self.sources = sources
+        self.unverifiedNumbers = unverifiedNumbers
     }
 }
 
 public struct ChatReply: Sendable {
     public let text: String
     public let sources: [String]
-    public init(text: String, sources: [String]) {
+    public let unverifiedNumbers: [String]
+    public init(text: String, sources: [String], unverifiedNumbers: [String] = []) {
         self.text = text
         self.sources = sources
+        self.unverifiedNumbers = unverifiedNumbers
     }
 }
 
@@ -35,15 +45,12 @@ public protocol ChatFactsProviding: IntelligenceCapabilityProviding {
 
 public enum ChatError: LocalizedError {
     case unavailable(String)
-    case notGrounded(String)
     case tooLong
     case failed(String)
 
     public var errorDescription: String? {
         switch self {
         case .unavailable(let reason): return reason
-        case .notGrounded(let number):
-            return "I could not ground that answer in your data (number: \(number)). Try asking about this week instead."
         case .tooLong: return "The answer was too long. Try a narrower question."
         case .failed(let message): return message
         }
@@ -88,13 +95,21 @@ public enum ChatPrompt {
         data.union(questionTime.intersection(timeNumbers(in: answer)))
     }
 
-    public static func build(question: String, history: [ChatMessage], maxCharacters: Int = 2_400) -> String {
+    public static func build(
+        question: String,
+        history: [ChatMessage],
+        correction: String? = nil,
+        maxCharacters: Int = 2_400
+    ) -> String {
         var lines: [String] = []
         for message in history.suffix(6) {
             let prefix = message.role == .user ? "Athlete" : "Assistant"
             lines.append("\(prefix): \(String(message.text.prefix(400)))")
         }
         lines.append("Question: \(question)")
+        if let correction {
+            lines.append("Correction: \(correction)")
+        }
         let text = lines.joined(separator: "\n")
         return String(text.suffix(maxCharacters))
     }
@@ -128,7 +143,40 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         guard availability().isAvailable else {
             throw ChatError.unavailable(availability().reasonText)
         }
-        let prompt = ChatPrompt.build(question: question, history: history)
+        var correction: String?
+        for attempt in 0..<2 {
+            let result = try await generate(
+                question: question, history: history, correction: correction
+            )
+            switch result {
+            case .grounded(let reply):
+                return reply
+            case .soft(let reply):
+                if attempt == 0 {
+                    correction = "Your previous answer used numbers that are not in the facts: "
+                        + "\(reply.unverifiedNumbers.joined(separator: ", ")). Rewrite the answer "
+                        + "using only numbers from the tool results, or say you cannot verify them."
+                    continue
+                }
+                return reply
+            }
+        }
+        throw ChatError.failed("The answer could not be generated.")
+    }
+
+    private enum Attempt {
+        case grounded(ChatReply)
+        case soft(ChatReply)
+    }
+
+    private func generate(
+        question: String,
+        history: [ChatMessage],
+        correction: String?
+    ) async throws -> Attempt {
+        let prompt = ChatPrompt.build(
+            question: question, history: history, correction: correction
+        )
         for toolLimit in [5, 3] {
             facts.resetRecord()
             let failureLog = ToolFailureLog()
@@ -154,20 +202,22 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                    failures.contains(where: { $0 == .unavailable || $0 == .server }) {
                     throw ChatError.failed("Your training data is temporarily unavailable. Try again.")
                 }
+                guard text.count <= 2_500 else { throw ChatError.tooLong }
                 let questionTime = ChatPrompt.timeNumbers(question: question, history: history)
-                let answerTime = ChatPrompt.timeNumbers(in: text)
                 let allowed = ChatPrompt.allowedNumbers(
                     data: NarrativeContext.allowedNumbers(in: envelopes),
                     questionTime: questionTime,
                     answer: text
                 )
-                if let ungrounded = NarrativeValidator.numbers(in: text).first(where: {
+                let ungrounded = NarrativeValidator.numbers(in: text).filter {
                     !NarrativeValidator.isGrounded($0, allowedNumbers: allowed)
-                }) {
-                    throw ChatError.notGrounded(ungrounded)
                 }
-                guard text.count <= 2_500 else { throw ChatError.tooLong }
-                return ChatReply(text: text, sources: facts.recordedSources)
+                let reply = ChatReply(
+                    text: text,
+                    sources: facts.recordedSources,
+                    unverifiedNumbers: ungrounded
+                )
+                return ungrounded.isEmpty ? .grounded(reply) : .soft(reply)
             } catch let error as ChatError {
                 throw error
             } catch {

@@ -157,11 +157,6 @@ public enum NarrativeValidator {
         }
     }
 
-    private static let numberWords: [String: String] = [
-        "two": "2", "three": "3", "four": "4", "five": "5",
-        "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
-    ]
-
     public static func validate(text: String, allowedNumbers: Set<String>, maxLength: Int = 2_000) throws {
         guard text.count <= maxLength else { throw NarrativeError.tooLong }
         if let ungrounded = numbers(in: text).first(where: {
@@ -174,7 +169,6 @@ public enum NarrativeValidator {
     public static func numbers(in text: String) -> [String] {
         // Do not read the digit inside e1RM, 1RM, RIR2 or sRPE2 as a claim.
         let pattern = "(?<![A-Za-z0-9_])[+\\-−–]?\\d+(?:[.,]\\d+)?(?![A-Za-z0-9_])"
-            + "|\\b(?:two|three|four|five|six|seven|eight|nine|ten)\\b"
         let regex = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.matches(in: text, range: range).compactMap { match in
@@ -212,11 +206,7 @@ public enum NarrativeValidator {
     }
 
     public static func isGrounded(_ number: String, allowedNumbers: Set<String>) -> Bool {
-        if variants(of: number).contains(where: allowedNumbers.contains) { return true }
-        if let digit = numberWords[number.lowercased()] {
-            return allowedNumbers.contains(digit)
-        }
-        return false
+        variants(of: number).contains(where: allowedNumbers.contains)
     }
 }
 

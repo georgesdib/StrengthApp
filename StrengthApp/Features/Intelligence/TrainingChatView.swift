@@ -83,6 +83,14 @@ struct TrainingChatView: View {
                     message.role == .user ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.12),
                     in: RoundedRectangle(cornerRadius: 12)
                 )
+            if !message.unverifiedNumbers.isEmpty {
+                Label(
+                    "Unverified numbers: \(message.unverifiedNumbers.joined(separator: ", "))",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption2)
+                .foregroundStyle(.orange)
+            }
             if !message.sources.isEmpty {
                 Text("Based on: \(message.sources.joined(separator: ", "))")
                     .font(.caption2)

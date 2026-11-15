@@ -35,7 +35,12 @@ final class TrainingChatModel: ObservableObject {
         do {
             let reply = try await generator.reply(to: question, history: history)
             messages.append(
-                ChatMessage(role: .assistant, text: reply.text, sources: reply.sources)
+                ChatMessage(
+                    role: .assistant,
+                    text: reply.text,
+                    sources: reply.sources,
+                    unverifiedNumbers: reply.unverifiedNumbers
+                )
             )
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription

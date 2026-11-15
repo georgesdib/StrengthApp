@@ -26,9 +26,11 @@ app presents and records that authority.
 - [iOS R8 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-R8-CONTRACT.md)
 - [watchOS Phase 6 contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-WATCH-CONTRACT.md)
 - [Training Intelligence plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/TRAINING-INTELLIGENCE.md)
-  — proposed cross-repository plan for the read-only intelligence capability layer, the standalone
-  MCP server and the on-device Foundation Models adapters. **Not implemented**; INT-1 requires owner
-  approval. Apple Intelligence, PCC and Siri remain deferred per the client plan.
+  — the delivered cross-repository plan for the read-only intelligence capability layer, the standalone
+  MCP server and the native Apple adapters. Delivered 2026-11-15: read-only Siri/Shortcuts intents,
+  workout automation (Shortcuts and HomeKit scenes), the Action button, watch Siri and the Shortcuts
+  start/finish pair. INT-9 (the Siri AI Developer Preview adoption pass) is deferred until iOS 27.3 and
+  PCC (INT-4c) is parked on Apple's entitlement.
 - [Training Intelligence contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/TRAINING-INTELLIGENCE-CONTRACT.md)
   — response envelope, MCP tool/resource catalogue and the native iOS adapter rules (five-tool cap,
   no Swift calculation).

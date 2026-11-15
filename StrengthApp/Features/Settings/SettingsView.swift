@@ -296,9 +296,11 @@ struct SettingsView: View {
                 .task { await loadScenes() }
                 .onChange(of: startSceneID) { _, newValue in
                     WorkoutAutomation.shared.startScene = scenes.first { $0.sceneID == newValue }
+                    model.syncSceneMappingToWatch()
                 }
                 .onChange(of: endSceneID) { _, newValue in
                     WorkoutAutomation.shared.endScene = scenes.first { $0.sceneID == newValue }
+                    model.syncSceneMappingToWatch()
                 }
 
                 WatchSettingsSection(model: model)

@@ -30,6 +30,26 @@ final class WatchCredentialTests: XCTestCase {
         XCTAssertEqual(try decoded.validated(), original)
     }
 
+    func testContextCarriesTheSceneMapping() throws {
+        let scene = SceneSelection(homeID: "h1", sceneID: "s1", label: "Home — Gym")
+        let value = WatchCredentialContext(
+            epoch: 2,
+            configVersion: 3,
+            homeBaseURL: "http://home.local:8000",
+            deviceID: "watch-1",
+            token: "watch-token",
+            issuedAt: "2026-11-15T20:00:00Z",
+            status: .ready,
+            startScene: scene.jsonString,
+            endScene: nil
+        )
+
+        let decoded = try WatchCredentialContext(dictionary: value.dictionary)
+
+        XCTAssertEqual(SceneSelection.decode(decoded.startScene), scene)
+        XCTAssertNil(decoded.endScene)
+    }
+
     func testContextRejectsUnsupportedSchemaAndInvalidFields() {
         XCTAssertThrowsError(try WatchCredentialContext(
             schema: 2, epoch: 1, configVersion: 1,

@@ -87,6 +87,7 @@ final class WatchSessionController: NSObject, ObservableObject {
         deferredContext = nil
         do {
             _ = try store.apply(credential)
+            WatchSceneAutomation.store(start: credential.startScene, end: credential.endScene)
             lastError = nil
             refreshState()
         } catch {

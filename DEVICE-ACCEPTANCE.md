@@ -450,11 +450,10 @@ Owner confirmation: pass 2026-11-15 · Build: INT-7b-1 · Device: physical iPhon
 
 ---
 
-# INT-7b-2 HomeKit scenes acceptance — phone slice delivered, watch slice pending
+# INT-7b-2 HomeKit scenes acceptance — implemented (phone and watch), device checks pending
 
-**Status 2026-11-15:** the phone executes a chosen scene on start and end, after the entitlement and
-usage string were added. The watch half (choice synced from the phone, executed on the watch) is **not
-implemented yet**.
+**Status 2026-11-15:** the phone chooses and executes scenes on start and end; the mapping travels to
+the watch in the credential context, and the watch executes the same scenes when it owns the session.
 
 ## Automated
 
@@ -472,10 +471,11 @@ implemented yet**.
 - [ ] A scene deleted after selection is skipped; the workout still starts and finishes.
 - [ ] Denying Home access leaves both pickers empty and never blocks a workout.
 
-## Known gap
+## Watch (owner to confirm once the watch build is installed)
 
-- [ ] The watch does not run scenes yet. The phone selection is not yet sent over WatchConnectivity,
-      and the watch executor is not wired into `WatchExecutionController`. Recorded in the plan as the
-      remaining half of 7b-2.
+- [ ] After choosing scenes on the phone, the watch receives the mapping with its next credential
+      context (pairing, config refresh, or a scene change).
+- [ ] Starting a workout on the watch runs the start scene; finishing or discarding runs the end scene.
+- [ ] The same session never runs a scene twice, and a missing home or scene is skipped silently.
 
-Owner confirmation: pending · Build: INT-7b-2 (phone) · Device: physical iPhone · iOS: 27.2
+Owner confirmation: pending · Build: INT-7b-2 (phone and watch) · Device: physical iPhone + Watch · iOS 27.2 / watchOS 27.2

@@ -1565,6 +1565,7 @@ final class AppModel: ObservableObject {
             if let cached = exerciseCatalogueCache.load(serverURL: server) {
                 exerciseCatalogue = cached.exercises
                 exerciseCatalogueCachedAt = cached.fetchedAt
+                await ExerciseSpotlightIndexer.index(cached.exercises)
             }
             exerciseCatalogueLoadedServerURL = server
         }
@@ -1578,6 +1579,7 @@ final class AppModel: ObservableObject {
             exerciseCatalogueCachedAt = nil
             exerciseCatalogueLoadedServerURL = server
             try? exerciseCatalogueCache.save(serverURL: server, exercises: exercises)
+            await ExerciseSpotlightIndexer.index(exercises)
         } catch {
             if exerciseCatalogue.isEmpty {
                 exerciseCatalogueError = message(for: error)

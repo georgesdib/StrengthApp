@@ -3,16 +3,26 @@ import Foundation
 import StrengthCore
 import StrengthIntents
 import SwiftUI
+import os
 
 /// Shared entry point for the read-only intents: one provider lookup, one error mapping.
 @MainActor
 enum IntentCall {
-    static func run<T>(_ body: () async throws -> T) async throws -> T {
+    private static let logger = Logger(
+        subsystem: "com.georgesdibpersonalteam.StrengthApp",
+        category: "intents"
+    )
+
+    static func run<T>(_ label: String = #function, _ body: () async throws -> T) async throws -> T {
         do {
-            return try await body()
+            let value = try await body()
+            logger.debug("intent \(label, privacy: .public) ok")
+            return value
         } catch let error as IntentServiceError {
+            logger.error("intent \(label, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             throw error
         } catch {
+            logger.error("intent \(label, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
             throw IntentServiceError.requestFailed(error.localizedDescription)
         }
     }

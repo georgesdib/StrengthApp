@@ -3,6 +3,7 @@ import Foundation
 import UIKit
 import UserNotifications
 import StrengthCore
+import StrengthIntents
 
 extension Notification.Name {
     static let restNotificationDone = Notification.Name("restNotificationDone")
@@ -137,6 +138,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         center.delegate = self
         Task { @MainActor in
             RestNotificationManager.shared.registerCategory()
+            // Belt and braces: an intent can run before SwiftUI's App.init on a background launch.
+            IntentServices.register(LiveIntentDataProvider())
         }
         return true
     }

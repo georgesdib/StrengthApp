@@ -6,6 +6,9 @@ struct SettingsView: View {
     @State private var confirmingForget = false
     @State private var isSavingServerSettings = false
     @State private var serverSaveMessage: String?
+    @State private var deepSeekKeyInput = ""
+    @State private var deepSeekStatus: String?
+    @State private var isTestingDeepSeek = false
 
     private func availabilityText(_ availability: NarrativeAvailability) -> String {
         switch availability {
@@ -120,10 +123,64 @@ struct SettingsView: View {
                 Section("Chat") {
                     Toggle("Chat with your training", isOn: $model.chatEnabled)
                     if model.chatEnabled {
-                        let availability = FoundationNarrativeGenerator().availability()
-                        Text(availabilityText(availability))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        Picker("Chat model", selection: $model.chatModelChoice) {
+                            ForEach(ChatModelChoice.allCases) { choice in
+                                Text(choice.title).tag(choice)
+                            }
+                        }
+                        .accessibilityIdentifier("chat-model-picker")
+
+                        if model.chatModelChoice == .deepSeek {
+                            SecureField("DeepSeek API key", text: $deepSeekKeyInput)
+                                .textContentType(.password)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .accessibilityIdentifier("deepseek-key-field")
+                            HStack {
+                                Button("Save key") {
+                                    deepSeekStatus = model.saveDeepSeekKey(deepSeekKeyInput)
+                                    if model.deepSeekKeyPresent { deepSeekKeyInput = "" }
+                                }
+                                .accessibilityIdentifier("deepseek-save-key")
+                                Button("Test key") {
+                                    Task {
+                                        isTestingDeepSeek = true
+                                        deepSeekStatus = await model.testDeepSeekKey(deepSeekKeyInput)
+                                        isTestingDeepSeek = false
+                                    }
+                                }
+                                .disabled(isTestingDeepSeek)
+                                .accessibilityIdentifier("deepseek-test-key")
+                                if model.deepSeekKeyPresent {
+                                    Button("Remove", role: .destructive) {
+                                        deepSeekStatus = model.removeDeepSeekKey()
+                                    }
+                                }
+                            }
+                            if isTestingDeepSeek {
+                                ProgressView()
+                            }
+                            if model.deepSeekKeyPresent {
+                                Text("A key is saved in this iPhone's Keychain.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let deepSeekStatus {
+                                Text(deepSeekStatus)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("Only Chat uses this model. Weekly and overview explanations stay on-device. "
+                                 + "DeepSeek receives your question and training facts; the key never leaves "
+                                 + "the Keychain.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            let availability = FoundationNarrativeGenerator().availability()
+                            Text(availabilityText(availability))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Text("On-device conversation over your own data. Nothing is sent to a server "
                          + "and the conversation is not saved.")

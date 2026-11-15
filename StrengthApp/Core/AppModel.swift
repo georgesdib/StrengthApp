@@ -67,6 +67,15 @@ final class AppModel: ObservableObject {
     ) {
         didSet { UserDefaults.standard.set(chatEnabled, forKey: "intelligence.chat.enabled") }
     }
+    @Published var chatModelChoice: ChatModelChoice = ChatModelChoice(
+        rawValue: UserDefaults.standard.string(forKey: "intelligence.chat.model") ?? ""
+    ) ?? .onDevice {
+        didSet {
+            UserDefaults.standard.set(chatModelChoice.rawValue, forKey: "intelligence.chat.model")
+        }
+    }
+    @Published private(set) var deepSeekKeyPresent = false
+    private let deepSeekKeyStore: any DeepSeekKeyStoring = KeychainDeepSeekKeyStore()
     @Published var narrativeDetail: NarrativeDetail = NarrativeDetail(
         rawValue: UserDefaults.standard.string(forKey: "intelligence.narrative.detail") ?? ""
     ) ?? .standard {
@@ -196,6 +205,7 @@ final class AppModel: ObservableObject {
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
         self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
+        self.deepSeekKeyPresent = ((try? self.deepSeekKeyStore.load()) ?? nil)?.isEmpty == false
         self.healthKitEnabled = enabled
         self.healthKitState = enabled
             ? (readiness.isAvailable ? .enabled : .unavailable)
@@ -1860,13 +1870,62 @@ final class AppModel: ObservableObject {
 
     func makeChatModel() -> TrainingChatModel {
         guard let session else {
-            return TrainingChatModel(generator: UnavailableChatGenerator())
+            return TrainingChatModel(
+                generator: UnavailableChatGenerator(), modelLabel: "Unavailable"
+            )
+        }
+        if chatModelChoice == .deepSeek {
+            let key = (try? deepSeekKeyStore.load()) ?? nil
+            return TrainingChatModel(
+                generator: DeepSeekChatGenerator(
+                    api: DeepSeekClient(apiKey: key),
+                    keyPresent: key?.isEmpty == false,
+                    facts: ChatToolbox(client: client, session: session)
+                ),
+                modelLabel: "DeepSeek"
+            )
         }
         return TrainingChatModel(
             generator: FoundationChatGenerator(
                 facts: ChatToolbox(client: client, session: session)
-            )
+            ),
+            modelLabel: "On-device"
         )
+    }
+
+    func saveDeepSeekKey(_ key: String) -> String {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Enter an API key first." }
+        do {
+            try deepSeekKeyStore.save(trimmed)
+            deepSeekKeyPresent = true
+            return "Key saved in this iPhone's Keychain."
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? "The key could not be saved."
+        }
+    }
+
+    func removeDeepSeekKey() -> String {
+        do {
+            try deepSeekKeyStore.delete()
+            deepSeekKeyPresent = false
+            return "Key removed."
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? "The key could not be removed."
+        }
+    }
+
+    func testDeepSeekKey(_ key: String) async -> String {
+        let stored = (try? deepSeekKeyStore.load()) ?? nil
+        let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selected = candidate.isEmpty ? stored : candidate
+        guard let selected, !selected.isEmpty else { return "Enter an API key first." }
+        do {
+            try await DeepSeekClient(apiKey: selected).validateKey()
+            return "Key works."
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? "The key could not be checked."
+        }
     }
 
     func loadOverviewEnvelope() async throws -> IntelligenceEnvelope {

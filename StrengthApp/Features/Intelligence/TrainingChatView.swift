@@ -10,6 +10,10 @@ struct TrainingChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Text("Model: \(chat.modelLabel)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 6)
             if !chat.availability.isAvailable {
                 ContentUnavailableView(
                     "Chat unavailable",

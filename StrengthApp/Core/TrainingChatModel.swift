@@ -16,9 +16,11 @@ final class TrainingChatModel: ObservableObject {
     @Published private(set) var errorMessage: String?
 
     private let generator: any TrainingChatGenerating
+    let modelLabel: String
 
-    init(generator: any TrainingChatGenerating) {
+    init(generator: any TrainingChatGenerating, modelLabel: String = "On-device") {
         self.generator = generator
+        self.modelLabel = modelLabel
     }
 
     var availability: NarrativeAvailability { generator.availability() }

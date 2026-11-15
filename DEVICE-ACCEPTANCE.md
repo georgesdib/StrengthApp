@@ -369,3 +369,33 @@ Owner confirmation: pass 2026-11-08 · Build: Phase 3A · Device: physical iPhon
 - [x] Confirm no background sync runs.
 
 Owner confirmation: pass 2026-11-08 · Build: Phase 4 · Device: physical iPhone · iOS: 27.2
+
+---
+
+# INT-7 Siri and App Intents acceptance — simulator verified, device pending
+
+**Status 2026-11-15:** the build compiles and the digest/registry unit tests pass on the iPhone 17
+simulator (iOS 27.2). The physical-device Siri checks below are **not yet signed off**.
+
+## Automated
+
+- [x] `StrengthIntents` package product builds and its metadata merges into `StrengthApp.app`.
+- [x] Digest tests: overview numbers, empty-window wording, weekly-review sessions and progression,
+      progression fallback name, last-workout sentence.
+- [x] Entity query resolves through the registered provider and filters by identifier.
+
+## Physical device (owner to confirm)
+
+- [ ] The build installs and launches on the physical iPhone (iOS 27.2).
+- [ ] "How long was my last workout in StrengthApp" answers with the newest history row: date,
+      duration and working sets.
+- [ ] "How is my training going in StrengthApp" answers with sessions completed versus target,
+      mean session duration and readiness coverage.
+- [ ] "Weekly review in StrengthApp" answers for the last completed week.
+- [ ] "How is <exercise> progressing in StrengthApp" asks for the exercise when it is missing and
+      answers with direction, change and session count when it is supplied.
+- [ ] Shortcuts lists the four actions with their phrases.
+- [ ] Unpaired or offline: the dialog says to pair or that the request failed; no crash, no hang.
+- [ ] No intent starts a workout or writes to the server (read-only).
+
+Owner confirmation: pending · Build: INT-7 · Device: physical iPhone · iOS: 27.2

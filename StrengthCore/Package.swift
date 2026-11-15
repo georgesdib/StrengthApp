@@ -9,9 +9,11 @@ let package = Package(
     ],
     products: [
         .library(name: "StrengthCore", targets: ["StrengthCore"]),
+        .library(name: "StrengthIntents", targets: ["StrengthIntents"]),
     ],
     targets: [
         .target(name: "StrengthCore"),
+        .target(name: "StrengthIntents", dependencies: ["StrengthCore"]),
     ],
     swiftLanguageModes: [.v5]
 )

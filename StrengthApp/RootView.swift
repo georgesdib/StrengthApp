@@ -6,9 +6,9 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        _model = StateObject(wrappedValue: AppModel(
-            watchConnectivity: LiveWatchConnectivitySession()
-        ))
+        let model = AppModel(watchConnectivity: LiveWatchConnectivitySession())
+        PhoneIntentBridge.model = model
+        _model = StateObject(wrappedValue: model)
     }
 
     var body: some View {

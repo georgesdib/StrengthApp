@@ -508,3 +508,29 @@ donated finish intent. The physical checks below are not yet signed off.
 - [ ] With the watch unpaired, those phrases answer with the pairing message instead of hanging.
 
 Owner confirmation: pending · Build: INT-7b-3 · Device: Apple Watch · watchOS 27.2
+
+---
+
+# INT-7c Shortcuts start and finish acceptance — implemented, device checks pending
+
+**Status 2026-11-15:** the Shortcuts app can start a workout and open the finish screen on both the
+phone and the watch. Ending never finishes by itself — it opens the screen where sRPE is recorded,
+matching the Action button's behaviour.
+
+## Automated
+
+- [x] The phone and watch schemes build; the iOS suite passes through `scripts/ci.sh`.
+- [x] The phone start intent refuses to invent a plan: no issued prescription means a message, not a
+      workout.
+
+## Physical device (owner to confirm)
+
+- [ ] With no requested workout, "Start Workout" says to request one and opens the app; nothing starts.
+- [ ] With a requested workout, "Start Workout" starts it and lands on the active workout.
+- [ ] "Finish Workout" on the phone opens the running workout; sRPE is entered and Finish is pressed by
+      hand.
+- [ ] "Finish Workout" on the watch opens the finish screen; the same applies after the Action button's
+      second press.
+- [ ] Both intents work from the Shortcuts app and from Siri's intents list.
+
+Owner confirmation: pending · Build: INT-7c · Device: iPhone + Watch · iOS 27.2 / watchOS 27.2

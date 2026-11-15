@@ -16,6 +16,12 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var selectedItem: PrescriptionItem?
     /// True only once the server acknowledged the finish; an empty queue is not proof.
     @Published private(set) var finishAcknowledged = false
+    /// A shortcut or the Action button asked for the finish screen. The execution view observes it.
+    @Published private(set) var openFinishRequest = 0
+
+    func requestOpenFinish() {
+        openFinishRequest += 1
+    }
     /// The rest end the pending notification was scheduled for, so sync() only re-schedules
     /// when the interval actually changes.
     private var scheduledRestEnd: Date?

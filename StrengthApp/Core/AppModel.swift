@@ -1885,6 +1885,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A shortcut or Action button asked to see the running workout. The Today screen observes this
+    /// and pushes the active workout, which is where finish and sRPE live.
+    @Published private(set) var openActiveWorkoutRequest = 0
+
+    func requestOpenActiveWorkout() {
+        openActiveWorkoutRequest += 1
+    }
+
     /// Pushes a changed scene choice to the watch. Best-effort; pairing errors are already surfaced
     /// by the watch section.
     func syncSceneMappingToWatch() {

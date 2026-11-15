@@ -167,21 +167,25 @@ public enum IntelligenceTools {
     public static func make(
         provider: any IntelligenceCapabilityProviding,
         failureLog: ToolFailureLog? = nil,
-        includePlan: Bool = false
+        includePlan: Bool = false,
+        includeBase: Bool = true,
+        planNames: Set<String>? = nil
     ) -> [any Tool] {
-        var tools: [any Tool] = [
+        var tools: [any Tool] = includeBase ? [
             TrainingOverviewTool(provider: provider, failureLog: failureLog),
             ExerciseProgressionTool(provider: provider, failureLog: failureLog),
             WeeklyReviewTool(provider: provider, failureLog: failureLog),
             SessionDetailsTool(provider: provider, failureLog: failureLog),
             ReadinessStatusTool(provider: provider, failureLog: failureLog),
-        ]
+        ] : []
         if includePlan {
-            tools += [
-                PrescriptionTool(provider: provider, failureLog: failureLog),
-                ProgrammeSummaryTool(provider: provider, failureLog: failureLog),
-                AdherenceTool(provider: provider, failureLog: failureLog),
+            let planTools: [(String, any Tool)] = [
+                ("prescription", PrescriptionTool(provider: provider, failureLog: failureLog)),
+                ("programme_summary", ProgrammeSummaryTool(provider: provider, failureLog: failureLog)),
+                ("adherence", AdherenceTool(provider: provider, failureLog: failureLog)),
             ]
+            let selected = planNames ?? Set(planTools.map(\.0))
+            tools += planTools.filter { selected.contains($0.0) }.map(\.1)
         }
         return tools
     }

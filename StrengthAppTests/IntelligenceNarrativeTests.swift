@@ -319,6 +319,20 @@ extension IntelligenceNarrativeTests {
         XCTAssertTrue(withPlan.map(\.name).contains("adherence"))
     }
 
+    func testPlanIntentSelectsOnlyTheNeededTool() {
+        XCTAssertEqual(ChatIntent.planToolNames("what was prescribed yesterday"), ["prescription"])
+        XCTAssertEqual(ChatIntent.planToolNames("how is my adherence"), ["adherence"])
+        XCTAssertEqual(
+            ChatIntent.planToolNames("what does my programme look like"), ["programme_summary"]
+        )
+        let tools = IntelligenceTools.make(
+            provider: StubProvider(), includePlan: true, includeBase: false,
+            planNames: ["prescription"]
+        )
+        XCTAssertEqual(tools.count, 1)
+        XCTAssertEqual(tools.first?.name, "prescription")
+    }
+
     func testPlanProjectionKeepsEveryPrescriptionItem() throws {
         let json = """
         {

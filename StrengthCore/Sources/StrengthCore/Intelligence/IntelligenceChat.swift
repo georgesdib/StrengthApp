@@ -89,10 +89,27 @@ public protocol TrainingChatGenerating {
 }
 
 public enum ChatIntent {
-    public static func requiresPlan(_ question: String) -> Bool {
+    public static func planToolNames(_ question: String) -> [String] {
         let text = question.lowercased()
-        return ["prescription", "prescribed", "programme", "program ", "adherence", " plan"]
-            .contains { text.contains($0) }
+        var names: Set<String> = []
+        if text.contains("prescription") || text.contains("prescribed") {
+            names.insert("prescription")
+        }
+        if text.contains("programme") || text.contains("program ") || text.contains("block") {
+            names.insert("programme_summary")
+        }
+        if text.contains("adherence") || text.contains("compliance") {
+            names.insert("adherence")
+        }
+        if text.contains(" plan") || text.contains("plan ") {
+            names.insert("prescription")
+            names.insert("programme_summary")
+        }
+        return names.sorted()
+    }
+
+    public static func requiresPlan(_ question: String) -> Bool {
+        !planToolNames(question).isEmpty
     }
 }
 
@@ -209,16 +226,26 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         history: [ChatMessage],
         correction: String?
     ) async throws -> Attempt {
-        let prompt = ChatPrompt.build(
-            question: question, history: history, correction: correction
-        )
-        for toolLimit in [5, 3] {
+        let planNames = includePlan ? ChatIntent.planToolNames(question) : []
+        let usePlan = !planNames.isEmpty
+        let promptHistory = usePlan ? Array(history.suffix(2)) : history
+        let attempts: [[ChatMessage]] = [promptHistory, []]
+
+        for (index, historyForPrompt) in attempts.enumerated() {
+            let prompt = ChatPrompt.build(
+                question: question,
+                history: historyForPrompt,
+                correction: correction,
+                maxCharacters: usePlan ? 1_200 : 2_400
+            )
             facts.resetRecord()
             let failureLog = ToolFailureLog()
-            let tools = Array(
-                IntelligenceTools.make(
-                    provider: facts, failureLog: failureLog, includePlan: includePlan
-                ).prefix(toolLimit)
+            let tools = IntelligenceTools.make(
+                provider: facts,
+                failureLog: failureLog,
+                includePlan: usePlan,
+                includeBase: !usePlan,
+                planNames: Set(planNames)
             )
             let session = LanguageModelSession(
                 model: SystemLanguageModel.default,
@@ -226,7 +253,7 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                 instructions: instructions
             )
             do {
-                let options = includePlan && ChatIntent.requiresPlan(question)
+                let options = usePlan
                     ? GenerationOptions(toolCallingMode: .required)
                     : GenerationOptions()
                 let response = try await session.respond(
@@ -261,17 +288,20 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                 let reply = ChatReply(
                     text: text,
                     sources: facts.recordedSources,
+                    suggestions: suggestions,
                     unverifiedNumbers: ungrounded
                 )
                 return ungrounded.isEmpty ? .grounded(reply) : .soft(reply)
             } catch let error as ChatError {
                 throw error
             } catch {
-                if isContextOverflow(error), toolLimit == 5 { continue }
+                if isContextOverflow(error), index == 0 { continue }
                 throw mapped(error)
             }
         }
-        throw ChatError.failed("The conversation was too large for the on-device model.")
+        throw ChatError.failed(
+            "The conversation is too long for the on-device model. Start a new chat."
+        )
     }
 
     private var instructions: String {

@@ -4,9 +4,17 @@ import SwiftUI
 /// client-side arithmetic. Every value is rendered from the envelope the server produced.
 public struct WeeklyReviewView: View {
     @StateObject private var model: WeeklyReviewViewModel
+    private let narrative: (any NarrativeGenerating)?
+    private let detail: NarrativeDetail
 
-    public init(model: WeeklyReviewViewModel) {
+    public init(
+        model: WeeklyReviewViewModel,
+        narrative: (any NarrativeGenerating)? = nil,
+        detail: NarrativeDetail = .standard
+    ) {
         _model = StateObject(wrappedValue: model)
+        self.narrative = narrative
+        self.detail = detail
     }
 
     public var body: some View {
@@ -30,6 +38,14 @@ public struct WeeklyReviewView: View {
                 programme(envelope)
                 observations(envelope)
                 footer(envelope)
+                if let narrative {
+                    Section("Explanation") {
+                        NarrativePanel(
+                            context: .weeklyReview(envelope, detail: detail),
+                            generator: narrative
+                        )
+                    }
+                }
             } else if model.isLoading {
                 Section { ProgressView("Loading the review…") }
             }

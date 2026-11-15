@@ -7,6 +7,13 @@ struct SettingsView: View {
     @State private var isSavingServerSettings = false
     @State private var serverSaveMessage: String?
 
+    private func availabilityText(_ availability: NarrativeAvailability) -> String {
+        switch availability {
+        case .available: return "The on-device model is ready."
+        case .unavailable(let reason): return reason
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -106,6 +113,25 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     Text("Reads only HRV, resting heart rate and bodyweight. No sleep, workouts or write access.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Intelligence") {
+                    Toggle("Explain training on this iPhone", isOn: $model.narrativeEnabled)
+                    if model.narrativeEnabled {
+                        Picker("Detail", selection: $model.narrativeDetail) {
+                            ForEach(NarrativeDetail.allCases, id: \.self) { detail in
+                                Text(detail.title).tag(detail)
+                            }
+                        }
+                        let availability = FoundationNarrativeGenerator().availability()
+                        Text(availabilityText(availability))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Uses Apple Intelligence on this iPhone. The facts stay on the device, "
+                         + "nothing is sent to a server, and explanations are not saved.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

@@ -57,6 +57,16 @@ final class AppModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var pairingError: String?
     @Published private(set) var activeWorkout: WorkoutDetail?
+    @Published var narrativeEnabled: Bool = UserDefaults.standard.bool(
+        forKey: "intelligence.narrative.enabled"
+    ) {
+        didSet { UserDefaults.standard.set(narrativeEnabled, forKey: "intelligence.narrative.enabled") }
+    }
+    @Published var narrativeDetail: NarrativeDetail = NarrativeDetail(
+        rawValue: UserDefaults.standard.string(forKey: "intelligence.narrative.detail") ?? ""
+    ) ?? .standard {
+        didSet { UserDefaults.standard.set(narrativeDetail.rawValue, forKey: "intelligence.narrative.detail") }
+    }
     @Published private(set) var offlineCapture: OfflineCapture?
     @Published private(set) var offlineRecoveryError: OfflineCaptureStoreError?
     @Published private(set) var offlinePersistenceError: String?
@@ -1837,6 +1847,15 @@ final class AppModel: ObservableObject {
                 progressError = message(for: error)
             }
         }
+    }
+
+    func makeNarrativeGenerator() -> any NarrativeGenerating {
+        FoundationNarrativeGenerator()
+    }
+
+    func loadOverviewEnvelope() async throws -> IntelligenceEnvelope {
+        guard let session else { throw APIError.unauthorized }
+        return try await client.overview(session: session)
     }
 
     /// The weekly review reads through the same paired session; the view owns its load state.

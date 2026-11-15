@@ -730,6 +730,66 @@ public final class IOSAPIClient {
         )
     }
 
+
+    public func overview(
+        session: IOSSession,
+        asOf: String? = nil,
+        windowWeeks: Int = 4
+    ) async throws -> IntelligenceEnvelope {
+        var query = [URLQueryItem(name: "window_weeks", value: String(windowWeeks))]
+        if let asOf { query.append(URLQueryItem(name: "as_of", value: asOf)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/overview", query: query, session: session
+        )
+    }
+
+    public func progression(
+        session: IOSSession,
+        exerciseID: String,
+        windowDays: Int = 84,
+        asOf: String? = nil
+    ) async throws -> IntelligenceEnvelope {
+        var query = [URLQueryItem(name: "window_days", value: String(windowDays))]
+        if let asOf { query.append(URLQueryItem(name: "as_of", value: asOf)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/exercises/\(exerciseID)/progression",
+            query: query,
+            session: session
+        )
+    }
+
+    public func readinessHistory(
+        session: IOSSession,
+        from: String,
+        to: String,
+        fields: [String]? = nil
+    ) async throws -> IntelligenceEnvelope {
+        var query = [
+            URLQueryItem(name: "from", value: from),
+            URLQueryItem(name: "to", value: to),
+        ]
+        if let fields, !fields.isEmpty {
+            query.append(URLQueryItem(name: "fields", value: fields.joined(separator: ",")))
+        }
+        return try await get(
+            path: "api/ios/v1/intelligence/readiness", query: query, session: session
+        )
+    }
+
+    public func intelligenceSessionDetails(
+        session: IOSSession,
+        workoutID: String? = nil,
+        sessionID: String? = nil,
+        includeRatios: Bool = false
+    ) async throws -> IntelligenceEnvelope {
+        var query = [URLQueryItem(name: "include_ratios", value: includeRatios ? "true" : "false")]
+        if let workoutID { query.append(URLQueryItem(name: "workout_id", value: workoutID)) }
+        if let sessionID { query.append(URLQueryItem(name: "session_id", value: sessionID)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/session-details", query: query, session: session
+        )
+    }
+
     // MARK: Pending operations
 
     public func pendingMutations(for session: IOSSession) -> [PendingMutation] {

@@ -39,6 +39,9 @@ for expected in 'static let enabled = false' 'static let serverURL = ""' 'static
   fi
 done
 
+# App Shortcuts phrases must carry the app-name token; malformed ones are dropped silently.
+"$(dirname "$0")/check-shortcut-phrases.sh"
+
 echo "Xcode: $(xcodebuild -version | paste -sd ' ' -)"
 echo "Watch simulator: $WATCH_DESTINATION"
 

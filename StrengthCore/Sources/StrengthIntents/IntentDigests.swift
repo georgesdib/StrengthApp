@@ -244,12 +244,9 @@ public struct WeeklyReviewDigest: Equatable {
         }
         var text = "Week of " + weekStart + ": " + (parts.isEmpty ? "no sessions recorded" : parts.joined(separator: ", "))
         if let first = progression.first {
-            var movement = first.display
-            if let changeKg = first.changeKg {
-                movement += " up " + String(format: "%.1f", abs(changeKg)) + " kg"
-            } else if let direction = first.direction {
-                movement += " " + direction
-            }
+            let movement = first.display + " " + progressionWording(
+                direction: first.direction, changeKg: first.changeKg
+            )
             text += ". " + movement + "."
         } else if let observation = observations.first {
             text += ". " + observation
@@ -280,14 +277,40 @@ public struct ProgressionDigest: Equatable {
 
     public func dialog(fallbackName: String? = nil) -> String {
         let name = exerciseDisplay ?? fallbackName ?? "This exercise"
-        if let changeKg = self.changeKg, let direction = self.direction {
-            let sign = direction.lowercased() == "down" ? "-" : "+"
-            let n = sessions.map { " over " + String($0) + " sessions" } ?? ""
-            return name + ": strength " + direction + " " + sign + String(format: "%.1f", abs(changeKg)) + " kg" + n + "."
+        let n = sessions.map { " over " + String($0) + " sessions" } ?? ""
+        if self.changeKg != nil {
+            return name + ": strength " + progressionWording(
+                direction: self.direction, changeKg: self.changeKg
+            ) + n + "."
         }
         if let direction = self.direction {
-            return name + ": strength trend is " + direction + "."
+            return name + ": strength " + progressionWording(
+                direction: direction, changeKg: nil
+            ) + n + "."
         }
         return name + ": not enough comparable sessions for a trend yet."
+    }
+}
+
+/// Spoken direction, without a redundant sign in front of an already-signed direction word.
+/// Canonical server directions are up, down and flat.
+private func progressionWording(direction: String?, changeKg: Double?) -> String {
+    let normalized = direction?.lowercased()
+    if let changeKg {
+        guard abs(changeKg) >= 0.05 else { return "unchanged" }
+        let magnitude = String(format: "%.1f", abs(changeKg)) + " kg"
+        switch normalized {
+        case "down": return "down " + magnitude
+        case "up": return "up " + magnitude
+        case "flat", "stable": return "unchanged"
+        default: return "changed by " + magnitude
+        }
+    }
+    switch normalized {
+    case "down": return "down"
+    case "up": return "up"
+    case "flat", "stable": return "unchanged"
+    case .some(let value): return "trend " + value
+    case nil: return "trend unavailable"
     }
 }

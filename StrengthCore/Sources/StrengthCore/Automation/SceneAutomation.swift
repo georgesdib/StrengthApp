@@ -37,16 +37,23 @@ public protocol SceneRunning: AnyObject {
 /// Live HomeKit executor. Best-effort: a denied authorisation, a deleted home or a missing scene
 /// returns `false` and never throws into the workout path.
 @MainActor
-public final class HomeKitSceneRunner: NSObject, SceneRunning {
+public final class HomeKitSceneRunner: NSObject, SceneRunning, HMHomeManagerDelegate {
     public static let shared = HomeKitSceneRunner()
 
-    private let manager = HMHomeManager()
-    private var loadedHomes = false
-    private var homesContinuation: CheckedContinuation<Void, Never>?
+    private let manager: HMHomeManager
+    private let homes = HomesWaiters()
     private let logger = Logger(
         subsystem: "com.georgesdibpersonalteam.StrengthApp",
         category: "automation"
     )
+
+    public override init() {
+        manager = HMHomeManager()
+        super.init()
+        // HMHomeManager loads asynchronously. The delegate is weak, so the shared runner must
+        // own the manager and stay alive for the first update (including an empty home list).
+        manager.delegate = self
+    }
 
     public func scenes() async -> [SceneSelection] {
         await waitForHomes()
@@ -88,17 +95,47 @@ public final class HomeKitSceneRunner: NSObject, SceneRunning {
 
     /// HomeKit loads homes asynchronously; wait for the first update instead of returning an empty list.
     private func waitForHomes() async {
-        if loadedHomes || !manager.homes.isEmpty { return }
+        if homes.loaded || !manager.homes.isEmpty { return }
+        await homes.wait()
+    }
+
+    @objc nonisolated public func homeManagerDidUpdateHomes(_ manager: HMHomeManager) {
+        Task { @MainActor in
+            // One update satisfies every suspended caller. An empty home list is a valid result:
+            // denied access or no configured home must not leave the UI or workout waiting.
+            self.homes.markLoaded()
+        }
+    }
+}
+
+/// One-shot fan-out for the initial HomeKit load.
+///
+/// A stored continuation per caller cannot be overwritten by a second wait, and every waiter is
+/// resumed exactly once. The loaded flag also closes the race where the delegate fired before a
+/// caller suspended.
+@MainActor
+final class HomesWaiters {
+    private(set) var loaded = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if loaded { return }
         await withCheckedContinuation { continuation in
-            homesContinuation = continuation
+            if loaded {
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+            }
         }
     }
 
-    nonisolated public func homeManagerDidUpdateHomes(_ manager: HMHomeManager) {
-        Task { @MainActor in
-            self.loadedHomes = true
-            self.homesContinuation?.resume()
-            self.homesContinuation = nil
+    func markLoaded() {
+        guard !loaded else { return }
+        loaded = true
+        let pending = waiters
+        waiters.removeAll()
+        for continuation in pending {
+            continuation.resume()
         }
     }
 }

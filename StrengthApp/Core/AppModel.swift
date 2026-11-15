@@ -180,13 +180,14 @@ final class AppModel: ObservableObject {
         offlineStore: OfflineCaptureStore? = nil,
         watchConnectivity: WatchConnectivitySession? = nil,
         exerciseCatalogueCache: ExerciseCatalogueCache? = nil,
-        automation: WorkoutAutomation = .shared
+        automation: WorkoutAutomation? = nil
     ) {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
         let readiness = healthKit ?? HealthKitReadinessService()
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
+        let resolvedAutomation = automation ?? WorkoutAutomation.shared
         let initialCapture: OfflineCapture?
         let initialRecoveryError: OfflineCaptureStoreError?
         do {
@@ -212,7 +213,7 @@ final class AppModel: ObservableObject {
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
         self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
-        self.automation = automation
+        self.automation = resolvedAutomation
         self.deepSeekKeyPresent = ((try? self.deepSeekKeyStore.load()) ?? nil)?.isEmpty == false
         self.healthKitEnabled = enabled
         self.healthKitState = enabled

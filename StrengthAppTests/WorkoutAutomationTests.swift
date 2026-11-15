@@ -1,7 +1,7 @@
 import XCTest
 
 @testable import StrengthApp
-import StrengthCore
+@testable import StrengthCore
 
 @MainActor
 final class WorkoutAutomationTests: XCTestCase {
@@ -133,6 +133,23 @@ final class WorkoutAutomationTests: XCTestCase {
         XCTAssertEqual(url?.scheme, "shortcuts")
         XCTAssertEqual(url?.host, "run-shortcut")
         XCTAssertEqual(url?.query, "name=Lights%20%26%20fan")
+    }
+
+
+    @MainActor
+    func testHomesWaitersWakeEveryCallerAndAllowEarlyLoad() async {
+        let waiters = HomesWaiters()
+        async let first: Void = waiters.wait()
+        async let second: Void = waiters.wait()
+        await Task.yield()
+        waiters.markLoaded()
+        _ = await (first, second)
+        XCTAssertTrue(waiters.loaded)
+
+        let alreadyLoaded = HomesWaiters()
+        alreadyLoaded.markLoaded()
+        await alreadyLoaded.wait()
+        XCTAssertTrue(alreadyLoaded.loaded)
     }
 }
 

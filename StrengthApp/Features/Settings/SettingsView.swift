@@ -14,6 +14,9 @@ struct SettingsView: View {
     @State private var scenes: [SceneSelection] = []
     @State private var startSceneID = WorkoutAutomation.shared.startScene?.sceneID ?? ""
     @State private var endSceneID = WorkoutAutomation.shared.endScene?.sceneID ?? ""
+    @State private var automationTestMessage: String?
+    @State private var automationTestSucceeded = false
+    @State private var isTestingAutomation = false
 
     private func loadScenes() async {
         let loaded = await WorkoutAutomation.shared.availableScenes()
@@ -24,6 +27,54 @@ struct SettingsView: View {
         }
         if !endSceneID.isEmpty, !loaded.contains(where: { $0.sceneID == endSceneID }) {
             endSceneID = ""
+        }
+    }
+
+    private func testShortcut(_ name: String, label: String) {
+        guard !isTestingAutomation else { return }
+        isTestingAutomation = true
+        automationTestMessage = "Testing \(label)…"
+        Task {
+            let ran = await WorkoutAutomation.shared.test(name)
+            automationTestSucceeded = ran
+            automationTestMessage = ran
+                ? "\(label) ran."
+                : "\(label) did not run. Check the name and Shortcuts access."
+            isTestingAutomation = false
+        }
+    }
+
+    private func testScene(_ scene: SceneSelection, label: String) {
+        guard !isTestingAutomation else { return }
+        isTestingAutomation = true
+        automationTestMessage = "Testing \(label)…"
+        Task {
+            let ran = await WorkoutAutomation.shared.testScene(scene)
+            automationTestSucceeded = ran
+            automationTestMessage = ran
+                ? "\(label) ran."
+                : "\(label) did not run. Check the scene and Home access."
+            isTestingAutomation = false
+        }
+    }
+
+    @ViewBuilder
+    private var automationTestFeedback: some View {
+        if let automationTestMessage {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if isTestingAutomation {
+                    ProgressView()
+                } else {
+                    Image(systemName: automationTestSucceeded
+                          ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(automationTestSucceeded ? Color.green : Color.red)
+                }
+                Text(automationTestMessage)
+                    .font(.footnote)
+                    .foregroundStyle(automationTestSucceeded || isTestingAutomation
+                                     ? Color.secondary : Color.red)
+            }
+            .accessibilityIdentifier("automation-test-result")
         }
     }
 
@@ -245,13 +296,16 @@ struct SettingsView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     Button("Test start shortcut") {
-                        Task { await WorkoutAutomation.shared.test(startShortcutName) }
+                        testShortcut(startShortcutName, label: "Start shortcut")
                     }
-                    .disabled(startShortcutName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(startShortcutName.trimmingCharacters(in: .whitespaces).isEmpty
+                              || isTestingAutomation)
                     Button("Test end shortcut") {
-                        Task { await WorkoutAutomation.shared.test(endShortcutName) }
+                        testShortcut(endShortcutName, label: "End shortcut")
                     }
-                    .disabled(endShortcutName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(endShortcutName.trimmingCharacters(in: .whitespaces).isEmpty
+                              || isTestingAutomation)
+                    automationTestFeedback
                 } header: {
                     Text("Workout automation")
                 } footer: {
@@ -274,16 +328,17 @@ struct SettingsView: View {
                     }
                     Button("Test start scene") {
                         if let scene = scenes.first(where: { $0.sceneID == startSceneID }) {
-                            Task { await WorkoutAutomation.shared.testScene(scene) }
+                            testScene(scene, label: "Start scene")
                         }
                     }
-                    .disabled(startSceneID.isEmpty)
+                    .disabled(startSceneID.isEmpty || isTestingAutomation)
                     Button("Test end scene") {
                         if let scene = scenes.first(where: { $0.sceneID == endSceneID }) {
-                            Task { await WorkoutAutomation.shared.testScene(scene) }
+                            testScene(scene, label: "End scene")
                         }
                     }
-                    .disabled(endSceneID.isEmpty)
+                    .disabled(endSceneID.isEmpty || isTestingAutomation)
+                    automationTestFeedback
                     Button("Reload scenes") {
                         Task { await loadScenes() }
                     }

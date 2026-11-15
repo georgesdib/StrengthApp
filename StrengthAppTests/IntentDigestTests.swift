@@ -100,6 +100,28 @@ final class IntentDigestTests: XCTestCase {
         XCTAssertTrue(digest.dialog.contains("2.5 kg"))
     }
 
+    func testWeeklyReviewSpeaksDownwardProgressionWithoutADoubleSign() throws {
+        let raw = weeklyReview
+            .replacingOccurrences(of: "\"direction\": \"up\"", with: "\"direction\": \"down\"")
+            .replacingOccurrences(of: "\"change_kg\": 2.5", with: "\"change_kg\": -2.5")
+        let digest = WeeklyReviewDigest(envelope: try decode(raw))
+
+        XCTAssertTrue(digest.dialog.contains("down 2.5 kg"))
+        XCTAssertFalse(digest.dialog.contains(" up "))
+        XCTAssertFalse(digest.dialog.contains("-2.5"))
+    }
+
+    func testWeeklyReviewSpeaksFlatProgressionAsUnchanged() throws {
+        let raw = weeklyReview
+            .replacingOccurrences(of: "\"direction\": \"up\"", with: "\"direction\": \"flat\"")
+            .replacingOccurrences(of: "\"change_kg\": 2.5", with: "\"change_kg\": 0.0")
+        let digest = WeeklyReviewDigest(envelope: try decode(raw))
+
+        XCTAssertTrue(digest.dialog.contains("unchanged"))
+        XCTAssertFalse(digest.dialog.contains(" up "))
+        XCTAssertFalse(digest.dialog.contains(" down "))
+    }
+
     func testOverviewDigestReportsNumbersWithoutComputing() throws {
         let digest = OverviewDigest(envelope: try decode(overview))
 
@@ -129,7 +151,7 @@ final class IntentDigestTests: XCTestCase {
     func testProgressionDialogUsesTheEntityNameWhenTheEnvelopeOmitsIt() throws {
         let digest = ProgressionDigest(envelope: try decode(progression))
 
-        XCTAssertEqual(digest.dialog(fallbackName: "Fallback"), "Trap Bar Deadlift: strength up +5.0 kg over 6 sessions.")
+        XCTAssertEqual(digest.dialog(fallbackName: "Fallback"), "Trap Bar Deadlift: strength up 5.0 kg over 6 sessions.")
 
         let bare = """
         {"schema_version":"intelligence.envelope.v1","capability":"get_exercise_progression",

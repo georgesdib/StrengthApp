@@ -25,7 +25,7 @@ struct WatchLastWorkoutIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let summary = try await WatchIntentCall.run {
-            let provider = try await IntentServices.provider()
+            let provider = try IntentServices.provider()
             return try await provider.lastWorkout()
         }
         guard let summary else {
@@ -43,7 +43,7 @@ struct WatchOverviewIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let envelope = try await WatchIntentCall.run {
-            let provider = try await IntentServices.provider()
+            let provider = try IntentServices.provider()
             return try await provider.overview(windowWeeks: 4)
         }
         return .result(dialog: IntentDialog(stringLiteral: OverviewDigest(envelope: envelope).dialog))
@@ -58,7 +58,7 @@ struct WatchWeeklyReviewIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let envelope = try await WatchIntentCall.run {
-            let provider = try await IntentServices.provider()
+            let provider = try IntentServices.provider()
             return try await provider.weeklyReview()
         }
         return .result(dialog: IntentDialog(stringLiteral: WeeklyReviewDigest(envelope: envelope).dialog))
@@ -79,7 +79,7 @@ struct WatchProgressionIntent: AppIntent {
             return .result(dialog: "Name an exercise, for example your main lift.")
         }
         let envelope = try await WatchIntentCall.run {
-            let provider = try await IntentServices.provider()
+            let provider = try IntentServices.provider()
             return try await provider.progression(exerciseID: entity.id)
         }
         let digest = ProgressionDigest(envelope: envelope)

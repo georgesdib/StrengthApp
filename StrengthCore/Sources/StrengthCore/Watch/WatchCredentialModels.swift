@@ -40,6 +40,10 @@ public struct WatchCredentialContext: Equatable, Sendable {
     public let token: String?
     public let issuedAt: String
     public let status: WatchCredentialStatus
+    /// The owner's HomeKit scene choice, carried with the credential so the watch runs the same
+    /// scenes as the phone. JSON-encoded `SceneSelection`; nil means "no scene".
+    public let startScene: String?
+    public let endScene: String?
 
     public init(
         schema: Int = WatchCredentialSchema.version,
@@ -49,7 +53,9 @@ public struct WatchCredentialContext: Equatable, Sendable {
         deviceID: String,
         token: String?,
         issuedAt: String,
-        status: WatchCredentialStatus = .ready
+        status: WatchCredentialStatus = .ready,
+        startScene: String? = nil,
+        endScene: String? = nil
     ) {
         self.schema = schema
         self.epoch = epoch
@@ -59,6 +65,8 @@ public struct WatchCredentialContext: Equatable, Sendable {
         self.token = token
         self.issuedAt = issuedAt
         self.status = status
+        self.startScene = startScene
+        self.endScene = endScene
     }
 
     public init(dictionary: [String: Any]) throws {
@@ -96,7 +104,9 @@ public struct WatchCredentialContext: Equatable, Sendable {
             deviceID: deviceID,
             token: token,
             issuedAt: issuedAt,
-            status: status
+            status: status,
+            startScene: dictionary["startScene"] as? String,
+            endScene: dictionary["endScene"] as? String
         )
     }
 
@@ -138,6 +148,12 @@ public struct WatchCredentialContext: Equatable, Sendable {
         ]
         if let token {
             value["token"] = token
+        }
+        if let startScene {
+            value["startScene"] = startScene
+        }
+        if let endScene {
+            value["endScene"] = endScene
         }
         return value
     }

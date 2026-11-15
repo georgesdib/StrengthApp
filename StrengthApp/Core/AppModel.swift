@@ -1885,6 +1885,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Pushes a changed scene choice to the watch. Best-effort; pairing errors are already surfaced
+    /// by the watch section.
+    func syncSceneMappingToWatch() {
+        Task { await watchPairing.syncSceneMapping() }
+    }
+
     func makeNarrativeGenerator() -> any NarrativeGenerating {
         FoundationNarrativeGenerator()
     }

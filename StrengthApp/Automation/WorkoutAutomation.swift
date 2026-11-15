@@ -1,5 +1,6 @@
 import Foundation
 import os
+import StrengthCore
 import UIKit
 
 /// The two lifecycle moments an automation can run on.
@@ -23,34 +24,45 @@ struct SystemShortcutURLOpener: ShortcutURLOpening {
     }
 }
 
-/// Runs a user-named Shortcut when a workout starts or ends.
+/// Runs the owner's automations when a workout starts or ends.
 ///
-/// Decisions recorded in the plan (INT-7b-1, 2026-11-15):
+/// Decisions recorded in the plan (INT-7b-1/7b-2, 2026-11-15):
 /// - both events are supported;
-/// - there is no separate toggle: a filled-in name means the channel is on, an empty one means off;
-/// - nothing is passed to the Shortcut — no session data, no duration, no text.
+/// - there is no separate toggle: a filled-in shortcut name or a chosen scene means the channel is on;
+/// - nothing is passed to the Shortcut — no session data, no duration, no text;
+/// - ordering is scene first, then the Shortcut, because the Shortcut foregrounds Shortcuts;
+/// - each channel fires at most once per session and event, even across relaunches.
 ///
-/// The automation is best-effort. It never blocks, delays or rolls back a workout, and it fires at
-/// most once per session and event, even across relaunches.
+/// Automation is best-effort. It never blocks, delays or rolls back a workout.
 final class WorkoutAutomation {
     static let shared = WorkoutAutomation()
 
     static let startShortcutKey = "ios.automation.startShortcut"
     static let endShortcutKey = "ios.automation.endShortcut"
+    static let startSceneKey = "ios.automation.startScene"
+    static let endSceneKey = "ios.automation.endScene"
     private static let firedKey = "ios.automation.fired"
     private static let firedLimit = 20
 
     private let defaults: UserDefaults
     private let opener: ShortcutURLOpening
+    private let sceneRunner: SceneRunning
     private let logger = Logger(
         subsystem: "com.georgesdibpersonalteam.StrengthApp",
         category: "automation"
     )
 
-    init(defaults: UserDefaults = .standard, opener: ShortcutURLOpening = SystemShortcutURLOpener()) {
+    init(
+        defaults: UserDefaults = .standard,
+        opener: ShortcutURLOpening = SystemShortcutURLOpener(),
+        sceneRunner: SceneRunning? = nil
+    ) {
         self.defaults = defaults
         self.opener = opener
+        self.sceneRunner = sceneRunner ?? HomeKitSceneRunner.shared
     }
+
+    // MARK: - Configuration
 
     var startShortcut: String {
         get { (defaults.string(forKey: Self.startShortcutKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -62,31 +74,60 @@ final class WorkoutAutomation {
         set { defaults.set(newValue, forKey: Self.endShortcutKey) }
     }
 
+    var startScene: SceneSelection? {
+        get { SceneSelection.decode(defaults.string(forKey: Self.startSceneKey)) }
+        set { defaults.set(newValue?.jsonString, forKey: Self.startSceneKey) }
+    }
+
+    var endScene: SceneSelection? {
+        get { SceneSelection.decode(defaults.string(forKey: Self.endSceneKey)) }
+        set { defaults.set(newValue?.jsonString, forKey: Self.endSceneKey) }
+    }
+
     func shortcut(for event: WorkoutEvent) -> String {
         event == .started ? startShortcut : endShortcut
     }
 
-    /// Fires the configured Shortcut for one session transition. Returns whether a URL was opened.
+    func scene(for event: WorkoutEvent) -> SceneSelection? {
+        event == .started ? startScene : endScene
+    }
+
+    // MARK: - Running
+
+    /// Runs the configured channels for one session transition: scene first, then the Shortcut.
+    /// Returns whether any channel ran.
     @discardableResult
     func handle(_ event: WorkoutEvent, sessionID: String) async -> Bool {
+        let eventKey = "\(sessionID):\(event.rawValue)"
+        var ran = false
+
+        if let selection = scene(for: event) {
+            let key = "\(eventKey):scene"
+            if !hasFired(key) {
+                markFired(key)
+                if await sceneRunner.run(selection) {
+                    ran = true
+                } else {
+                    // A refused or missing scene is retried on a later transition only.
+                    clearFired(key)
+                }
+            }
+        }
+
         let name = shortcut(for: event)
-        guard !name.isEmpty else { return false }
-        let key = "\(sessionID):\(event.rawValue)"
-        guard !hasFired(key) else { return false }
-        guard let url = Self.url(forShortcutNamed: name) else {
-            logger.error("cannot build a run-shortcut URL")
-            return false
+        if !name.isEmpty {
+            let key = "\(eventKey):shortcut"
+            if !hasFired(key), let url = Self.url(forShortcutNamed: name) {
+                markFired(key)
+                if await opener.open(url) {
+                    ran = true
+                } else {
+                    clearFired(key)
+                    logger.error("the system refused the shortcut URL")
+                }
+            }
         }
-        // Mark before opening: a re-entrant transition must not fire twice.
-        markFired(key)
-        let opened = await opener.open(url)
-        if !opened {
-            // The system refused the URL (Shortcuts missing or the name is malformed). Clear the
-            // mark so a later transition can try again, and keep the workout unaffected.
-            clearFired(key)
-            logger.error("the system refused the shortcut URL")
-        }
-        return opened
+        return ran
     }
 
     /// Runs a named Shortcut once, for the Settings test button. No dedupe, no session.
@@ -95,6 +136,17 @@ final class WorkoutAutomation {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let url = Self.url(forShortcutNamed: trimmed) else { return false }
         return await opener.open(url)
+    }
+
+    /// The scenes currently available from HomeKit, for the Settings pickers.
+    func availableScenes() async -> [SceneSelection] {
+        await sceneRunner.scenes()
+    }
+
+    /// Runs one scene once, for the Settings test button. No dedupe, no session.
+    @discardableResult
+    func testScene(_ selection: SceneSelection) async -> Bool {
+        await sceneRunner.run(selection)
     }
 
     static func url(forShortcutNamed name: String) -> URL? {

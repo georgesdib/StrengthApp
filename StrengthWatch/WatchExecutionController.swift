@@ -253,6 +253,8 @@ final class WatchExecutionController: ObservableObject {
         let started = await engine.start(issuedPlanID: issuedPlanID, session: session)
         if !started {
             await endLiveness()
+        } else if let sessionID = engine.sessionRecord?.sessionUUID {
+            await WatchSceneAutomation.run(event: "started", sessionID: sessionID)
         }
         sync()
     }
@@ -458,6 +460,9 @@ final class WatchExecutionController: ObservableObject {
         }
         #endif
         await handle(stop)
+        if engine.sessionRecord?.finish != nil, let sessionID = engine.sessionRecord?.sessionUUID {
+            await WatchSceneAutomation.run(event: "ended", sessionID: sessionID)
+        }
         // The HealthKit save ends the live session itself, so liveness is not ended here.
         if !WatchSmokeMode.isEnabled {
             await finalizeHealthKit()
@@ -474,7 +479,11 @@ final class WatchExecutionController: ObservableObject {
 
     func discard() async {
         guard let session = currentSession() else { return }
+        let sessionID = engine.sessionRecord?.sessionUUID
         await engine.discard(session: session)
+        if let sessionID {
+            await WatchSceneAutomation.run(event: "ended", sessionID: sessionID)
+        }
         await endLiveness()
         sync()
     }

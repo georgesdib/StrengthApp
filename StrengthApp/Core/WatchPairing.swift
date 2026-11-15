@@ -460,7 +460,9 @@ final class WatchPairingCoordinator: ObservableObject {
             deviceID: link.deviceID,
             token: pendingToken,
             issuedAt: Self.timestamp(),
-            status: .ready
+            status: .ready,
+            startScene: WorkoutAutomation.shared.startScene?.jsonString,
+            endScene: WorkoutAutomation.shared.endScene?.jsonString
         )
         do {
             try connectivity.updateApplicationContext(context.dictionary)
@@ -469,6 +471,11 @@ final class WatchPairingCoordinator: ObservableObject {
             errorMessage = message(for: error)
             scheduleRetry()
         }
+    }
+
+    /// Re-sends the credential context so a changed scene choice reaches the watch.
+    func syncSceneMapping() async {
+        await sendCredential()
     }
 
     private func sendRevokedContext() async {

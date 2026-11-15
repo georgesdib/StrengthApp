@@ -66,6 +66,31 @@ final class TrainingChatTests: XCTestCase {
         XCTAssertFalse(prompt.contains("question 0 "))
     }
 
+    func testQuestionTimeWindowGroundsAnEchoedWindow() throws {
+        let questionTime = ChatPrompt.timeNumbers(in: "how has it progressed over the last 3 months?")
+        XCTAssertTrue(questionTime.contains("3"))
+        let allowed = ChatPrompt.allowedNumbers(
+            data: ["2"], questionTime: questionTime,
+            answer: "Over the last 3 months it moved 2 kg."
+        )
+        XCTAssertTrue(allowed.contains("3"))
+        XCTAssertNoThrow(
+            try NarrativeValidator.validate(
+                text: "Over the last 3 months it moved 2 kg.", allowedNumbers: allowed
+            )
+        )
+    }
+
+    func testQuestionTimeWindowCannotGroundAnUnrelatedValue() {
+        let allowed = ChatPrompt.allowedNumbers(
+            data: ["2"], questionTime: ["3"], answer: "You did 3 sessions."
+        )
+        XCTAssertFalse(allowed.contains("3"))
+        XCTAssertThrowsError(
+            try NarrativeValidator.validate(text: "You did 3 sessions.", allowedNumbers: allowed)
+        )
+    }
+
     func testChatGuardRejectsAnUngroundedNumber() throws {
         XCTAssertThrowsError(
             try NarrativeValidator.validate(

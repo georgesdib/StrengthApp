@@ -57,6 +57,37 @@ public protocol TrainingChatGenerating {
 }
 
 public enum ChatPrompt {
+    /// Numbers used as a time window ("last 3 months") are not data claims. They only ground when
+    /// the answer also uses them as a time window, so "3 sessions" cannot borrow "3 months".
+    public static func timeNumbers(in text: String) -> Set<String> {
+        let pattern = "(?<![\\w.])(\\d+(?:[.,]\\d+)?)\\s*(?:days?|weeks?|months?|years?)"
+        let regex = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        var numbers: Set<String> = []
+        for match in regex.matches(in: text, range: range) {
+            guard let numberRange = Range(match.range(at: 1), in: text) else { continue }
+            let token = String(text[numberRange])
+            numbers.insert(token)
+            numbers.insert(token.replacingOccurrences(of: ",", with: ""))
+            numbers.insert(token.replacingOccurrences(of: ",", with: "."))
+        }
+        return numbers
+    }
+
+    public static func timeNumbers(question: String, history: [ChatMessage]) -> Set<String> {
+        var numbers = timeNumbers(in: question)
+        for message in history where message.role == .user {
+            numbers.formUnion(timeNumbers(in: message.text))
+        }
+        return numbers
+    }
+
+    public static func allowedNumbers(
+        data: Set<String>, questionTime: Set<String>, answer: String
+    ) -> Set<String> {
+        data.union(questionTime.intersection(timeNumbers(in: answer)))
+    }
+
     public static func build(question: String, history: [ChatMessage], maxCharacters: Int = 2_400) -> String {
         var lines: [String] = []
         for message in history.suffix(6) {
@@ -110,10 +141,15 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                 let response = try await session.respond(to: prompt)
                 let text = response.content
                 let envelopes = facts.recordedEnvelopes
+                let questionTime = ChatPrompt.timeNumbers(question: question, history: history)
+                let answerTime = ChatPrompt.timeNumbers(in: text)
+                let allowed = ChatPrompt.allowedNumbers(
+                    data: NarrativeContext.allowedNumbers(in: envelopes),
+                    questionTime: questionTime,
+                    answer: text
+                )
                 if let ungrounded = NarrativeValidator.numbers(in: text).first(where: {
-                    !NarrativeValidator.isGrounded(
-                        $0, allowedNumbers: NarrativeContext.allowedNumbers(in: envelopes)
-                    )
+                    !NarrativeValidator.isGrounded($0, allowedNumbers: allowed)
                 }) {
                     throw ChatError.notGrounded(ungrounded)
                 }

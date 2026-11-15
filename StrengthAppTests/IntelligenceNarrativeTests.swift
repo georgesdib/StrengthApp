@@ -285,6 +285,23 @@ extension IntelligenceNarrativeTests {
         XCTAssertEqual(CapabilityFailure(APIError.http(status: 503, message: "", fields: [:])), .server)
     }
 
+    func testPlanQueryResolvesRelativeDates() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 15))!
+        XCTAssertEqual(
+            PlanQuery.isoDate(from: "yesterday", now: now, calendar: calendar), "2026-11-14"
+        )
+        XCTAssertEqual(
+            PlanQuery.isoDate(from: "today", now: now, calendar: calendar), "2026-11-15"
+        )
+        XCTAssertEqual(
+            PlanQuery.isoDate(from: "2026-11-04", now: now, calendar: calendar), "2026-11-04"
+        )
+        XCTAssertNil(PlanQuery.isoDate(from: "squat", now: now, calendar: calendar))
+        XCTAssertNil(PlanQuery.isoDate(from: "", now: now, calendar: calendar))
+    }
+
     func testPlanToolsAreOnlyAddedWhenEnabled() throws {
         let base = IntelligenceTools.make(provider: StubProvider())
         let withPlan = IntelligenceTools.make(provider: StubProvider(), includePlan: true)

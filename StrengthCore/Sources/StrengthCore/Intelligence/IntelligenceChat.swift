@@ -267,8 +267,8 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         + "answer. You may suggest changes and discuss medical considerations, but put them in the "
         + "suggestions field, never in the answer: they are proposals, not facts, and they are never "
         + "applied. If the tools cannot answer, say so plainly. If a tool says it could not find "
-        + "something, ask the athlete to clarify; never repeat a raw tool error. Keep the answer under "
-        + "150 words."
+        + "something, ask the athlete to clarify; never repeat a raw tool error. Convert today and "
+        + "yesterday to a YYYY-MM-DD date before calling a plan tool. Keep the answer under 150 words."
     }
 
     private func isContextOverflow(_ error: Error) -> Bool {

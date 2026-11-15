@@ -13,6 +13,38 @@ public protocol IntelligenceCapabilityProviding: Sendable {
 }
 
 /// Safe, model-facing classification of a failed capability call.
+public enum PlanQuery {
+    /// Resolves "today"/"yesterday" or an ISO date. Returns nil for anything else (an id).
+    public static func isoDate(
+        from value: String,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        let target: Date?
+        switch lower {
+        case "today", "": target = lower == "today" ? now : nil
+        case "yesterday": target = calendar.date(byAdding: .day, value: -1, to: now)
+        default: target = nil
+        }
+        if let target {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = calendar.timeZone
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.string(from: target)
+        }
+        let parts = trimmed.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0].count == 4, Int(parts[0]) != nil,
+              parts[1].count == 2, Int(parts[1]) != nil,
+              parts[2].count == 2, Int(parts[2]) != nil else {
+            return nil
+        }
+        return trimmed
+    }
+}
+
 public protocol PlanFactsProviding: Sendable {
     func prescription(query: String) async throws -> String
     func programmeSummary(query: String) async throws -> String
@@ -297,7 +329,7 @@ public struct PrescriptionTool: Tool {
         self.failureLog = failureLog
     }
     public let name = "prescription"
-    public let description = "Read-only training prescription. Pass a date (YYYY-MM-DD) or a prescription id; an empty string asks for the current prescription."
+    public let description = "Read-only training prescription. Convert relative dates to YYYY-MM-DD (for example yesterday becomes a date), or pass a prescription id; an empty string asks for the current prescription."
     public func call(arguments: NarrativeToolQuery) async throws -> String {
         guard let plan = provider as? any PlanFactsProviding else {
             return "Plan data is not available in this build."

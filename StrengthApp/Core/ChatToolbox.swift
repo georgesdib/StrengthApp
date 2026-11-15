@@ -83,10 +83,10 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
     func prescription(query: String) async throws -> String {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let envelope: IntelligenceEnvelope
-        if value.isEmpty {
+        if value.isEmpty || value.lowercased() == "today" {
             envelope = try await client.prescription(session: session)
-        } else if Self.isDate(value) {
-            envelope = try await client.prescription(session: session, forDate: value)
+        } else if let date = PlanQuery.isoDate(from: value) {
+            envelope = try await client.prescription(session: session, forDate: date)
         } else {
             envelope = try await client.prescription(session: session, prescriptionID: value)
         }
@@ -97,7 +97,7 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let envelope = try await client.programmeSummary(
             session: session,
-            asOf: Self.isDate(value) ? value : nil,
+            asOf: PlanQuery.isoDate(from: value),
             blockWeeks: 4
         )
         return record(envelope, source: "programme")
@@ -114,17 +114,11 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
         return record(
             try await client.adherence(
                 session: session,
-                asOf: Self.isDate(value) ? value : nil,
+                asOf: PlanQuery.isoDate(from: value),
                 weeks: 12
             ),
             source: "adherence"
         )
-    }
-
-    private static func isDate(_ value: String) -> Bool {
-        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
-        return parts.count == 3 && parts[0].count == 4 && Int(parts[0]) != nil
-            && parts[1].count == 2 && parts[2].count == 2
     }
 
     func readinessStatus(from: String, to: String) async throws -> String {

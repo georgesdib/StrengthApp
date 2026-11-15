@@ -126,6 +126,23 @@ final class IntelligenceNarrativeTests: XCTestCase {
         )
     }
 
+    func testSignedProgressionValuesGroundBothDirections() throws {
+        let context = NarrativeContext.overview(
+            try envelopeWithFact(-5.3), detail: .standard
+        )
+        XCTAssertTrue(context.allowedNumbers.contains("-5.3"))
+        XCTAssertTrue(context.allowedNumbers.contains("5.3"))
+        XCTAssertNoThrow(
+            try NarrativeValidator.validate(text: "-5.3 kg", allowedNumbers: context.allowedNumbers)
+        )
+        XCTAssertNoThrow(
+            try NarrativeValidator.validate(text: "down 5.3 kg", allowedNumbers: context.allowedNumbers)
+        )
+        XCTAssertNoThrow(
+            try NarrativeValidator.validate(text: "−5.3 kg", allowedNumbers: context.allowedNumbers)
+        )
+    }
+
     func testGroundedNumbersAcceptPercentagesThousandsAndTechnicalTerms() throws {
         let context = NarrativeContext(
             kind: .weeklyReview,

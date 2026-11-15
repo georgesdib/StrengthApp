@@ -173,7 +173,7 @@ public enum NarrativeValidator {
 
     public static func numbers(in text: String) -> [String] {
         // Do not read the digit inside e1RM, 1RM, RIR2 or sRPE2 as a claim.
-        let pattern = "(?<![A-Za-z0-9_])\\d+(?:[.,]\\d+)?(?![A-Za-z0-9_])"
+        let pattern = "(?<![A-Za-z0-9_])[+\\-−–]?\\d+(?:[.,]\\d+)?(?![A-Za-z0-9_])"
             + "|\\b(?:two|three|four|five|six|seven|eight|nine|ten)\\b"
         let regex = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
@@ -191,14 +191,28 @@ public enum NarrativeValidator {
         isGrounded(number, allowedNumbers: context.allowedNumbers)
     }
 
-    public static func isGrounded(_ number: String, allowedNumbers: Set<String>) -> Bool {
-        var candidates = [number, number.replacingOccurrences(of: ",", with: "")]
-        if number.contains(",") {
-            let noComma = number.replacingOccurrences(of: ",", with: "")
-            candidates.append(noComma)
-            candidates.append(number.replacingOccurrences(of: ",", with: "."))
+    private static func variants(of number: String) -> [String] {
+        let signed = number
+            .replacingOccurrences(of: "−", with: "-")
+            .replacingOccurrences(of: "–", with: "-")
+        var base = [signed]
+        if signed.hasPrefix("-") || signed.hasPrefix("+") {
+            base.append(String(signed.dropFirst()))
+        } else {
+            base.append("-" + signed)
+            base.append("+" + signed)
         }
-        if candidates.contains(where: allowedNumbers.contains) { return true }
+        var variants: [String] = []
+        for value in base {
+            variants.append(value)
+            variants.append(value.replacingOccurrences(of: ",", with: ""))
+            variants.append(value.replacingOccurrences(of: ",", with: "."))
+        }
+        return variants
+    }
+
+    public static func isGrounded(_ number: String, allowedNumbers: Set<String>) -> Bool {
+        if variants(of: number).contains(where: allowedNumbers.contains) { return true }
         if let digit = numberWords[number.lowercased()] {
             return allowedNumbers.contains(digit)
         }
@@ -237,7 +251,7 @@ public extension NarrativeContext {
             if trimmed.hasSuffix(".") { trimmed.removeLast() }
             return trimmed
         }
-        func add(_ value: Double) {
+        func addMagnitude(_ value: Double) {
             if value == value.rounded() {
                 numbers.insert(String(Int(value)))
                 if let grouped = grouping.string(from: NSNumber(value: value)) {
@@ -257,10 +271,15 @@ public extension NarrativeContext {
                 numbers.insert(trimZeros(String(format: "%.1f", percent)))
             }
         }
+        func add(_ value: Double) {
+            addMagnitude(value)
+            // A decline may be repeated as a magnitude ("down 5.3" for -5.3).
+            if value < 0 { addMagnitude(-value) }
+        }
         // A string fact may legitimately carry a value such as "5.3 kg" or "80%". Only numeric-like
         // strings are parsed, so instruction-like text cannot widen the set.
         let numericString = try! NSRegularExpression(
-            pattern: "^[0-9][0-9.,:/\\-\\s]*(kg|lb|lbs|%|s|sec|reps|days|weeks|bpm|ms|cm|in|h|min|km|mi|m)?$",
+            pattern: "^[+\\-−–]?[0-9][0-9.,:/\\-\\s]*(kg|lb|lbs|%|s|sec|reps|days|weeks|bpm|ms|cm|in|h|min|km|mi|m)?$",
             options: [.caseInsensitive]
         )
         func addNumericString(_ text: String) {

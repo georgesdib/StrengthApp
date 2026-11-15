@@ -480,3 +480,31 @@ The owner confirmed every phone and watch check below.
 - [x] The same session never runs a scene twice, and a missing home or scene is skipped silently.
 
 Owner confirmation: pass 2026-11-15 · Build: INT-7b-2 (phone and watch) · Device: iPhone 16 Pro Max + Apple Watch · iOS 27.2 / watchOS 27.2
+
+---
+
+# INT-7b-3 Action button and watch Siri acceptance — implemented, device checks pending
+
+**Status 2026-11-15:** the watch target links `StrengthIntents`, declares its own read-only intents and
+App Shortcuts, registers a watch-side data provider, and implements `StartWorkoutIntent` plus the
+donated finish intent. The physical checks below are not yet signed off.
+
+## Automated
+
+- [x] The watch scheme builds with the intents package linked.
+- [x] The phone scheme still builds and the iOS suite passes (run through `scripts/ci.sh`).
+- [x] `StrengthWorkoutStyle` is a single `Strength` case; the issued plan decides the session content.
+
+## Physical device (owner to confirm)
+
+- [ ] Settings > Action button > Workout lists Strength; choosing it and pressing the button starts the
+      plan the iPhone already requested for the watch.
+- [ ] With no watch-targeted plan, the button answers "Request a workout on your iPhone first" and opens
+      the app instead of starting anything.
+- [ ] While a session is running, the second press brings the session forward and does **not** finish it
+      (owner chose "open the finish screen", 2026-11-15); sRPE is entered and Finish is tapped by hand.
+- [ ] Watch Siri answers the four read-only questions (last workout, overview, weekly review, exercise
+      progression) after the watch app has been opened once.
+- [ ] With the watch unpaired, those phrases answer with the pairing message instead of hanging.
+
+Owner confirmation: pending · Build: INT-7b-3 · Device: Apple Watch · watchOS 27.2

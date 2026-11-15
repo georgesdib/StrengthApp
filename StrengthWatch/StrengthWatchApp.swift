@@ -1,4 +1,5 @@
 import StrengthCore
+import StrengthIntents
 import SwiftUI
 
 @main
@@ -15,11 +16,16 @@ struct StrengthWatchApp: App {
         let execution = WatchExecutionController(
             onCredentialsMissing: { session.markCredentialsMissing() }
         )
-        _session = StateObject(wrappedValue: session)
-        _today = StateObject(wrappedValue: WatchTodayController(
+        let today = WatchTodayController(
             onCredentialsMissing: { session.markCredentialsMissing() }
-        ))
+        )
+        _session = StateObject(wrappedValue: session)
+        _today = StateObject(wrappedValue: today)
         _execution = StateObject(wrappedValue: execution)
+        // Intents run in this process: give them the live controllers and the read-only provider.
+        WatchIntentBridge.today = today
+        WatchIntentBridge.execution = execution
+        IntentServices.register(WatchIntentDataProvider())
         // §7.8: a home-server change waits until the session is finished and the outbox empty.
         session.onExecutionPayload = { [weak execution] in
             execution?.applyRemotePayload($0)

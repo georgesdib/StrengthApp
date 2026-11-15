@@ -73,6 +73,9 @@ public struct WeeklyReviewView: View {
     private func activity(_ envelope: IntelligenceEnvelope) -> some View {
         if let fact = envelope.facts["activity"], let value = fact.value.objectValue {
             Section("Activity") {
+                Text("Target-based exposure; no planned-session calendar exists.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 LabeledContent("Completed", value: value["completed_sessions"]?.displayText ?? "—")
                 LabeledContent("Target", value: value["target_sessions"]?.displayText ?? "—")
                 LabeledContent("Working sets", value: value["working_sets"]?.displayText ?? "—")
@@ -91,6 +94,10 @@ public struct WeeklyReviewView: View {
         if let fact = envelope.facts["adherence"], let value = fact.value.objectValue {
             Section("Adherence") {
                 if value["available"]?.boolValue == true {
+                    Text("Matched against prescribed sets in the final frozen plan, which may have "
+                         + "been modified after issue.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     if let ratio = value["final_plan_ratio"]?.doubleValue {
                         LabeledContent("Final-plan completion",
                                        value: ratio.formatted(.percent.precision(.fractionLength(0))))
@@ -129,6 +136,9 @@ public struct WeeklyReviewView: View {
     private func progression(_ envelope: IntelligenceEnvelope) -> some View {
         if let fact = envelope.facts["progression"], let rows = fact.value.arrayValue, !rows.isEmpty {
             Section("Progression") {
+                Text("Change is the latest e1RM versus the recent median, not a tested maximum.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     if let value = row.objectValue {
                         let direction = value["direction"]?.displayText ?? "unknown"
@@ -145,11 +155,18 @@ public struct WeeklyReviewView: View {
                                 }
                             }
                             Spacer()
-                            if let change = value["change_kg"]?.doubleValue {
-                                Text(change, format: .number.precision(.fractionLength(1)))
-                                    .font(.subheadline.monospacedDigit())
-                                    .foregroundStyle(directionTint(direction))
-                                    .accessibilityLabel("change \(change) kilograms")
+                            VStack(alignment: .trailing, spacing: 2) {
+                                if let change = value["change_kg"]?.doubleValue {
+                                    Text(change, format: .number.precision(.fractionLength(1)))
+                                        .font(.subheadline.monospacedDigit())
+                                        .foregroundStyle(directionTint(direction))
+                                        .accessibilityLabel("versus recent median \(change) kilograms")
+                                }
+                                if let median = value["recent_median_kg"]?.doubleValue {
+                                    Text("median \(median.formatted(.number.precision(.fractionLength(1)))) kg")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -167,7 +184,16 @@ public struct WeeklyReviewView: View {
                     ReviewBadge(text: status.replacingOccurrences(of: "_", with: " "),
                                 systemImage: "chart.bar.fill", tint: volumeTint(status))
                     Spacer()
-                    Text("weekly hard sets by pattern")
+                    if let window = value["window_weeks"]?.intValue {
+                        Text("\(window)-week rolling window")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let coverage = value["coverage"]?.objectValue,
+                   let observed = coverage["observed_weeks"]?.intValue,
+                   let denominator = coverage["denominator"]?.intValue {
+                    Text("Weeks with data: \(observed) of \(denominator)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -225,9 +251,36 @@ public struct WeeklyReviewView: View {
     private func programme(_ envelope: IntelligenceEnvelope) -> some View {
         if let fact = envelope.facts["programme"], let value = fact.value.objectValue {
             Section("Programme") {
-                LabeledContent("Deload", value: (value["deload"]?.displayText ?? "—").replacingOccurrences(of: "_", with: " "))
+                LabeledContent(
+                    "Deload policy",
+                    value: (value["deload_policy"]?.displayText ?? "—")
+                        .replacingOccurrences(of: "_", with: " ")
+                )
+                if let reason = value["deload_reason"]?.stringValue {
+                    Text("Reason: \(reason)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Policy state on the Sunday; it does not mean a deload was performed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 LabeledContent("Regime", value: (value["regime_review"]?.displayText ?? "—").replacingOccurrences(of: "_", with: " "))
-                LabeledContent("Findings", value: value["regime_findings"]?.displayText ?? "—")
+                if let findings = value["regime_findings_detail"]?.arrayValue, !findings.isEmpty {
+                    ForEach(Array(findings.enumerated()), id: \.offset) { _, row in
+                        if let finding = row.objectValue {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(finding["main_lift"]?.displayText ?? "—")
+                                Text(regimeLine(finding))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } else {
+                    Text("No regime findings this week.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -319,6 +372,22 @@ public struct WeeklyReviewView: View {
         case "mixed", "under": return .yellow
         default: return .secondary
         }
+    }
+
+    private func regimeLine(_ finding: [String: JSONValue]) -> String {
+        var parts: [String] = []
+        if let kind = finding["kind"]?.displayText {
+            parts.append(kind)
+        }
+        if let drop = finding["drop_pct"]?.doubleValue {
+            parts.append("-\(drop.formatted(.number.precision(.fractionLength(1))))%")
+        }
+        if let substitutes = finding["substitutes"]?.arrayValue, let first = substitutes.first?.objectValue,
+           let lift = first["exercise_id"]?.displayText,
+           let increase = first["increase"]?.displayText {
+            parts.append("substitute \(lift) +\(increase)")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func statusIcon(_ status: String) -> String {

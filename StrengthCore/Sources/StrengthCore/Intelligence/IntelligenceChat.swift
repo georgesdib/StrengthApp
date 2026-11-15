@@ -131,7 +131,10 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         let prompt = ChatPrompt.build(question: question, history: history)
         for toolLimit in [5, 3] {
             facts.resetRecord()
-            let tools = Array(IntelligenceTools.make(provider: facts).prefix(toolLimit))
+            let failureLog = ToolFailureLog()
+            let tools = Array(
+                IntelligenceTools.make(provider: facts, failureLog: failureLog).prefix(toolLimit)
+            )
             let session = LanguageModelSession(
                 model: SystemLanguageModel.default,
                 tools: tools,
@@ -141,6 +144,16 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                 let response = try await session.respond(to: prompt)
                 let text = response.content
                 let envelopes = facts.recordedEnvelopes
+                let failures = failureLog.failures
+                if envelopes.isEmpty, failures.contains(.unauthorized) {
+                    throw ChatError.unavailable(
+                        "Your training data could not be accessed. Check the pairing."
+                    )
+                }
+                if envelopes.isEmpty,
+                   failures.contains(where: { $0 == .unavailable || $0 == .server }) {
+                    throw ChatError.failed("Your training data is temporarily unavailable. Try again.")
+                }
                 let questionTime = ChatPrompt.timeNumbers(question: question, history: history)
                 let answerTime = ChatPrompt.timeNumbers(in: text)
                 let allowed = ChatPrompt.allowedNumbers(

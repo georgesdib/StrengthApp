@@ -12,6 +12,68 @@ public protocol IntelligenceCapabilityProviding: Sendable {
     func readinessStatus(from: String, to: String) async throws -> String
 }
 
+/// Safe, model-facing classification of a failed capability call.
+public enum CapabilityFailure: String, Sendable, Equatable, CaseIterable {
+    case notFound
+    case invalidIdentifier
+    case unauthorized
+    case unavailable
+    case server
+    case unknown
+
+    public init(_ error: Error) {
+        guard let api = error as? APIError else {
+            self = .unknown
+            return
+        }
+        switch api {
+        case .transport:
+            self = .unavailable
+        case .unauthorized, .forbidden:
+            self = .unauthorized
+        case .http(let status, _, _):
+            self = Self.from(status: status)
+        case .server(let status, _, _, _, _):
+            self = Self.from(status: status)
+        default:
+            self = .unknown
+        }
+    }
+
+    private static func from(status: Int) -> CapabilityFailure {
+        switch status {
+        case 404: return .notFound
+        case 400, 422: return .invalidIdentifier
+        case 401, 403: return .unauthorized
+        case 500...: return .server
+        default: return .unknown
+        }
+    }
+}
+
+/// Records classifications without leaking them into the conversation.
+public final class ToolFailureLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [CapabilityFailure] = []
+
+    public init() {}
+
+    public var failures: [CapabilityFailure] {
+        lock.lock(); defer { lock.unlock() }
+        return storage
+    }
+
+    public func record(_ failure: CapabilityFailure) {
+        lock.lock(); defer { lock.unlock() }
+        storage.append(failure)
+    }
+
+    public func reset() {
+        lock.lock(); defer { lock.unlock() }
+        storage = []
+    }
+}
+
 public enum NarrativeUnavailableReason: String, Sendable {
     case deviceNotEligible
     case appleIntelligenceNotEnabled
@@ -64,13 +126,16 @@ public struct NarrativeToolQuery {
 
 @available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
 public enum IntelligenceTools {
-    public static func make(provider: any IntelligenceCapabilityProviding) -> [any Tool] {
+    public static func make(
+        provider: any IntelligenceCapabilityProviding,
+        failureLog: ToolFailureLog? = nil
+    ) -> [any Tool] {
         [
-            TrainingOverviewTool(provider: provider),
-            ExerciseProgressionTool(provider: provider),
-            WeeklyReviewTool(provider: provider),
-            SessionDetailsTool(provider: provider),
-            ReadinessStatusTool(provider: provider),
+            TrainingOverviewTool(provider: provider, failureLog: failureLog),
+            ExerciseProgressionTool(provider: provider, failureLog: failureLog),
+            WeeklyReviewTool(provider: provider, failureLog: failureLog),
+            SessionDetailsTool(provider: provider, failureLog: failureLog),
+            ReadinessStatusTool(provider: provider, failureLog: failureLog),
         ]
     }
 }
@@ -79,14 +144,29 @@ public enum IntelligenceTools {
 public struct TrainingOverviewTool: Tool {
     public typealias Arguments = NarrativeToolQuery
     private let provider: any IntelligenceCapabilityProviding
-    public init(provider: any IntelligenceCapabilityProviding) { self.provider = provider }
+    private let failureLog: ToolFailureLog?
+    public init(provider: any IntelligenceCapabilityProviding, failureLog: ToolFailureLog? = nil) {
+        self.provider = provider
+        self.failureLog = failureLog
+    }
     public let name = "training_overview"
     public let description = "Read-only four-week training overview: compliance, performance, volume and readiness coverage. Use it for a broader context."
     public func call(arguments: NarrativeToolQuery) async throws -> String {
         do {
             return try await provider.trainingOverview(asOf: nil, windowWeeks: 4)
         } catch {
-            return "The overview could not be loaded right now."
+            let failure = CapabilityFailure(error)
+            failureLog?.record(failure)
+            switch failure {
+            case .unauthorized:
+                return "The overview could not be accessed. The pairing may need attention."
+            case .unavailable, .server:
+                return "The overview data is temporarily unavailable. Try again."
+            case .notFound:
+                return "No overview data was found."
+            case .invalidIdentifier, .unknown:
+                return "The overview could not be loaded right now."
+            }
         }
     }
 }
@@ -95,7 +175,11 @@ public struct TrainingOverviewTool: Tool {
 public struct ExerciseProgressionTool: Tool {
     public typealias Arguments = NarrativeToolQuery
     private let provider: any IntelligenceCapabilityProviding
-    public init(provider: any IntelligenceCapabilityProviding) { self.provider = provider }
+    private let failureLog: ToolFailureLog?
+    public init(provider: any IntelligenceCapabilityProviding, failureLog: ToolFailureLog? = nil) {
+        self.provider = provider
+        self.failureLog = failureLog
+    }
     public let name = "exercise_progression"
     public let description = "Read-only e1RM progression for one exercise. Pass an exact canonical id such as competition_squat, bench_press or trap_bar_deadlift, or an empty string when the question is not lift-specific."
     public func call(arguments: NarrativeToolQuery) async throws -> String {
@@ -106,8 +190,19 @@ public struct ExerciseProgressionTool: Tool {
         do {
             return try await provider.exerciseProgression(exerciseID: exercise, windowDays: 84)
         } catch {
-            return "No progression was found for '\(exercise)'. Ask the athlete which lift they mean; "
-                + "examples are competition_squat, bench_press and trap_bar_deadlift."
+            let failure = CapabilityFailure(error)
+            failureLog?.record(failure)
+            switch failure {
+            case .notFound, .invalidIdentifier:
+                return "No progression was found for '\(exercise)'. Ask the athlete which lift they mean; "
+                    + "examples are competition_squat, bench_press and trap_bar_deadlift."
+            case .unauthorized:
+                return "Progression data could not be accessed. The pairing may need attention."
+            case .unavailable, .server:
+                return "Progression data is temporarily unavailable. Try again."
+            case .unknown:
+                return "Progression data could not be loaded right now."
+            }
         }
     }
 }
@@ -116,14 +211,29 @@ public struct ExerciseProgressionTool: Tool {
 public struct WeeklyReviewTool: Tool {
     public typealias Arguments = NarrativeToolQuery
     private let provider: any IntelligenceCapabilityProviding
-    public init(provider: any IntelligenceCapabilityProviding) { self.provider = provider }
+    private let failureLog: ToolFailureLog?
+    public init(provider: any IntelligenceCapabilityProviding, failureLog: ToolFailureLog? = nil) {
+        self.provider = provider
+        self.failureLog = failureLog
+    }
     public let name = "weekly_review"
     public let description = "Read-only deterministic Monday-Sunday review: activity, adherence, sessions, progression, volume, readiness coverage and programme state."
     public func call(arguments: NarrativeToolQuery) async throws -> String {
         do {
             return try await provider.weeklyReview(weekEnd: nil)
         } catch {
-            return "The weekly review could not be loaded right now."
+            let failure = CapabilityFailure(error)
+            failureLog?.record(failure)
+            switch failure {
+            case .unauthorized:
+                return "The weekly review could not be accessed. The pairing may need attention."
+            case .unavailable, .server:
+                return "The weekly review is temporarily unavailable. Try again."
+            case .notFound:
+                return "No weekly review data was found."
+            case .invalidIdentifier, .unknown:
+                return "The weekly review could not be loaded right now."
+            }
         }
     }
 }
@@ -132,7 +242,11 @@ public struct WeeklyReviewTool: Tool {
 public struct SessionDetailsTool: Tool {
     public typealias Arguments = NarrativeToolQuery
     private let provider: any IntelligenceCapabilityProviding
-    public init(provider: any IntelligenceCapabilityProviding) { self.provider = provider }
+    private let failureLog: ToolFailureLog?
+    public init(provider: any IntelligenceCapabilityProviding, failureLog: ToolFailureLog? = nil) {
+        self.provider = provider
+        self.failureLog = failureLog
+    }
     public let name = "session_details"
     public let description = "Read-only detail for one completed workout. Pass a workout id if known, or an empty string for the most recent completed session."
     public func call(arguments: NarrativeToolQuery) async throws -> String {
@@ -140,7 +254,20 @@ public struct SessionDetailsTool: Tool {
         do {
             return try await provider.sessionDetails(workoutID: workout)
         } catch {
-            return "No session was found. Ask the athlete for a different workout."
+            let failure = CapabilityFailure(error)
+            failureLog?.record(failure)
+            switch failure {
+            case .notFound:
+                return "No session was found for that workout."
+            case .invalidIdentifier:
+                return "That workout id is not valid."
+            case .unauthorized:
+                return "Session data could not be accessed. The pairing may need attention."
+            case .unavailable, .server:
+                return "Session data is temporarily unavailable. Try again."
+            case .unknown:
+                return "Session data could not be loaded right now."
+            }
         }
     }
 }
@@ -149,14 +276,29 @@ public struct SessionDetailsTool: Tool {
 public struct ReadinessStatusTool: Tool {
     public typealias Arguments = NarrativeToolQuery
     private let provider: any IntelligenceCapabilityProviding
-    public init(provider: any IntelligenceCapabilityProviding) { self.provider = provider }
+    private let failureLog: ToolFailureLog?
+    public init(provider: any IntelligenceCapabilityProviding, failureLog: ToolFailureLog? = nil) {
+        self.provider = provider
+        self.failureLog = failureLog
+    }
     public let name = "readiness_status"
     public let description = "Read-only readiness score and coverage for the last seven days. Raw health fields are not returned by this tool."
     public func call(arguments: NarrativeToolQuery) async throws -> String {
         do {
             return try await provider.readinessStatus(from: "", to: "")
         } catch {
-            return "Readiness could not be loaded right now."
+            let failure = CapabilityFailure(error)
+            failureLog?.record(failure)
+            switch failure {
+            case .unauthorized:
+                return "Readiness could not be accessed. The pairing may need attention."
+            case .unavailable, .server:
+                return "Readiness data is temporarily unavailable. Try again."
+            case .notFound:
+                return "No readiness data was found."
+            case .invalidIdentifier, .unknown:
+                return "Readiness could not be loaded right now."
+            }
         }
     }
 }

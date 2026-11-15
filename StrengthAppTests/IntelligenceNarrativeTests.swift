@@ -174,6 +174,20 @@ final class IntelligenceNarrativeTests: XCTestCase {
 }
 
 
+private final class FailingProvider: IntelligenceCapabilityProviding, @unchecked Sendable {
+    let error: Error
+
+    init(error: Error = APIError.http(status: 404, message: "unknown exercise", fields: [:])) {
+        self.error = error
+    }
+
+    func trainingOverview(asOf: String?, windowWeeks: Int) async throws -> String { throw error }
+    func exerciseProgression(exerciseID: String, windowDays: Int) async throws -> String { throw error }
+    func weeklyReview(weekEnd: String?) async throws -> String { throw error }
+    func sessionDetails(workoutID: String) async throws -> String { throw error }
+    func readinessStatus(from: String, to: String) async throws -> String { throw error }
+}
+
 private final class StubProvider: IntelligenceCapabilityProviding, @unchecked Sendable {
     func trainingOverview(asOf: String?, windowWeeks: Int) async throws -> String { "overview facts" }
     func exerciseProgression(exerciseID: String, windowDays: Int) async throws -> String {
@@ -226,6 +240,39 @@ extension IntelligenceNarrativeTests {
         let tool = SessionDetailsTool(provider: StubProvider())
         let output = try await tool.call(arguments: NarrativeToolQuery())
         XCTAssertEqual(output, "session facts")
+    }
+
+    func testNotFoundExerciseStillSuggestsExamples() async throws {
+        let tool = ExerciseProgressionTool(provider: FailingProvider())
+        let message = try await tool.call(arguments: NarrativeToolQuery(query: "squat"))
+        XCTAssertTrue(message.contains("No progression was found"))
+        XCTAssertTrue(message.contains("competition_squat"))
+    }
+
+    func testTransportFailureIsNotPresentedAsAnUnknownExercise() async throws {
+        let tool = ExerciseProgressionTool(
+            provider: FailingProvider(error: APIError.transport("offline"))
+        )
+        let message = try await tool.call(arguments: NarrativeToolQuery(query: "squat"))
+        XCTAssertTrue(message.contains("temporarily unavailable"))
+        XCTAssertFalse(message.contains("competition_squat"))
+    }
+
+    func testToolFailureLogPreservesTheCategory() async throws {
+        let log = ToolFailureLog()
+        let tool = TrainingOverviewTool(
+            provider: FailingProvider(error: APIError.unauthorized), failureLog: log
+        )
+        _ = try await tool.call(arguments: NarrativeToolQuery())
+        XCTAssertEqual(log.failures, [.unauthorized])
+    }
+
+    func testCapabilityFailureClassification() {
+        XCTAssertEqual(CapabilityFailure(APIError.http(status: 404, message: "", fields: [:])), .notFound)
+        XCTAssertEqual(CapabilityFailure(APIError.http(status: 400, message: "", fields: [:])), .invalidIdentifier)
+        XCTAssertEqual(CapabilityFailure(APIError.unauthorized), .unauthorized)
+        XCTAssertEqual(CapabilityFailure(APIError.transport("")), .unavailable)
+        XCTAssertEqual(CapabilityFailure(APIError.http(status: 503, message: "", fields: [:])), .server)
     }
 
     func testBudgetTrimsObservationsFirst() {

@@ -43,7 +43,7 @@ struct ActionButtonStartWorkoutIntent: StartWorkoutIntent {
         }
         await today.refresh()
         guard case .ready(let plan) = today.state else {
-            return .result(dialog: "Request a workout on your iPhone first.")
+            return .result(dialog: "No workout is ready. Request one on your iPhone, then try again.")
         }
         await execution.start(issuedPlanID: plan.issuedPlanID)
         return .result(dialog: "Starting your workout.")
@@ -58,7 +58,15 @@ struct ActionButtonOpenFinishIntent: AppIntent {
     static var description = IntentDescription("Opens the running workout so you can finish it with sRPE.")
     static var openAppWhenRun: Bool = true
 
-    func perform() async throws -> some IntentResult {
-        .result()
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let execution = WatchIntentBridge.execution else {
+            return .result(dialog: "Open Strength on your watch first.")
+        }
+        guard execution.phase != .ready else {
+            return .result(dialog: "No workout is running. Request one on your iPhone first.")
+        }
+        execution.requestOpenFinish()
+        return .result(dialog: "Finish the workout here.")
     }
 }

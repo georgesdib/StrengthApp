@@ -304,6 +304,7 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
         + "answer: they are proposals, not facts, and they are never applied. If the tools cannot "
         + "answer, say so plainly. Return a JSON object with keys answer (string) and suggestions "
         + "(array of strings, empty when none). Convert today and yesterday to YYYY-MM-DD before calling "
-        + "a plan tool. Keep the answer under 150 words."
+        + "a plan tool. When asked for a prescription, list every item, not just the first. Keep the "
+        + "answer under 150 words."
     }
 }

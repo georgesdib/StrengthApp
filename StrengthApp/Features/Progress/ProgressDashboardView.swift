@@ -29,9 +29,11 @@ struct ProgressDashboardView: View {
                     }
                 }
 
-                Section("Intelligence") {
-                    NavigationLink("Weekly review") {
-                        WeeklyReviewView(model: model.makeWeeklyReviewModel())
+                if model.bootstrap?.capabilities.intelligenceRead == true {
+                    Section("Intelligence") {
+                        NavigationLink("Weekly review") {
+                            WeeklyReviewView(model: model.makeWeeklyReviewModel())
+                        }
                     }
                 }
 

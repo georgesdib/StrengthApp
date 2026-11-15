@@ -59,6 +59,16 @@ public struct WeeklyReviewView: View {
                                 systemImage: "exclamationmark.circle", tint: .orange)
                 }
             }
+            if envelope.status == "no_data" {
+                Text("No completed session in this week. This is missing data, not a negative result.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            if envelope.coverage["week_partial"]?.intValue == 1 {
+                Text("This week is still in progress; sections cover completed work so far.")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
             HStack {
                 Button("Previous week") { Task { await model.step(byWeeks: -1) } }
                     .buttonStyle(.bordered)

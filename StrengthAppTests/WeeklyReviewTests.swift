@@ -103,3 +103,45 @@ final class WeeklyReviewTests: XCTestCase {
         XCTAssertEqual(requested.last ?? nil, "2026-11-01")
     }
 }
+
+
+extension WeeklyReviewTests {
+    func testBootstrapCapabilityIsAdditive() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let old = """
+        {"api_version":"1","server_date":"2026-11-15","server_time":"2026-11-15T09:00:00Z",
+         "utc_offset_minutes":0,"server_timezone":"GMT",
+         "capabilities":{"readiness":true,"prescription":true,"workout_write":true,
+                         "healthkit":false,"offline":false}}
+        """
+        let decoded = try decoder.decode(BootstrapResponse.self, from: Data(old.utf8))
+        XCTAssertNil(decoded.capabilities.intelligenceRead)
+
+        let new = old.replacingOccurrences(
+            of: "\"offline\":false", with: "\"offline\":false,\"intelligence_read\":true"
+        )
+        let withRoute = try decoder.decode(BootstrapResponse.self, from: Data(new.utf8))
+        XCTAssertEqual(withRoute.capabilities.intelligenceRead, true)
+    }
+
+    @MainActor
+    func testViewModelSurfacesFailuresWithoutNegativeFraming() async {
+        let failures: [APIError] = [
+            .http(status: 404, message: "not found", fields: [:]),
+            .http(status: 503, message: "capabilities disabled", fields: [:]),
+            .transport("The request timed out."),
+            .unauthorized,
+            .decoding,
+        ]
+        for failure in failures {
+            let model = WeeklyReviewViewModel { _ in throw failure }
+            await model.load()
+            XCTAssertNil(model.envelope)
+            let message = model.errorMessage ?? ""
+            XCTAssertFalse(message.isEmpty)
+            XCTAssertFalse(message.lowercased().contains("missed"))
+            XCTAssertFalse(message.lowercased().contains("injury"))
+        }
+    }
+}

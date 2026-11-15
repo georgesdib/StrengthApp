@@ -36,6 +36,8 @@ public struct Capabilities: Decodable, Equatable {
     public let healthkitReadiness: Bool?
     public let offline: Bool
     public let readinessWrite: Bool?
+    /// Additive INT-3 capability; nil on an older server that predates the route.
+    public let intelligenceRead: Bool?
 
     public init(
         readiness: Bool,
@@ -44,7 +46,8 @@ public struct Capabilities: Decodable, Equatable {
         healthkit: Bool,
         offline: Bool,
         readinessWrite: Bool? = nil,
-        healthkitReadiness: Bool? = nil
+        healthkitReadiness: Bool? = nil,
+        intelligenceRead: Bool? = nil
     ) {
         self.readiness = readiness
         self.prescription = prescription
@@ -53,6 +56,7 @@ public struct Capabilities: Decodable, Equatable {
         self.healthkitReadiness = healthkitReadiness
         self.offline = offline
         self.readinessWrite = readinessWrite
+        self.intelligenceRead = intelligenceRead
     }
 }
 

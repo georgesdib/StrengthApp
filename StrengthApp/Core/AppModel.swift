@@ -1850,7 +1850,10 @@ final class AppModel: ObservableObject {
     }
 
     func makeNarrativeGenerator() -> any NarrativeGenerating {
-        FoundationNarrativeGenerator()
+        guard let session else { return FoundationNarrativeGenerator() }
+        return FoundationNarrativeGenerator(
+            provider: RESTIntelligenceProvider(client: client, session: session)
+        )
     }
 
     func loadOverviewEnvelope() async throws -> IntelligenceEnvelope {

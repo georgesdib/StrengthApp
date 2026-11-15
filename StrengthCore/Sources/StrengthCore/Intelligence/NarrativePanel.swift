@@ -5,36 +5,25 @@ import SwiftUI
 /// It never substitutes for the deterministic review: when the model is unavailable, fails or
 /// produces an ungrounded answer, the review above stays exactly as it was and this panel says why.
 public struct NarrativePanel: View {
-    private let context: NarrativeContext
-    private let generator: any NarrativeGenerating
-
-    @State private var phase: Phase = .idle
-
-    private enum Phase {
-        case idle
-        case loading
-        case result(GeneratedNarrative)
-        case message(String)
-    }
+    @StateObject private var model: NarrativePanelModel
 
     public init(context: NarrativeContext, generator: any NarrativeGenerating) {
-        self.context = context
-        self.generator = generator
+        _model = StateObject(
+            wrappedValue: NarrativePanelModel(context: context, generator: generator)
+        )
     }
 
     public var body: some View {
-        let availability = generator.availability()
+        let availability = model.generatorAvailability
         VStack(alignment: .leading, spacing: 8) {
             if availability.isAvailable {
-                switch phase {
+                switch model.phase {
                 case .idle, .message:
-                    Button(buttonTitle) { Task { await generate() } }
+                    Button(buttonTitle) { Task { await model.generate() } }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("explain-training")
-                    if case .message(let message) = phase {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    if case .message(let message) = model.phase {
+                        Text(message).font(.footnote).foregroundStyle(.secondary)
                     }
                 case .loading:
                     HStack(spacing: 8) {
@@ -49,37 +38,21 @@ public struct NarrativePanel: View {
                     Label(narrative.limitation, systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Regenerate") { Task { await generate() } }
+                    Button("Regenerate") { Task { await model.generate() } }
                         .font(.footnote)
                         .accessibilityIdentifier("regenerate-explanation")
                 }
                 Text("Generated on this iPhone; nothing is sent to a server and nothing is saved.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-            } else {
-                if case .unavailable(let reason) = availability {
-                    Text(reason)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+            } else if case .unavailable(let reason) = availability {
+                Text(reason).font(.footnote).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)
     }
 
     private var buttonTitle: String {
-        context.kind == .weeklyReview ? "Explain this week" : "Explain the last four weeks"
-    }
-
-    private func generate() async {
-        phase = .loading
-        do {
-            phase = .result(try await generator.generate(context))
-        } catch {
-            phase = .message(
-                (error as? LocalizedError)?.errorDescription
-                    ?? "The explanation could not be generated."
-            )
-        }
+        model.context.kind == .weeklyReview ? "Explain this week" : "Explain the last four weeks"
     }
 }

@@ -29,6 +29,14 @@ struct ProgressDashboardView: View {
                     }
                 }
 
+                if model.bootstrap?.capabilities.intelligenceRead == true {
+                    Section("Intelligence") {
+                        NavigationLink("Weekly review") {
+                            WeeklyReviewView(model: model.makeWeeklyReviewModel())
+                        }
+                    }
+                }
+
                 if let progress = model.progress {
                     Section("Coverage") {
                         LabeledContent("Sessions", value: "\(progress.coverage.sessions)")

@@ -714,6 +714,22 @@ public final class IOSAPIClient {
         )
     }
 
+    /// One deterministic weekly-review envelope; `weekEnd` defaults to the last completed week.
+    public func weeklyReview(
+        session: IOSSession,
+        weekEnd: String? = nil
+    ) async throws -> IntelligenceEnvelope {
+        var query: [URLQueryItem] = []
+        if let weekEnd {
+            query.append(URLQueryItem(name: "week_end", value: weekEnd))
+        }
+        return try await get(
+            path: "api/ios/v1/intelligence/weekly-review",
+            query: query,
+            session: session
+        )
+    }
+
     // MARK: Pending operations
 
     public func pendingMutations(for session: IOSSession) -> [PendingMutation] {

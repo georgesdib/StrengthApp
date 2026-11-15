@@ -186,6 +186,10 @@ completed workouts.
 
 - **Progress** shows the server's descriptive dashboard: sRPE coverage, performance points,
   weekly volume, attendance and back-symptom summary over the selected window.
+- **Progress → Weekly review** shows the server's deterministic Monday–Sunday package: activity,
+  adherence, sessions, main-lift progression, volume, readiness coverage, programme state and up to
+  two gated observations, with coverage and limitations. It is read-only and has no model; an empty
+  week says so instead of showing zeros.
 - **Settings → Exercises** provides a searchable catalogue, exercise configuration, server e1RM
   and paginated working-set history.
 - Catalogue/configuration is cached for the app session; entering an exercise fetches e1RM and

@@ -152,6 +152,31 @@ final class DeepSeekChatTests: XCTestCase {
         XCTAssertFalse(generator.availability().isAvailable)
     }
 
+    func testToolRoundCapStopsRunawayToolUse() async throws {
+        let call = DeepSeekChatResult(
+            content: nil,
+            toolCalls: [
+                DeepSeekToolCall(
+                    id: "call", function: .init(name: "weekly_review", arguments: "{}")
+                ),
+            ]
+        )
+        let api = StubDeepSeekAPI(responses: Array(repeating: call, count: 5))
+        let generator = DeepSeekChatGenerator(
+            api: api, keyPresent: true, facts: StubFacts(envelope: try envelope())
+        )
+        do {
+            _ = try await generator.reply(to: "What changed?", history: [])
+            XCTFail("expected the round cap to stop")
+        } catch let error as ChatError {
+            guard case .failed(let message) = error else {
+                return XCTFail("expected failed, got (error)")
+            }
+            XCTAssertTrue(message.contains("too many tool steps"))
+            XCTAssertEqual(api.calls.count, 4)
+        }
+    }
+
     func testClientSendsBearerAndParsesToolCall() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]

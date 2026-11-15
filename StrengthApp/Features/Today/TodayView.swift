@@ -16,6 +16,7 @@ struct TodayView: View {
     @State private var showingReview = false
     @State private var startAfterReview = false
     @State private var confirmingDiscardOffline = false
+    @State private var showingActiveWorkoutFromIntent = false
 
     var body: some View {
         NavigationStack {
@@ -293,6 +294,12 @@ struct TodayView: View {
                 }
             }
             .navigationTitle("Today")
+            .navigationDestination(isPresented: $showingActiveWorkoutFromIntent) {
+                ActiveWorkoutView(model: model)
+            }
+            .onChange(of: model.openActiveWorkoutRequest) { _, _ in
+                showingActiveWorkoutFromIntent = true
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

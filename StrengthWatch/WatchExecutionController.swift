@@ -16,6 +16,12 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var selectedItem: PrescriptionItem?
     /// True only once the server acknowledged the finish; an empty queue is not proof.
     @Published private(set) var finishAcknowledged = false
+    /// A shortcut or the Action button asked for the finish screen. The execution view observes it.
+    @Published private(set) var openFinishRequest = 0
+
+    func requestOpenFinish() {
+        openFinishRequest += 1
+    }
     /// The rest end the pending notification was scheduled for, so sync() only re-schedules
     /// when the interval actually changes.
     private var scheduledRestEnd: Date?
@@ -253,6 +259,10 @@ final class WatchExecutionController: ObservableObject {
         let started = await engine.start(issuedPlanID: issuedPlanID, session: session)
         if !started {
             await endLiveness()
+        } else if let sessionID = engine.sessionRecord?.sessionUUID {
+            await WatchSceneAutomation.run(event: "started", sessionID: sessionID)
+            // The Action button's next press should bring the session forward for sRPE.
+            _ = try? await ActionButtonOpenFinishIntent().donate()
         }
         sync()
     }
@@ -297,6 +307,29 @@ final class WatchExecutionController: ObservableObject {
         // Contract §10.2: refresh after each set, so a plan edit whose nudge was dropped while
         // the watch was unreachable is picked up at this idle point rather than at the next
         // foreground. Only when the flush finished cleanly; offline work stays local.
+        if result.persisted, result.stop == .allSent {
+            await reconcileNow()
+        }
+    }
+
+    /// Warm-up sets are ordinary logged sets with RIR 6 and no plan-item attribution, so they
+    /// stay out of working-set adherence and do not open a working-set rest timer.
+    func logWarmup(loadKg: Double?, reps: Int, index: Int) async {
+        guard let session = currentSession(), let item = engine.selectedItem else { return }
+        let entry = WatchExecutionEngine.SetEntry(
+            exerciseId: item.exerciseId ?? "",
+            planItemIndex: nil,
+            setIndex: 1000 + max(0, index),
+            loadKg: loadKg,
+            reps: reps,
+            rir: 6,
+            completedAt: Date()
+        )
+        isWorking = true
+        defer { isWorking = false }
+        let result = await engine.logSet(entry, session: session)
+        await handle(result.stop)
+        sync()
         if result.persisted, result.stop == .allSent {
             await reconcileNow()
         }
@@ -435,6 +468,9 @@ final class WatchExecutionController: ObservableObject {
         }
         #endif
         await handle(stop)
+        if engine.sessionRecord?.finish != nil, let sessionID = engine.sessionRecord?.sessionUUID {
+            await WatchSceneAutomation.run(event: "ended", sessionID: sessionID)
+        }
         // The HealthKit save ends the live session itself, so liveness is not ended here.
         if !WatchSmokeMode.isEnabled {
             await finalizeHealthKit()
@@ -451,7 +487,11 @@ final class WatchExecutionController: ObservableObject {
 
     func discard() async {
         guard let session = currentSession() else { return }
+        let sessionID = engine.sessionRecord?.sessionUUID
         await engine.discard(session: session)
+        if let sessionID {
+            await WatchSceneAutomation.run(event: "ended", sessionID: sessionID)
+        }
         await endLiveness()
         sync()
     }

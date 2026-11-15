@@ -5,6 +5,7 @@ struct WatchExecutionView: View {
     @ObservedObject var execution: WatchExecutionController
     @State private var showingSession = false
     @State private var showingPlan = false
+    @State private var showingFinishFromIntent = false
 
     var body: some View {
         Group {
@@ -51,6 +52,12 @@ struct WatchExecutionView: View {
         }
         .sheet(isPresented: $showingPlan) {
             WatchPlanView(execution: execution)
+        }
+        .sheet(isPresented: $showingFinishFromIntent) {
+            WatchFinishView(execution: execution)
+        }
+        .onChange(of: execution.openFinishRequest) { _, _ in
+            showingFinishFromIntent = true
         }
         // Finishing or discarding from a sheet leaves it presented over a screen that no longer
         // belongs to that sheet; close the stack when the phase leaves the active session.

@@ -57,6 +57,35 @@ final class AppModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var pairingError: String?
     @Published private(set) var activeWorkout: WorkoutDetail?
+    @Published var narrativeEnabled: Bool = UserDefaults.standard.bool(
+        forKey: "intelligence.narrative.enabled"
+    ) {
+        didSet { UserDefaults.standard.set(narrativeEnabled, forKey: "intelligence.narrative.enabled") }
+    }
+    @Published var chatEnabled: Bool = UserDefaults.standard.bool(
+        forKey: "intelligence.chat.enabled"
+    ) {
+        didSet { UserDefaults.standard.set(chatEnabled, forKey: "intelligence.chat.enabled") }
+    }
+    @Published var chatModelChoice: ChatModelChoice = ChatModelChoice(
+        rawValue: UserDefaults.standard.string(forKey: "intelligence.chat.model") ?? ""
+    ) ?? .onDevice {
+        didSet {
+            UserDefaults.standard.set(chatModelChoice.rawValue, forKey: "intelligence.chat.model")
+        }
+    }
+    @Published var chatPlanEnabled: Bool = UserDefaults.standard.bool(
+        forKey: "intelligence.chat.plan"
+    ) {
+        didSet { UserDefaults.standard.set(chatPlanEnabled, forKey: "intelligence.chat.plan") }
+    }
+    @Published private(set) var deepSeekKeyPresent = false
+    private let deepSeekKeyStore: any DeepSeekKeyStoring = KeychainDeepSeekKeyStore()
+    @Published var narrativeDetail: NarrativeDetail = NarrativeDetail(
+        rawValue: UserDefaults.standard.string(forKey: "intelligence.narrative.detail") ?? ""
+    ) ?? .standard {
+        didSet { UserDefaults.standard.set(narrativeDetail.rawValue, forKey: "intelligence.narrative.detail") }
+    }
     @Published private(set) var offlineCapture: OfflineCapture?
     @Published private(set) var offlineRecoveryError: OfflineCaptureStoreError?
     @Published private(set) var offlinePersistenceError: String?
@@ -132,6 +161,7 @@ final class AppModel: ObservableObject {
     private var offlineRetryTask: Task<Void, Never>?
     private var offlineRetryAttempt = 0
     private let exerciseCatalogueCache: ExerciseCatalogueCache
+    private let automation: WorkoutAutomation
     private var exerciseCatalogueLoadedServerURL: String?
     private var exerciseDetailCache: [String: ExerciseDetailResponse] = [:]
     private var exerciseHistoryExerciseId: String?
@@ -149,13 +179,15 @@ final class AppModel: ObservableObject {
         healthKitDefaults: UserDefaults = .standard,
         offlineStore: OfflineCaptureStore? = nil,
         watchConnectivity: WatchConnectivitySession? = nil,
-        exerciseCatalogueCache: ExerciseCatalogueCache? = nil
+        exerciseCatalogueCache: ExerciseCatalogueCache? = nil,
+        automation: WorkoutAutomation? = nil
     ) {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
         let readiness = healthKit ?? HealthKitReadinessService()
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
+        let resolvedAutomation = automation ?? WorkoutAutomation.shared
         let initialCapture: OfflineCapture?
         let initialRecoveryError: OfflineCaptureStoreError?
         do {
@@ -181,6 +213,8 @@ final class AppModel: ObservableObject {
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
         self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
+        self.automation = resolvedAutomation
+        self.deepSeekKeyPresent = ((try? self.deepSeekKeyStore.load()) ?? nil)?.isEmpty == false
         self.healthKitEnabled = enabled
         self.healthKitState = enabled
             ? (readiness.isAvailable ? .enabled : .unavailable)
@@ -1369,6 +1403,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(workout))
+            await automation.handle(.started, sessionID: workout.workoutId)
             clearOfflineCaptureAfterServerCompletion()
             persistActiveWorkout()
             recoveryIssue = nil
@@ -1535,6 +1570,7 @@ final class AppModel: ObservableObject {
             if let cached = exerciseCatalogueCache.load(serverURL: server) {
                 exerciseCatalogue = cached.exercises
                 exerciseCatalogueCachedAt = cached.fetchedAt
+                await ExerciseSpotlightIndexer.index(cached.exercises)
             }
             exerciseCatalogueLoadedServerURL = server
         }
@@ -1548,6 +1584,7 @@ final class AppModel: ObservableObject {
             exerciseCatalogueCachedAt = nil
             exerciseCatalogueLoadedServerURL = server
             try? exerciseCatalogueCache.save(serverURL: server, exercises: exercises)
+            await ExerciseSpotlightIndexer.index(exercises)
         } catch {
             if exerciseCatalogue.isEmpty {
                 exerciseCatalogueError = message(for: error)
@@ -1753,7 +1790,11 @@ final class AppModel: ObservableObject {
         }
         if offlineCaptureActive {
             restTimer.dismiss()
-            return queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+            let queued = queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+            if queued {
+                await automation.handle(.ended, sessionID: workout.workoutId)
+            }
+            return queued
         }
         guard permitsMutation(kind: .completeWorkout, operationId: idempotencyKey) else {
             return false
@@ -1768,6 +1809,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(updated))
+            await automation.handle(.ended, sessionID: workout.workoutId)
             recoveryIssue = nil
             workoutRefreshGrace = false
             restTimer.dismiss()
@@ -1778,7 +1820,11 @@ final class AppModel: ObservableObject {
         } catch {
             if shouldQueueOffline(error) {
                 client.discardPendingOperation(idempotencyKey)
-                return queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+                let queued = queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+                if queued {
+                    await automation.handle(.ended, sessionID: workout.workoutId)
+                }
+                return queued
             }
             if let api = error as? APIError,
                ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
@@ -1806,6 +1852,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(updated))
+            await automation.handle(.ended, sessionID: workout.workoutId)
             clearOfflineCaptureAfterServerCompletion()
             recoveryIssue = nil
             workoutRefreshGrace = false
@@ -1836,6 +1883,103 @@ final class AppModel: ObservableObject {
             } else {
                 progressError = message(for: error)
             }
+        }
+    }
+
+    /// A shortcut or Action button asked to see the running workout. The Today screen observes this
+    /// and pushes the active workout, which is where finish and sRPE live.
+    @Published private(set) var openActiveWorkoutRequest = 0
+
+    func requestOpenActiveWorkout() {
+        openActiveWorkoutRequest += 1
+    }
+
+    /// Pushes a changed scene choice to the watch. Best-effort; pairing errors are already surfaced
+    /// by the watch section.
+    func syncSceneMappingToWatch() {
+        Task { await watchPairing.syncSceneMapping() }
+    }
+
+    func makeNarrativeGenerator() -> any NarrativeGenerating {
+        FoundationNarrativeGenerator()
+    }
+
+    func makeChatModel() -> TrainingChatModel {
+        guard let session else {
+            return TrainingChatModel(
+                generator: UnavailableChatGenerator(), modelLabel: "Unavailable"
+            )
+        }
+        if chatModelChoice == .deepSeek {
+            let key = (try? deepSeekKeyStore.load()) ?? nil
+            return TrainingChatModel(
+                generator: DeepSeekChatGenerator(
+                    api: DeepSeekClient(apiKey: key),
+                    keyPresent: key?.isEmpty == false,
+                    facts: ChatToolbox(client: client, session: session),
+                    includePlan: chatPlanEnabled
+                ),
+                modelLabel: "DeepSeek",
+                planEnabled: chatPlanEnabled
+            )
+        }
+        return TrainingChatModel(
+            generator: FoundationChatGenerator(
+                facts: ChatToolbox(client: client, session: session),
+                includePlan: chatPlanEnabled
+            ),
+            modelLabel: "On-device",
+            planEnabled: chatPlanEnabled
+        )
+    }
+
+    func saveDeepSeekKey(_ key: String) -> String {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Enter an API key first." }
+        do {
+            try deepSeekKeyStore.save(trimmed)
+            deepSeekKeyPresent = true
+            return "Key saved in this iPhone's Keychain."
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? "The key could not be saved."
+        }
+    }
+
+    func removeDeepSeekKey() -> String {
+        do {
+            try deepSeekKeyStore.delete()
+            deepSeekKeyPresent = false
+            return "Key removed."
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? "The key could not be removed."
+        }
+    }
+
+    func testDeepSeekKey(_ key: String) async -> String {
+        let stored = (try? deepSeekKeyStore.load()) ?? nil
+        let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selected = candidate.isEmpty ? stored : candidate
+        guard let selected, !selected.isEmpty else { return "Enter an API key first." }
+        do {
+            try await DeepSeekClient(apiKey: selected).validateKey()
+            return "Key works."
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? "The key could not be checked."
+        }
+    }
+
+    func loadOverviewEnvelope() async throws -> IntelligenceEnvelope {
+        guard let session else { throw APIError.unauthorized }
+        return try await client.overview(session: session)
+    }
+
+    /// The weekly review reads through the same paired session; the view owns its load state.
+    func makeWeeklyReviewModel() -> WeeklyReviewViewModel {
+        WeeklyReviewViewModel { [weak self] weekEnd in
+            guard let self, let session = self.session else {
+                throw APIError.unauthorized
+            }
+            return try await self.client.weeklyReview(session: session, weekEnd: weekEnd)
         }
     }
 

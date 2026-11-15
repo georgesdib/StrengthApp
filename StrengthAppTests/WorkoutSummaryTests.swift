@@ -78,6 +78,47 @@ final class WorkoutSummaryTests: XCTestCase {
         XCTAssertEqual(envelope.summary.workoutId, "workout-1")
     }
 
+    func testSummaryUsesTheLongTransportAndSixtySecondTimeout() async throws {
+        let short = StubTransport { _ in
+            XCTFail("the summary must not use the short transport")
+            return (500, Data())
+        }
+        let long = StubTransport { request in
+            XCTAssertEqual(request.timeoutInterval, 60)
+            XCTAssertEqual(
+                request.url?.path,
+                "/api/ios/v1/workouts/workout-1/summary"
+            )
+            return (200, Data(Self.summaryJSON.utf8))
+        }
+        let client = IOSAPIClient(transport: short, longTransport: long)
+        let envelope = try await client.workoutSummary(
+            workoutId: "workout-1", session: session
+        )
+        XCTAssertEqual(envelope.summary.workoutId, "workout-1")
+        XCTAssertEqual(long.requests.count, 1)
+        XCTAssertTrue(short.requests.isEmpty)
+    }
+
+    func testSummaryTimeoutIsReportedWithoutRetrying() async throws {
+        let transport = AsyncStubTransport { _ in
+            throw URLError(.timedOut)
+        }
+        let client = IOSAPIClient(transport: transport, longTransport: transport)
+        do {
+            _ = try await client.workoutSummary(
+                workoutId: "workout-1", session: session
+            )
+            XCTFail("expected a timeout")
+        } catch let error as APIError {
+            XCTAssertEqual(
+                error.errorDescription,
+                "The server did not respond within 60 seconds."
+            )
+        }
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+
     func testHistoryDetailCarriesTheWorkoutId() throws {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase

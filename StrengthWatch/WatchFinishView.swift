@@ -16,32 +16,67 @@ struct WatchFinishView: View {
         ScrollView {
             VStack(spacing: 8) {
                 Text("Session RPE").font(.headline)
-                Text(notRecorded ? "—" : "\(Int(sessionRpe))")
-                    .font(.system(size: 40, weight: .semibold, design: .rounded))
-                    .focusable()
-                    .digitalCrownRotation(
-                        $sessionRpe,
-                        from: 1,
-                        through: 10,
-                        by: 1,
-                        sensitivity: .medium
-                    )
-                    .disabled(notRecorded)
+                HStack(spacing: 8) {
+                    Button {
+                        sessionRpe = max(1, sessionRpe - 1)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .disabled(notRecorded || sessionRpe <= 1)
+                    .accessibilityIdentifier("watch-session-rpe-minus")
+
+                    Text(notRecorded ? "—" : "\(Int(sessionRpe))")
+                        .font(.system(size: 36, weight: .semibold, design: .rounded))
+                        .frame(minWidth: 54)
+                        .focusable()
+                        .digitalCrownRotation(
+                            $sessionRpe,
+                            from: 1,
+                            through: 10,
+                            by: 1,
+                            sensitivity: .medium,
+                            isContinuous: false,
+                            isHapticFeedbackEnabled: true
+                        )
+                        .disabled(notRecorded)
+                        .accessibilityIdentifier("watch-session-rpe")
+                        .accessibilityValue(notRecorded ? "Not recorded" : "\(Int(sessionRpe))")
+
+                    Button {
+                        sessionRpe = min(10, sessionRpe + 1)
+                    } label: {
+                        Image(systemName: "plus.circle")
+                    }
+                    .disabled(notRecorded || sessionRpe >= 10)
+                    .accessibilityIdentifier("watch-session-rpe-plus")
+                }
                 Text("\(execution.completedSetCount) sets · \(execution.pendingCount) pending")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Toggle("Not recorded", isOn: $notRecorded)
                 Text("Productivity").font(.headline)
-                HStack(spacing: 2) {
+                VStack(spacing: 4) {
                     ForEach(1...5, id: \.self) { value in
-                        Button("\(value)") { productivity = value }
-                            .buttonStyle(.bordered)
-                            .tint(productivity == value ? .accentColor : .gray)
-                            .accessibilityIdentifier("watch-productivity-\(value)")
+                        Button {
+                            productivity = value
+                        } label: {
+                            HStack {
+                                Text("\(value)")
+                                Spacer()
+                                if productivity == value {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(productivity == value ? .accentColor : .gray)
+                        .accessibilityIdentifier("watch-productivity-\(value)")
                     }
                 }
                 Button("Not recorded") { productivity = nil }
                     .font(.caption2)
+                    .foregroundStyle(productivity == nil ? .primary : .secondary)
                 Button("Finish") {
                     isSaving = true
                     Task {

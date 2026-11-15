@@ -212,7 +212,7 @@ public struct HealthKitStartGate: Equatable, Sendable {
 
 /// A heart-rate reading with the moment it was observed, so a stale value is never shown as live.
 public struct HeartRateReading: Equatable, Sendable {
-    public static let freshness: TimeInterval = 30
+    public static let freshness: TimeInterval = 10
 
     public let bpm: Int
     public let observedAt: Date

@@ -107,23 +107,40 @@ struct WatchExerciseView: View {
             Text("Set \(setNumber(item)) of \(item.sets ?? 0)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                if let heartRate = execution.heartRate {
+                    Label("\(heartRate) bpm", systemImage: "heart.fill")
+                        .foregroundStyle(.red)
+                }
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Label(
+                        formattedDuration(execution.elapsed(at: context.date)),
+                        systemImage: "timer"
+                    )
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("watch-total-time")
+            }
+            .font(.caption)
+            .monospacedDigit()
             Text("\(item.loadLabel) × \(item.repsLabel)")
                 .font(.title3)
             Text(item.effortLabel)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            if let heartRate = execution.heartRate {
-                Text("\(heartRate) bpm")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
         }
     }
 
     private func idle(_ item: PrescriptionItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            warmupSection(item)
             loadRow
             repsRow
+            if loadEntryNeeded {
+                Text("Enter the load for this exercise.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
             if prescribedSetsExhausted(item) {
                 Button {
                     execution.beginSet(loadKg: loadKg, reps: reps)
@@ -174,6 +191,38 @@ struct WatchExerciseView: View {
         }
     }
 
+    @ViewBuilder
+    private func warmupSection(_ item: PrescriptionItem) -> some View {
+        if let warmups = item.warmup, !warmups.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Warm-up")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                ForEach(Array(warmups.enumerated()), id: \.offset) { index, warmup in
+                    HStack {
+                        Text("Warm-up \(index + 1): \(warmup.loadLabel) × \(warmup.reps)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Log") {
+                            Task {
+                                await execution.logWarmup(
+                                    loadKg: warmup.loadKg,
+                                    reps: warmup.reps,
+                                    index: index
+                                )
+                            }
+                        }
+                        .font(.caption2)
+                        .disabled(execution.isWorking)
+                        .accessibilityIdentifier("watch-log-warmup-\(index)")
+                    }
+                }
+            }
+            .accessibilityIdentifier("watch-warmups")
+        }
+    }
+
     private var loadRow: some View {
         HStack {
             Text("Load").font(.caption2)
@@ -192,24 +241,31 @@ struct WatchExerciseView: View {
 
     private var repsRow: some View {
         HStack {
-            Text("\(reps) reps").font(.body).monospacedDigit()
+            Text(isTimeBased ? "\(reps) sec" : "\(reps) reps")
+                .font(.body)
+                .monospacedDigit()
             Spacer()
-            Button("−") { reps = max(0, reps - 1) }
-            Button("+") { reps += 1 }
+            Button("−") { reps = max(0, reps - (isTimeBased ? 5 : 1)) }
+            Button("+") { reps += isTimeBased ? 5 : 1 }
         }
         .accessibilityIdentifier("watch-reps")
+    }
+
+    private var isTimeBased: Bool {
+        execution.selectedItem?.isTimeBased == true
     }
 
     private var completionSheet: some View {
         ScrollView {
             VStack(spacing: 4) {
                 Text("Reps in reserve").font(.headline)
-                Text("\(formatted(loadKg)) kg × \(reps)")
+                Text("\(formatted(loadKg)) kg × \(reps)\(isTimeBased ? "s" : "")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                // Only a calibrated lift has a velocity target; bodyweight work must not ask
-                // for bar speed (contract: the plan decides, the client displays).
-                if execution.selectedItem?.velocityTarget != nil {
+                // The watch records the measurement; the server supplies any target. Allow
+                // it for external-load work even when the plan has no target, but not for
+                // bodyweight work.
+                if offersVelocityInput {
                     TextField("Bar speed m/s", text: $velocityText)
                         .accessibilityIdentifier("watch-velocity")
                     if !velocityText.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -274,6 +330,28 @@ struct WatchExerciseView: View {
 
     /// Optional mean velocity for the set (VBT). Empty means "not measured"; a non-empty value
     /// must parse, so a typo cannot silently drop the measurement.
+    /// A swapped or otherwise re-solved exercise has no issued target; allow an optional
+    /// measurement for it, but keep bodyweight work free of a bar-speed prompt.
+    private var offersVelocityInput: Bool {
+        guard let item = execution.selectedItem else { return false }
+        // The watch only records the measurement. A server target is optional; external-load
+        // work can always be measured, while bodyweight work is not asked for bar speed.
+        return !isBodyweight(item)
+    }
+
+    private func isBodyweight(_ item: PrescriptionItem) -> Bool {
+        item.loadBasis == "bodyweight" || item.loadBasis == "bodyweight_total"
+    }
+
+    /// A nil load after a swap is unknown, not bodyweight. Force an explicit entry before the
+    /// set can be started so a missing value is never recorded as 0 kg.
+    private var loadEntryNeeded: Bool {
+        guard let item = execution.selectedItem else { return false }
+        return item.loadKg == nil
+            && !isBodyweight(item)
+            && loadKg <= 0
+    }
+
     private var parsedVelocity: Double? {
         let trimmed = velocityText.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, let value = Double(trimmed), value > 0 else { return nil }
@@ -335,8 +413,13 @@ struct WatchExerciseView: View {
         let key = "\(itemIndex)-\(item.exerciseId ?? "")"
         guard preparedFor != key else { return }
         preparedFor = key
-        loadKg = item.loadKg ?? loadKg
-        loadText = formatted(loadKg)
+        if let plannedLoad = item.loadKg {
+            loadKg = plannedLoad
+            loadText = formatted(plannedLoad)
+        } else {
+            loadKg = 0
+            loadText = ""
+        }
         reps = item.repsLow ?? item.repsHigh ?? reps
     }
 

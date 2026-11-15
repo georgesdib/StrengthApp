@@ -9,6 +9,7 @@ public struct WatchPlanItemSummary: Identifiable, Equatable, Sendable {
     public let loadLabel: String
     public let effortLabel: String
     public let restLabel: String
+    public let warmupLabel: String?
 
     public init(
         id: String,
@@ -17,7 +18,8 @@ public struct WatchPlanItemSummary: Identifiable, Equatable, Sendable {
         repsLabel: String,
         loadLabel: String,
         effortLabel: String,
-        restLabel: String
+        restLabel: String,
+        warmupLabel: String? = nil
     ) {
         self.id = id
         self.exerciseLabel = exerciseLabel
@@ -26,6 +28,7 @@ public struct WatchPlanItemSummary: Identifiable, Equatable, Sendable {
         self.loadLabel = loadLabel
         self.effortLabel = effortLabel
         self.restLabel = restLabel
+        self.warmupLabel = warmupLabel
     }
 }
 
@@ -99,7 +102,13 @@ public enum WatchTodayMapper {
                     repsLabel: item.repsLabel,
                     loadLabel: item.loadLabel,
                     effortLabel: item.effortLabel,
-                    restLabel: item.restS.map { String($0) + "s rest" } ?? "—"
+                    restLabel: item.restS.map { String($0) + "s rest" } ?? "—",
+                    warmupLabel: {
+                        guard let warmup = item.warmup, !warmup.isEmpty else { return nil }
+                        return warmup
+                            .map { "\($0.loadLabel)×\($0.reps)" }
+                            .joined(separator: " · ")
+                    }()
                 )
             }
             return .ready(WatchPlanSummary(

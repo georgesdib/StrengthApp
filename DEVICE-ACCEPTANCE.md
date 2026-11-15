@@ -369,3 +369,168 @@ Owner confirmation: pass 2026-11-08 · Build: Phase 3A · Device: physical iPhon
 - [x] Confirm no background sync runs.
 
 Owner confirmation: pass 2026-11-08 · Build: Phase 4 · Device: physical iPhone · iOS: 27.2
+
+---
+
+# INT-7 Siri and App Intents acceptance — complete (owner-confirmed 2026-11-15)
+
+**Status 2026-11-15:** delivered and owner-confirmed on the physical iPhone (iOS 27.2, Release build
+of `development` at `0697889`). Siri routes every read-only phrase to the app and answers with the
+deterministic values plus a snippet card.
+
+## Automated
+
+- [x] `StrengthIntents` package product builds and its metadata merges into `StrengthApp.app`.
+- [x] Digest tests: overview numbers, empty-window wording, weekly-review sessions and progression,
+      progression fallback name, last-workout sentence, average-duration mean and empty case.
+- [x] Entity query resolves through the registered provider and filters by identifier.
+- [x] Snippet cards render through `ImageRenderer` for weekly review, overview, progression, last
+      workout and average duration.
+- [x] `scripts/check-shortcut-phrases.sh` passes: every phrase carries the app-name token.
+
+## Physical device — owner-confirmed
+
+- [x] The build installs and launches on the physical iPhone (iOS 27.2).
+- [x] "How long was my last workout in StrengthApp" answers with the newest history row.
+- [x] "How is my training going in StrengthApp" answers with sessions, mean duration and readiness
+      coverage.
+- [x] "Weekly review in StrengthApp" answers for the last completed week.
+- [x] "How is <exercise> progression in StrengthApp" answers with direction, change and session count.
+- [x] "Average workout duration in StrengthApp" answers with the mean and the sample size.
+- [x] "Average workout duration over the last 12 weeks in StrengthApp" answers for the 12-week window.
+- [x] The metadata build registers the shortcuts after a reinstall; the earlier generic Siri answers
+      were a registration problem, not a code problem.
+
+## Not separately recorded on device
+
+- [ ] Snippet cards were seen on device (the views are covered by render tests; the owner confirmed the
+      spoken answers, not the cards).
+- [ ] The Shortcuts app listing was not opened.
+- [ ] The unpaired/offline dialog was not exercised.
+- [x] Read-only by inspection: every intent calls a `GET` route (`/intelligence/...` or `/history`)
+      and there is no write path in `StrengthIntents`.
+
+## Deferred
+
+- **Spotlight**: `ExerciseEntity` conforms to `IndexedEntity` and the app donates the catalogue with
+  `CSSearchableIndex.indexAppEntities`, but search results do not surface on the owner's device. The
+  owner accepted the deferral on 2026-11-15. Next probes if it is revisited: Settings → Siri & Search →
+  StrengthApp → Show Content in Search, and the `intents` log category.
+
+Owner confirmation: pass 2026-11-15 · Build: INT-7 · Device: iPhone 16 Pro Max (iPhone17,2) · iOS: 27.2
+
+---
+
+# INT-7b-1 workout automation acceptance — complete (owner-confirmed 2026-11-15)
+
+**Status 2026-11-15:** `WorkoutAutomation` is wired into the session transitions and its unit tests pass
+on the iPhone 17 simulator. The owner confirmed every physical-device check below.
+
+## Automated
+
+- [x] A configured shortcut fires once per session and event, and a second identical transition is a
+      no-op.
+- [x] Start and end are separate channels and both fire.
+- [x] An empty or whitespace-only field is off.
+- [x] Different sessions each fire.
+- [x] A refused URL is forgotten so a later transition can retry, and the workout is untouched.
+- [x] The URL is `shortcuts://run-shortcut?name=<percent-encoded>` with no input.
+
+## Physical device — owner-confirmed
+
+- [x] Settings shows "Workout automation" with a shortcut name per event and two test buttons.
+- [x] With both fields filled, starting a workout runs the start shortcut (Shortcuts comes to the
+      foreground briefly and the app returns).
+- [x] Finishing or abandoning the workout runs the end shortcut.
+- [x] With both fields empty, nothing runs.
+- [x] A shortcut name that no longer exists does not block or delay the workout and does not crash.
+- [x] The shortcut receives no input: a shortcut whose first action reads "Shortcut Input" still runs.
+
+Owner confirmation: pass 2026-11-15 · Build: INT-7b-1 · Device: physical iPhone · iOS: 27.2
+
+---
+
+# INT-7b-2 HomeKit scenes acceptance — complete (owner-confirmed 2026-11-15)
+
+**Status 2026-11-15:** the phone chooses and executes scenes on start and end; the mapping travels to
+the watch in the credential context, and the watch executes the same scenes when it owns the session.
+The owner confirmed every phone and watch check below.
+
+## Automated
+
+- [x] The scene runs before the Shortcut, once per session and event.
+- [x] A refused scene is forgotten so a later transition can retry, and the workout is untouched.
+- [x] `SceneSelection` survives a JSON round-trip and tolerates corrupt storage.
+- [x] Ten automation tests pass on the iPhone 17 simulator.
+
+## Physical device — owner-confirmed
+
+- [x] Settings shows "Home scenes" with a start and end picker, populated from the homes the app can
+      see; the first open asks for Home access.
+- [x] Choosing a scene and starting a workout runs it; finishing or abandoning runs the end scene.
+- [x] With both pickers on "None", no scene runs.
+- [x] A scene deleted after selection is skipped; the workout still starts and finishes.
+- [x] Denying Home access leaves both pickers empty and never blocks a workout.
+
+## Watch — owner-confirmed
+
+- [x] After choosing scenes on the phone, the watch receives the mapping with its next credential
+      context (pairing, config refresh, or a scene change).
+- [x] Starting a workout on the watch runs the start scene; finishing or discarding runs the end scene.
+- [x] The same session never runs a scene twice, and a missing home or scene is skipped silently.
+
+Owner confirmation: pass 2026-11-15 · Build: INT-7b-2 (phone and watch) · Device: iPhone 16 Pro Max + Apple Watch · iOS 27.2 / watchOS 27.2
+
+---
+
+# INT-7b-3 Action button and watch Siri acceptance — complete (owner-confirmed 2026-11-15)
+
+**Status 2026-11-15:** the watch target links `StrengthIntents`, declares its own read-only intents and
+App Shortcuts, registers a watch-side data provider, and implements `StartWorkoutIntent` plus the
+donated finish intent. The owner confirmed every physical check below.
+
+## Automated
+
+- [x] The watch scheme builds with the intents package linked.
+- [x] The phone scheme still builds and the iOS suite passes (run through `scripts/ci.sh`).
+- [x] `StrengthWorkoutStyle` is a single `Strength` case; the issued plan decides the session content.
+
+## Physical device — owner-confirmed
+
+- [x] Settings > Action button > Workout lists Strength; choosing it and pressing the button starts the
+      plan the iPhone already requested for the watch.
+- [x] With no watch-targeted plan, the button answers "Request a workout on your iPhone first" and opens
+      the app instead of starting anything.
+- [x] While a session is running, the second press brings the session forward and does **not** finish it
+      (owner chose "open the finish screen", 2026-11-15); sRPE is entered and Finish is tapped by hand.
+- [x] Watch Siri answers the four read-only questions (last workout, overview, weekly review, exercise
+      progression) after the watch app has been opened once.
+- [x] With the watch unpaired, those phrases answer with the pairing message instead of hanging.
+
+Owner confirmation: pass 2026-11-15 · Build: INT-7b-3 · Device: Apple Watch · watchOS 27.2
+
+---
+
+# INT-7c Shortcuts start and finish acceptance — complete (owner-confirmed 2026-11-15)
+
+**Status 2026-11-15:** the Shortcuts app can start a workout and open the finish screen on both the
+phone and the watch. Ending never finishes by itself — it opens the screen where sRPE is recorded,
+matching the Action button's behaviour.
+
+## Automated
+
+- [x] The phone and watch schemes build; the iOS suite passes through `scripts/ci.sh`.
+- [x] The phone start intent refuses to invent a plan: no issued prescription means a message, not a
+      workout.
+
+## Physical device — owner-confirmed
+
+- [x] With no requested workout, "Start Workout" says to request one and opens the app; nothing starts.
+- [x] With a requested workout, "Start Workout" starts it and lands on the active workout.
+- [x] "Finish Workout" on the phone opens the running workout; sRPE is entered and Finish is pressed by
+      hand.
+- [x] "Finish Workout" on the watch opens the finish screen; the same applies after the Action button's
+      second press.
+- [x] Both intents work from the Shortcuts app and from Siri's intents list.
+
+Owner confirmation: pass 2026-11-15 · Build: INT-7c · Device: iPhone + Watch · iOS 27.2 / watchOS 27.2

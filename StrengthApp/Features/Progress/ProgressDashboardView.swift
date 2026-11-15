@@ -4,6 +4,17 @@ import StrengthCore
 struct ProgressDashboardView: View {
     @ObservedObject var model: AppModel
     @State private var weeks = 8
+    @State private var overviewEnvelope: IntelligenceEnvelope?
+    @State private var overviewError: String?
+
+    private func loadOverview() async {
+        do {
+            overviewEnvelope = try await model.loadOverviewEnvelope()
+        } catch {
+            overviewError = (error as? LocalizedError)?.errorDescription
+                ?? "The overview could not be loaded."
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -26,6 +37,47 @@ struct ProgressDashboardView: View {
                     }
                     .onChange(of: weeks) { _, value in
                         Task { await model.loadProgress(weeks: value) }
+                    }
+                }
+
+                if model.bootstrap?.capabilities.intelligenceRead == true {
+                    Section("Intelligence") {
+                        NavigationLink("Weekly review") {
+                            WeeklyReviewView(
+                                model: model.makeWeeklyReviewModel(),
+                                narrative: model.narrativeEnabled
+                                    ? model.makeNarrativeGenerator() : nil,
+                                detail: model.narrativeDetail
+                            )
+                        }
+                        if model.chatEnabled {
+                            NavigationLink("Chat") {
+                                TrainingChatView(model: model)
+                            }
+                            .accessibilityIdentifier("training-chat-link")
+                        }
+                    }
+                }
+
+                if model.narrativeEnabled,
+                   model.bootstrap?.capabilities.intelligenceRead == true {
+                    Section("Explanation") {
+                        if let envelope = overviewEnvelope {
+                            NarrativePanel(
+                                context: .overview(envelope, detail: model.narrativeDetail),
+                                generator: model.makeNarrativeGenerator()
+                            )
+                        } else {
+                            Button("Explain the last four weeks") {
+                                Task { await loadOverview() }
+                            }
+                            .accessibilityIdentifier("explain-overview")
+                            if let overviewError {
+                                Text(overviewError)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
 

@@ -33,8 +33,10 @@ public enum APIError: LocalizedError, Equatable {
             return "Enter the 8-digit code printed by strength-coach ios pair."
         case .invalidLabel(let message):
             return message
-        case .transport:
-            return "Could not reach the server. Check that it is running and that this iPhone is on the same network."
+        case .transport(let message):
+            return message.isEmpty
+                ? "Could not reach the server. Check that it is running and that this iPhone is on the same network."
+                : message
         case .http(let status, let message, let fields):
             return Self.httpDescription(status: status, message: message, fields: fields)
         case .server(let status, _, let message, let fields, _):
@@ -195,6 +197,7 @@ private struct TransportFailure: Error {
 @MainActor
 public final class IOSAPIClient {
     private let transport: HTTPTransport
+    private let longTransport: HTTPTransport
     private let decoder: JSONDecoder
     private let encoder = JSONEncoder()
     private let journal: MutationJournal?
@@ -202,9 +205,11 @@ public final class IOSAPIClient {
 
     public init(
         transport: HTTPTransport,
-        journal: MutationJournal? = nil
+        journal: MutationJournal? = nil,
+        longTransport: HTTPTransport? = nil
     ) {
         self.transport = transport
+        self.longTransport = longTransport ?? transport
         self.journal = journal
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -213,7 +218,11 @@ public final class IOSAPIClient {
     }
 
     public convenience init(journal: MutationJournal? = nil) {
-        self.init(transport: URLSessionTransport(), journal: journal)
+        self.init(
+            transport: URLSessionTransport(timeout: 10),
+            journal: journal,
+            longTransport: URLSessionTransport(timeout: 60)
+        )
     }
 
     // MARK: Input validation
@@ -379,7 +388,10 @@ public final class IOSAPIClient {
         try await get(
             path: "api/ios/v1/workouts/\(workoutId)/summary",
             query: [],
-            session: session
+            session: session,
+            timeout: 60,
+            transport: longTransport,
+            retries: 0
         )
     }
 
@@ -702,6 +714,124 @@ public final class IOSAPIClient {
         )
     }
 
+    /// One deterministic weekly-review envelope; `weekEnd` defaults to the last completed week.
+    public func weeklyReview(
+        session: IOSSession,
+        weekEnd: String? = nil
+    ) async throws -> IntelligenceEnvelope {
+        var query: [URLQueryItem] = []
+        if let weekEnd {
+            query.append(URLQueryItem(name: "week_end", value: weekEnd))
+        }
+        return try await get(
+            path: "api/ios/v1/intelligence/weekly-review",
+            query: query,
+            session: session
+        )
+    }
+
+
+    public func overview(
+        session: IOSSession,
+        asOf: String? = nil,
+        windowWeeks: Int = 4
+    ) async throws -> IntelligenceEnvelope {
+        var query = [URLQueryItem(name: "window_weeks", value: String(windowWeeks))]
+        if let asOf { query.append(URLQueryItem(name: "as_of", value: asOf)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/overview", query: query, session: session
+        )
+    }
+
+    public func progression(
+        session: IOSSession,
+        exerciseID: String,
+        windowDays: Int = 84,
+        asOf: String? = nil
+    ) async throws -> IntelligenceEnvelope {
+        var query = [URLQueryItem(name: "window_days", value: String(windowDays))]
+        if let asOf { query.append(URLQueryItem(name: "as_of", value: asOf)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/exercises/\(exerciseID)/progression",
+            query: query,
+            session: session
+        )
+    }
+
+    public func readinessHistory(
+        session: IOSSession,
+        from: String,
+        to: String,
+        fields: [String]? = nil
+    ) async throws -> IntelligenceEnvelope {
+        var query = [
+            URLQueryItem(name: "from", value: from),
+            URLQueryItem(name: "to", value: to),
+        ]
+        if let fields, !fields.isEmpty {
+            query.append(URLQueryItem(name: "fields", value: fields.joined(separator: ",")))
+        }
+        return try await get(
+            path: "api/ios/v1/intelligence/readiness", query: query, session: session
+        )
+    }
+
+    public func prescription(
+        session: IOSSession,
+        prescriptionID: String? = nil,
+        forDate: String? = nil,
+        includeProvenance: Bool = true
+    ) async throws -> IntelligenceEnvelope {
+        var query = [
+            URLQueryItem(name: "include_provenance", value: includeProvenance ? "true" : "false"),
+        ]
+        if let prescriptionID { query.append(URLQueryItem(name: "prescription_id", value: prescriptionID)) }
+        if let forDate { query.append(URLQueryItem(name: "for_date", value: forDate)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/prescription", query: query, session: session
+        )
+    }
+
+    public func programmeSummary(
+        session: IOSSession,
+        asOf: String? = nil,
+        blockWeeks: Int = 4
+    ) async throws -> IntelligenceEnvelope {
+        var query = [URLQueryItem(name: "block_weeks", value: String(blockWeeks))]
+        if let asOf { query.append(URLQueryItem(name: "as_of", value: asOf)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/programme-summary", query: query, session: session
+        )
+    }
+
+    public func adherence(
+        session: IOSSession,
+        asOf: String? = nil,
+        weeks: Int? = 12
+    ) async throws -> IntelligenceEnvelope {
+        var query: [URLQueryItem] = []
+        if let asOf { query.append(URLQueryItem(name: "as_of", value: asOf)) }
+        if let weeks { query.append(URLQueryItem(name: "weeks", value: String(weeks))) }
+        query.append(URLQueryItem(name: "group_by", value: "week"))
+        return try await get(
+            path: "api/ios/v1/intelligence/adherence", query: query, session: session
+        )
+    }
+
+    public func intelligenceSessionDetails(
+        session: IOSSession,
+        workoutID: String? = nil,
+        sessionID: String? = nil,
+        includeRatios: Bool = false
+    ) async throws -> IntelligenceEnvelope {
+        var query = [URLQueryItem(name: "include_ratios", value: includeRatios ? "true" : "false")]
+        if let workoutID { query.append(URLQueryItem(name: "workout_id", value: workoutID)) }
+        if let sessionID { query.append(URLQueryItem(name: "session_id", value: sessionID)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/session-details", query: query, session: session
+        )
+    }
+
     // MARK: Pending operations
 
     public func pendingMutations(for session: IOSSession) -> [PendingMutation] {
@@ -880,11 +1010,16 @@ public final class IOSAPIClient {
     private func get<T: Decodable>(
         path: String,
         query: [URLQueryItem],
-        session: IOSSession
+        session: IOSSession,
+        timeout: TimeInterval = 10,
+        transport overridingTransport: HTTPTransport? = nil,
+        retries: Int? = nil
     ) async throws -> T {
+        let activeTransport = overridingTransport ?? transport
+        let retryLimit = retries ?? maxGETRetries
         var request = URLRequest(url: try url(path: path, query: query, baseURL: session.baseURL))
         request.httpMethod = "GET"
-        request.timeoutInterval = 10
+        request.timeoutInterval = timeout
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(session.token)", forHTTPHeaderField: "Authorization")
@@ -892,11 +1027,16 @@ public final class IOSAPIClient {
         var attempt = 0
         while true {
             do {
-                let (data, response) = try await perform(request)
+                let (data, response) = try await perform(request, using: activeTransport)
                 try validate(response, data: data)
                 return try decode(T.self, from: data)
             } catch let failure as TransportFailure {
-                guard attempt < maxGETRetries, failure.isTransient else {
+                guard attempt < retryLimit, failure.isTransient else {
+                    if failure.code == .timedOut {
+                        throw APIError.transport(
+                            "The server did not respond within \(Int(timeout)) seconds."
+                        )
+                    }
                     throw APIError.transport(failure.message)
                 }
                 attempt += 1
@@ -919,9 +1059,12 @@ public final class IOSAPIClient {
         }
     }
 
-    private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    private func perform(
+        _ request: URLRequest,
+        using activeTransport: HTTPTransport
+    ) async throws -> (Data, HTTPURLResponse) {
         do {
-            return try await transport.data(for: request)
+            return try await activeTransport.data(for: request)
         } catch let error as URLError {
             throw TransportFailure(code: error.code, message: error.localizedDescription)
         } catch {

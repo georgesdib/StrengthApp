@@ -87,6 +87,11 @@ struct WatchTodayView: View {
                     Text("\(item.effortLabel) · \(item.restLabel)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    if let warmup = item.warmupLabel, !warmup.isEmpty {
+                        Text("Warm-up \(warmup)")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
                 .padding(.vertical, 2)
             }

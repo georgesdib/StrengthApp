@@ -186,6 +186,10 @@ completed workouts.
 
 - **Progress** shows the server's descriptive dashboard: sRPE coverage, performance points,
   weekly volume, attendance and back-symptom summary over the selected window.
+- **Progress → Weekly review** shows the server's deterministic Monday–Sunday package: activity,
+  adherence, sessions, main-lift progression, volume, readiness coverage, programme state and up to
+  two gated observations, with coverage and limitations. It is read-only and has no model; an empty
+  week says so instead of showing zeros.
 - **Settings → Exercises** provides a searchable catalogue, exercise configuration, server e1RM
   and paginated working-set history.
 - Catalogue/configuration is cached for the app session; entering an exercise fetches e1RM and
@@ -204,8 +208,8 @@ HealthKit readiness is optional and off by default. When enabled, the app reads 
 Manual readiness takes precedence over HealthKit, which takes precedence over imported
 readiness. The app never writes to HealthKit and does not import sleep or workouts.
 
-**Workout heart rate is not implemented.** The app does not request or store workout HR samples,
-and HR is not used for readiness, fatigue, progression or prescriptions.
+**Workout heart rate is read only on Apple Watch**, for the live session display and the one
+saved HealthKit workout. It is not used for readiness, fatigue, progression or prescriptions.
 
 ## 9. Settings and maintenance
 
@@ -236,13 +240,22 @@ Changing the Home Server and tapping **Save server settings** increments the wat
 version. When the watch has no active session, it updates its Home address without receiving a new
 token.
 
-The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR
-(mean velocity only when the plan asks for it). The rest starts when you tap **End set**, so the
-RIR and velocity entry happens during the rest, not inside the set. Rest — **+15s** extends it,
-**−15s** shortens it,
-and a local notification fires when it ends if you allowed notifications — rate form at
-**End exercise**, and finish with sRPE and optional productivity. Heart rate shows during the
-session and exactly one HealthKit workout is saved. Capture is local-first: without the
+The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR.
+Warm-up rows have their own **Log** action; they are recorded with RIR 6 and stay out of
+working-set volume. Mean velocity is available for external-load work even when the plan has no
+target; the watch records the measurement and the server owns calibration. Time-based exercises
+show seconds (“30s”), not repetitions. The rest starts when you tap **End set**, so the RIR and
+velocity entry happens during the rest, not inside the set. Rest — **+15s** extends it, **−15s**
+shortens it, and a local notification fires when it ends if you allowed notifications — rate form
+at **End exercise**, and finish with editable sRPE and optional productivity. Total elapsed time
+and heart rate show at the top of the exercise screen; heart rate follows the latest HealthKit
+sample and clears after 10 seconds without a new one. Exactly one HealthKit workout is saved, and
+the session sRPE is written as the workout's Apple effort score.
+
+A swap re-solves the replacement from its own history and calibration: load, warm-up ramps and
+VBT target when available. It never copies the old lift's load. If no load can be derived, the
+replacement shows **Load not set** rather than **bodyweight**, remains startable, and accepts a
+manual load. VBT is optional for external-load work and is measured, not calibrated, by the watch. Capture is local-first: without the
 network the sets queue on the watch and sync when it reconnects.
 
 Requested a workout for the wrong target? The ready card on Today offers **Request another

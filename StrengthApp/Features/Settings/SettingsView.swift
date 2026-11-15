@@ -9,6 +9,8 @@ struct SettingsView: View {
     @State private var deepSeekKeyInput = ""
     @State private var deepSeekStatus: String?
     @State private var isTestingDeepSeek = false
+    @AppStorage(WorkoutAutomation.startShortcutKey) private var startShortcutName = ""
+    @AppStorage(WorkoutAutomation.endShortcutKey) private var endShortcutName = ""
 
     private func availabilityText(_ availability: NarrativeAvailability) -> String {
         switch availability {
@@ -212,6 +214,34 @@ struct SettingsView: View {
                          + "nothing is sent to a server, and explanations are not saved.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    TextField(
+                        "Shortcut when a workout starts",
+                        text: $startShortcutName
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    TextField(
+                        "Shortcut when a workout ends",
+                        text: $endShortcutName
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    Button("Test start shortcut") {
+                        Task { await WorkoutAutomation.shared.test(startShortcutName) }
+                    }
+                    .disabled(startShortcutName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button("Test end shortcut") {
+                        Task { await WorkoutAutomation.shared.test(endShortcutName) }
+                    }
+                    .disabled(endShortcutName.trimmingCharacters(in: .whitespaces).isEmpty)
+                } header: {
+                    Text("Workout automation")
+                } footer: {
+                    Text("Leave a field empty to turn that channel off. The Shortcut runs with no "
+                         + "input, and Shortcuts comes to the foreground briefly when a workout starts.")
                 }
 
                 WatchSettingsSection(model: model)

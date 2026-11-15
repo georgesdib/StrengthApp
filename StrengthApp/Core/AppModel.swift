@@ -161,6 +161,7 @@ final class AppModel: ObservableObject {
     private var offlineRetryTask: Task<Void, Never>?
     private var offlineRetryAttempt = 0
     private let exerciseCatalogueCache: ExerciseCatalogueCache
+    private let automation: WorkoutAutomation
     private var exerciseCatalogueLoadedServerURL: String?
     private var exerciseDetailCache: [String: ExerciseDetailResponse] = [:]
     private var exerciseHistoryExerciseId: String?
@@ -178,7 +179,8 @@ final class AppModel: ObservableObject {
         healthKitDefaults: UserDefaults = .standard,
         offlineStore: OfflineCaptureStore? = nil,
         watchConnectivity: WatchConnectivitySession? = nil,
-        exerciseCatalogueCache: ExerciseCatalogueCache? = nil
+        exerciseCatalogueCache: ExerciseCatalogueCache? = nil,
+        automation: WorkoutAutomation = .shared
     ) {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
@@ -210,6 +212,7 @@ final class AppModel: ObservableObject {
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
         self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
+        self.automation = automation
         self.deepSeekKeyPresent = ((try? self.deepSeekKeyStore.load()) ?? nil)?.isEmpty == false
         self.healthKitEnabled = enabled
         self.healthKitState = enabled
@@ -1399,6 +1402,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(workout))
+            await automation.handle(.started, sessionID: workout.workoutId)
             clearOfflineCaptureAfterServerCompletion()
             persistActiveWorkout()
             recoveryIssue = nil
@@ -1785,7 +1789,11 @@ final class AppModel: ObservableObject {
         }
         if offlineCaptureActive {
             restTimer.dismiss()
-            return queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+            let queued = queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+            if queued {
+                await automation.handle(.ended, sessionID: workout.workoutId)
+            }
+            return queued
         }
         guard permitsMutation(kind: .completeWorkout, operationId: idempotencyKey) else {
             return false
@@ -1800,6 +1808,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(updated))
+            await automation.handle(.ended, sessionID: workout.workoutId)
             recoveryIssue = nil
             workoutRefreshGrace = false
             restTimer.dismiss()
@@ -1810,7 +1819,11 @@ final class AppModel: ObservableObject {
         } catch {
             if shouldQueueOffline(error) {
                 client.discardPendingOperation(idempotencyKey)
-                return queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+                let queued = queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
+                if queued {
+                    await automation.handle(.ended, sessionID: workout.workoutId)
+                }
+                return queued
             }
             if let api = error as? APIError,
                ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
@@ -1838,6 +1851,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(updated))
+            await automation.handle(.ended, sessionID: workout.workoutId)
             clearOfflineCaptureAfterServerCompletion()
             recoveryIssue = nil
             workoutRefreshGrace = false

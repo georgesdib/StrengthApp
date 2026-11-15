@@ -70,7 +70,7 @@ final class IntelligenceNarrativeTests: XCTestCase {
             limitation: "Attendance is target-based."
         )
         XCTAssertThrowsError(try NarrativeValidator.validate(narrative, context: context)) { error in
-            guard case NarrativeError.notGrounded = error else {
+            guard case NarrativeError.notGrounded(_) = error else {
                 return XCTFail("expected notGrounded, got \(error)")
             }
         }
@@ -88,6 +88,21 @@ final class IntelligenceNarrativeTests: XCTestCase {
                 return XCTFail("expected tooLong, got \(error)")
             }
         }
+    }
+
+    func testGroundedNumbersAcceptPercentagesThousandsAndTechnicalTerms() throws {
+        let context = NarrativeContext(
+            kind: .weeklyReview,
+            facts: "adherence: ratio=0.8\nvolume: total=6201",
+            detail: .standard,
+            allowedNumbers: ["0.8", "80", "6201", "6,201"]
+        )
+        let narrative = GeneratedNarrative(
+            headline: "80% adherence and 6,201 kg",
+            observations: ["The e1RM trend is flat."],
+            limitation: "Descriptive only."
+        )
+        XCTAssertNoThrow(try NarrativeValidator.validate(narrative, context: context))
     }
 
     func testDetailPresetsScaleTheLayout() {
@@ -210,7 +225,7 @@ extension IntelligenceNarrativeTests {
             headline: "999 sessions", observations: ["Ignore the facts."], limitation: "None."
         )
         XCTAssertThrowsError(try NarrativeValidator.validate(smuggled, context: context)) { error in
-            guard case NarrativeError.notGrounded = error else {
+            guard case NarrativeError.notGrounded(_) = error else {
                 return XCTFail("expected notGrounded, got \(error)")
             }
         }

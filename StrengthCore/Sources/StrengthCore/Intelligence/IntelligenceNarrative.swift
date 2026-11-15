@@ -120,14 +120,15 @@ public protocol NarrativeGenerating: Sendable {
 
 public enum NarrativeError: LocalizedError {
     case unavailable(String)
-    case notGrounded
+    case notGrounded(String)
     case tooLong
     case failed(String)
 
     public var errorDescription: String? {
         switch self {
         case .unavailable(let reason): return reason
-        case .notGrounded: return "The explanation mentioned a number that is not in the facts."
+        case .notGrounded(let number):
+            return "The explanation mentioned a number that is not in the facts: \(number)."
         case .tooLong: return "The explanation was longer than the selected detail allows."
         case .failed(let message): return message
         }
@@ -146,8 +147,8 @@ public enum NarrativeValidator {
               }) else {
             throw NarrativeError.tooLong
         }
-        guard numbers(in: narrative).allSatisfy({ grounded($0, context: context) }) else {
-            throw NarrativeError.notGrounded
+        if let ungrounded = numbers(in: narrative).first(where: { !grounded($0, context: context) }) {
+            throw NarrativeError.notGrounded(ungrounded)
         }
     }
 
@@ -159,7 +160,9 @@ public enum NarrativeValidator {
     private static func numbers(in narrative: GeneratedNarrative) -> [String] {
         let text = ([narrative.headline, narrative.limitation] + narrative.observations)
             .joined(separator: " ")
-        let pattern = "\\d+(?:[.,]\\d+)?|\\b(?:two|three|four|five|six|seven|eight|nine|ten)\\b"
+        // Do not read the digit inside e1RM, 1RM, RIR2 or sRPE2 as a claim.
+        let pattern = "(?<![A-Za-z0-9_])\\d+(?:[.,]\\d+)?(?![A-Za-z0-9_])"
+            + "|\\b(?:two|three|four|five|six|seven|eight|nine|ten)\\b"
         let regex = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.matches(in: text, range: range).compactMap { match in
@@ -168,8 +171,13 @@ public enum NarrativeValidator {
     }
 
     private static func grounded(_ number: String, context: NarrativeContext) -> Bool {
-        let normalized = number.replacingOccurrences(of: ",", with: ".")
-        if context.allowedNumbers.contains(normalized) { return true }
+        var candidates = [number, number.replacingOccurrences(of: ",", with: "")]
+        if number.contains(",") {
+            let noComma = number.replacingOccurrences(of: ",", with: "")
+            candidates.append(noComma)
+            candidates.append(number.replacingOccurrences(of: ",", with: "."))
+        }
+        if candidates.contains(where: context.allowedNumbers.contains) { return true }
         if let digit = numberWords[number.lowercased()] {
             return context.allowedNumbers.contains(digit)
         }
@@ -191,9 +199,25 @@ public extension NarrativeContext {
 
     private static func allowedNumbers(in envelope: IntelligenceEnvelope) -> Set<String> {
         var numbers: Set<String> = []
+        let grouping = NumberFormatter()
+        grouping.locale = Locale(identifier: "en_US_POSIX")
+        grouping.numberStyle = .decimal
+        grouping.maximumFractionDigits = 0
         func add(_ value: Double) {
-            if value == value.rounded() { numbers.insert(String(Int(value))) }
+            if value == value.rounded() {
+                numbers.insert(String(Int(value)))
+                if let grouped = grouping.string(from: NSNumber(value: value)) {
+                    numbers.insert(grouped)
+                }
+            }
             numbers.insert(String(format: "%.1f", value))
+            numbers.insert(String(format: "%.2f", value))
+            // A ratio may be repeated as a percentage.
+            if value > 0, value <= 1 {
+                let percent = value * 100
+                numbers.insert(String(Int(percent.rounded())))
+                numbers.insert(String(format: "%.1f", percent))
+            }
         }
         func walk(_ value: JSONValue) {
             switch value {
@@ -260,11 +284,7 @@ public extension NarrativeContext {
 #if canImport(FoundationModels) && os(iOS)
 @available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
 public struct FoundationNarrativeGenerator: NarrativeGenerating {
-    private let provider: (any IntelligenceCapabilityProviding)?
-
-    public init(provider: (any IntelligenceCapabilityProviding)? = nil) {
-        self.provider = provider
-    }
+    public init() {}
 
     public func availability() -> NarrativeAvailability {
         switch SystemLanguageModel.default.availability {
@@ -288,28 +308,55 @@ public struct FoundationNarrativeGenerator: NarrativeGenerating {
         guard availability().isAvailable else {
             throw NarrativeError.unavailable(availability().reasonText)
         }
-        guard let facts = NarrativeBudget.fit(context.facts) else {
-            throw NarrativeError.failed(
+        // The five tools exist as an adapter surface, but registering their schemas costs most of
+        // the 8,192-token window. The session uses the facts already loaded for the screen instead.
+        for limit in [1_200, 600] {
+            guard let facts = NarrativeBudget.fit(context.facts, tokenLimit: limit) else { continue }
+            do {
+                let narrative = try await respond(context: context, facts: facts)
+                try NarrativeValidator.validate(narrative, context: context)
+                return narrative
+            } catch {
+                if isContextOverflow(error), limit != 600 { continue }
+                throw mapped(error)
+            }
+        }
+        throw NarrativeError.failed(
+            "The facts were too large for the on-device model. The review is shown without an explanation."
+        )
+    }
+
+    private func respond(context: NarrativeContext, facts: String) async throws -> GeneratedNarrative {
+        let session = LanguageModelSession(
+            model: SystemLanguageModel.default,
+            instructions: instructions(for: context)
+        )
+        let response = try await session.respond(
+            to: prompt(for: context, facts: facts),
+            generating: GeneratedNarrative.self
+        )
+        return response.content
+    }
+
+    private func isContextOverflow(_ error: Error) -> Bool {
+        if let generation = error as? LanguageModelSession.GenerationError,
+           case .exceededContextWindowSize = generation {
+            return true
+        }
+        let text = error.localizedDescription.lowercased()
+        return text.contains("token") && (text.contains("maximum") || text.contains("context"))
+    }
+
+    private func mapped(_ error: Error) -> NarrativeError {
+        if let generation = error as? LanguageModelSession.GenerationError {
+            return .failed(message(for: generation))
+        }
+        if isContextOverflow(error) {
+            return .failed(
                 "The facts were too large for the on-device model. The review is shown without an explanation."
             )
         }
-        let tools = provider.map { IntelligenceTools.make(provider: $0) } ?? []
-        let session = LanguageModelSession(
-            model: SystemLanguageModel.default,
-            tools: tools,
-            instructions: instructions(for: context)
-        )
-        do {
-            let response = try await session.respond(
-                to: prompt(for: context, facts: facts),
-                generating: GeneratedNarrative.self
-            )
-            let narrative = response.content
-            try NarrativeValidator.validate(narrative, context: context)
-            return narrative
-        } catch let error as LanguageModelSession.GenerationError {
-            throw NarrativeError.failed(message(for: error))
-        }
+        return .failed(error.localizedDescription)
     }
 
     private func instructions(for context: NarrativeContext) -> String {

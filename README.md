@@ -250,9 +250,9 @@ xcrun simctl launch 'iPhone 17' com.georgesdibpersonalteam.StrengthApp
 Install on the paired physical iPhone (device build plus CoreDevice):
 
 ```bash
-./scripts/install-iphone.sh            # Debug build for the connected iPhone, then install
+./scripts/install-iphone.sh            # Release build for the connected iPhone, then install
 ./scripts/install-iphone.sh --launch   # also launch it
-CONFIGURATION=Release ./scripts/install-iphone.sh
+CONFIGURATION=Debug ./scripts/install-iphone.sh   # opt into an unoptimised build
 DRY_RUN=1 ./scripts/install-iphone.sh  # print the resolved device, build nothing
 ```
 

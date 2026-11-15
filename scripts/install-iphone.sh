@@ -5,14 +5,14 @@
 # hand the signed bundle to CoreDevice so the result is visible instead of a Xcode spinner.
 #
 # Usage:
-#   ./scripts/install-iphone.sh              # Debug build + install
+#   ./scripts/install-iphone.sh              # Release build + install
 #   ./scripts/install-iphone.sh --launch     # ... and launch it
-#   CONFIGURATION=Release ./scripts/install-iphone.sh
+#   CONFIGURATION=Debug ./scripts/install-iphone.sh   # opt into an unoptimised build
 #   DRY_RUN=1 ./scripts/install-iphone.sh    # resolve the device and print, build nothing
 #
 # Environment overrides:
 #   IPHONE_UDID    CoreDevice identifier of the iPhone (default: the paired physical iPhone)
-#   CONFIGURATION  Debug (default) or Release
+#   CONFIGURATION  Release (default) or Debug
 #   APP_PATH       install this .app instead of building
 #   BUILD=0        skip the build; requires APP_PATH or a previous build in DERIVED_DATA
 #   DERIVED_DATA   build directory (default: .build/device)
@@ -26,7 +26,7 @@ export PATH="$DEVELOPER_DIR/usr/bin:$PATH"
 
 cd "$(dirname "$0")/.."
 
-CONFIGURATION="${CONFIGURATION:-Debug}"
+CONFIGURATION="${CONFIGURATION:-Release}"
 DERIVED_DATA="${DERIVED_DATA:-$PWD/.build/device}"
 LAUNCH="${LAUNCH:-0}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -93,10 +93,21 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 if [[ "$BUILD" == "1" ]]; then
+  BUILD_SETTINGS=()
+  if [[ "$CONFIGURATION" == "Release" ]]; then
+    # Make the optimised build explicit rather than relying on an inherited default.
+    BUILD_SETTINGS=(SWIFT_OPTIMIZATION_LEVEL=-O GCC_OPTIMIZATION_LEVEL=3)
+  fi
   echo "building $CONFIGURATION for the device..."
-  xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \
-    -configuration "$CONFIGURATION" -destination "id=$IPHONE_UDID" \
-    -derivedDataPath "$DERIVED_DATA" build
+  if [[ ${#BUILD_SETTINGS[@]} -gt 0 ]]; then
+    xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \
+      -configuration "$CONFIGURATION" -destination "id=$IPHONE_UDID" \
+      -derivedDataPath "$DERIVED_DATA" "${BUILD_SETTINGS[@]}" build
+  else
+    xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \
+      -configuration "$CONFIGURATION" -destination "id=$IPHONE_UDID" \
+      -derivedDataPath "$DERIVED_DATA" build
+  fi
 else
   echo "build skipped (BUILD=0)"
 fi

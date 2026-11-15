@@ -3,7 +3,7 @@ import Foundation
 // MARK: - JSON helpers
 
 /// A small JSON value used for server conflict details. The server only sends JSON here.
-public enum JSONValue: Codable, Equatable {
+public enum JSONValue: Codable, Equatable, Sendable {
     case string(String)
     case number(Double)
     case bool(Bool)

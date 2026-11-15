@@ -50,14 +50,14 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
     }
 
     func trainingOverview(asOf: String?, windowWeeks: Int) async throws -> String {
-        try record(
+        record(
             try await client.overview(session: session, asOf: asOf, windowWeeks: windowWeeks),
             source: "overview"
         )
     }
 
     func exerciseProgression(exerciseID: String, windowDays: Int) async throws -> String {
-        try record(
+        record(
             try await client.progression(
                 session: session, exerciseID: exerciseID, windowDays: windowDays
             ),
@@ -66,7 +66,7 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
     }
 
     func weeklyReview(weekEnd: String?) async throws -> String {
-        try record(
+        record(
             try await client.weeklyReview(session: session, weekEnd: weekEnd),
             source: "weekly review"
         )
@@ -134,7 +134,7 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
 
     func readinessStatus(from: String, to: String) async throws -> String {
         let (start, end) = Self.window(from: from, to: to)
-        return try record(
+        return record(
             try await client.readinessHistory(
                 session: session, from: start, to: end, fields: ["score"]
             ),

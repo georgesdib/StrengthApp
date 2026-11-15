@@ -491,8 +491,8 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
     }
 
     private func isContextOverflow(_ error: Error) -> Bool {
-        if let generation = error as? LanguageModelSession.GenerationError,
-           case .exceededContextWindowSize = generation {
+        if let generation = error as? LanguageModelError,
+           case .contextSizeExceeded = generation {
             return true
         }
         let text = error.localizedDescription.lowercased()
@@ -503,7 +503,7 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         if isContextOverflow(error) {
             return .failed("The conversation was too large for the on-device model.")
         }
-        if let generation = error as? LanguageModelSession.GenerationError,
+        if let generation = error as? LanguageModelError,
            case .unsupportedLanguageOrLocale = generation {
             return .unavailable("The on-device model does not support this language yet.")
         }

@@ -9,7 +9,8 @@
 # Environment overrides:
 #   WATCH_UDID  device identifier of the watch (default: its hardware UDID when available,
 #               otherwise the CoreDevice identifier)
-#   APP_PATH    path to StrengthWatch.app (default: newest Debug-iphoneos build)
+#   CONFIGURATION  Release (default) or Debug
+#   APP_PATH    path to StrengthWatch.app (default: newest $CONFIGURATION-iphoneos build)
 set -euo pipefail
 
 if [[ -z "${DEVELOPER_DIR:-}" ]]; then
@@ -18,6 +19,8 @@ fi
 export PATH="$DEVELOPER_DIR/usr/bin:$PATH"
 
 cd "$(dirname "$0")/.."
+
+CONFIGURATION="${CONFIGURATION:-Release}"
 
 if [[ -z "${WATCH_UDID:-}" ]]; then
   list=$(mktemp)
@@ -49,10 +52,19 @@ PY
 fi
 
 if [[ -z "${APP_PATH:-}" ]]; then
-  APP_PATH=$(ls -td "$HOME"/Library/Developer/Xcode/DerivedData/StrengthApp-*/Build/Products/Debug-iphoneos/StrengthApp.app/Watch/StrengthWatch.app 2>/dev/null | head -1 || true)
+  # Prefer the repo-local device build used by install-iphone.sh, then fall back to Xcode's
+  # default DerivedData location.
+  for candidate in \
+    "$PWD/.build/device/Build/Products/$CONFIGURATION-iphoneos/StrengthApp.app/Watch/StrengthWatch.app" \
+    "$HOME"/Library/Developer/Xcode/DerivedData/StrengthApp-*/Build/Products/"$CONFIGURATION"-iphoneos/StrengthApp.app/Watch/StrengthWatch.app; do
+    if [[ -d "$candidate" ]]; then
+      APP_PATH="$candidate"
+      break
+    fi
+  done
 fi
 if [[ -z "$APP_PATH" || ! -d "$APP_PATH" ]]; then
-  echo "error: StrengthWatch.app not found; build the StrengthApp scheme for your iPhone first" >&2
+  echo "error: StrengthWatch.app not found; build the StrengthApp scheme for your iPhone in $CONFIGURATION first" >&2
   exit 1
 fi
 

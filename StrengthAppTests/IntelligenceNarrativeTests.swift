@@ -222,6 +222,12 @@ extension IntelligenceNarrativeTests {
         XCTAssertFalse(tool.description.isEmpty)
     }
 
+    func testSessionDetailsToolWorksWithoutAnId() async throws {
+        let tool = SessionDetailsTool(provider: StubProvider())
+        let output = try await tool.call(arguments: NarrativeToolQuery())
+        XCTAssertEqual(output, "session facts")
+    }
+
     func testBudgetTrimsObservationsFirst() {
         let facts = """
         capability: get_weekly_review

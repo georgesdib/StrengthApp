@@ -62,13 +62,22 @@ final class ChatToolbox: ChatFactsProviding, @unchecked Sendable {
     }
 
     func sessionDetails(workoutID: String) async throws -> String {
-        guard !workoutID.isEmpty else {
-            return "No workout was specified, so no session detail is available."
+        if !workoutID.isEmpty,
+           let envelope = try? await client.intelligenceSessionDetails(
+               session: session, workoutID: workoutID
+           ) {
+            return record(envelope, source: "session details")
         }
-        return try record(
-            try await client.intelligenceSessionDetails(session: session, workoutID: workoutID),
-            source: "session details"
+        // The model cannot know a workout id, so an empty or stale id falls back to the most
+        // recently completed session.
+        let history = try await client.history(session: session, limit: 1)
+        guard let latest = history.sessions.first else {
+            return "There are no completed sessions yet."
+        }
+        let envelope = try await client.intelligenceSessionDetails(
+            session: session, sessionID: latest.sessionId
         )
+        return record(envelope, source: "session details")
     }
 
     func readinessStatus(from: String, to: String) async throws -> String {

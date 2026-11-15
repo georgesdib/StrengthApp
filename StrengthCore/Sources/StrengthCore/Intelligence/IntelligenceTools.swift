@@ -134,16 +134,13 @@ public struct SessionDetailsTool: Tool {
     private let provider: any IntelligenceCapabilityProviding
     public init(provider: any IntelligenceCapabilityProviding) { self.provider = provider }
     public let name = "session_details"
-    public let description = "Read-only detail for one completed workout. Pass the workout id, or an empty string when no workout is in question."
+    public let description = "Read-only detail for one completed workout. Pass a workout id if known, or an empty string for the most recent completed session."
     public func call(arguments: NarrativeToolQuery) async throws -> String {
         let workout = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !workout.isEmpty else {
-            return "No workout was specified, so no session detail is available."
-        }
         do {
             return try await provider.sessionDetails(workoutID: workout)
         } catch {
-            return "No session was found for that workout id."
+            return "No session was found. Ask the athlete for a different workout."
         }
     }
 }

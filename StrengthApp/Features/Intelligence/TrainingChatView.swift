@@ -118,6 +118,22 @@ struct TrainingChatView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            if !message.rawOutputs.isEmpty {
+                DisclosureGroup("Show raw data (\(message.rawOutputs.count))") {
+                    ForEach(message.rawOutputs) { output in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(output.source)
+                                .font(.caption2.weight(.semibold))
+                            Text(output.text)
+                                .font(.caption2.monospaced())
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
     }

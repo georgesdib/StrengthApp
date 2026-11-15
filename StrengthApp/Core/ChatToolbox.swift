@@ -8,6 +8,7 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
     private let lock = NSLock()
     private var envelopes: [IntelligenceEnvelope] = []
     private var sources: Set<String> = []
+    private var outputs: [ChatToolOutput] = []
 
     init(client: IOSAPIClient, session: IOSSession) {
         self.client = client
@@ -24,21 +25,28 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
         return sources.sorted()
     }
 
+    var recordedOutputs: [ChatToolOutput] {
+        lock.lock(); defer { lock.unlock() }
+        return outputs
+    }
+
     func resetRecord() {
         lock.lock(); defer { lock.unlock() }
         envelopes = []
         sources = []
+        outputs = []
     }
 
     private func record(_ envelope: IntelligenceEnvelope, source: String) -> String {
+        let text = ["prescription", "adherence", "programme"].contains(source)
+            ? PlanProjection.text(envelope)
+            : NarrativeContext.projectionText(envelope)
         lock.lock()
         envelopes.append(envelope)
         sources.insert(source)
+        outputs.append(ChatToolOutput(source: source, text: text))
         lock.unlock()
-        if ["prescription", "adherence", "programme"].contains(source) {
-            return PlanProjection.text(envelope)
-        }
-        return NarrativeContext.projectionText(envelope)
+        return text
     }
 
     func trainingOverview(asOf: String?, windowWeeks: Int) async throws -> String {

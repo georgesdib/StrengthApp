@@ -82,6 +82,26 @@ final class TrainingChatTests: XCTestCase {
         XCTAssertEqual(model.messages.last?.suggestions, ["Try 105 kg."])
     }
 
+    func testPromptCarriesTodayAndKeepsTheQuestion() {
+        let prompt = ChatPrompt.build(question: "what was prescribed yesterday", history: [])
+        XCTAssertTrue(prompt.contains("Today:"))
+        XCTAssertTrue(prompt.contains("what was prescribed yesterday"))
+    }
+
+    func testRawToolOutputsAreCarriedToTheMessage() async {
+        let model = TrainingChatModel(
+            generator: StubChatGenerator(
+                reply: ChatReply(
+                    text: "Two sessions.", sources: ["weekly review"],
+                    rawOutputs: [ChatToolOutput(source: "weekly review", text: "activity: 2")]
+                )
+            )
+        )
+        await model.send("What changed?")
+        XCTAssertEqual(model.messages.last?.rawOutputs.first?.source, "weekly review")
+        XCTAssertEqual(model.messages.last?.rawOutputs.first?.text, "activity: 2")
+    }
+
     func testPromptKeepsOnlyTheRecentTurns() {
         let history = (0..<10).map {
             ChatMessage(role: .user, text: "question \($0) \(String(repeating: "x", count: 500))")

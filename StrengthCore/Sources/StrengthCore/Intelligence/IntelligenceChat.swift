@@ -3,6 +3,16 @@ import Foundation
 import FoundationModels
 #endif
 
+public struct ChatToolOutput: Identifiable, Equatable, Sendable {
+    public let id = UUID()
+    public let source: String
+    public let text: String
+    public init(source: String, text: String) {
+        self.source = source
+        self.text = text
+    }
+}
+
 public struct ChatMessage: Identifiable, Equatable, Sendable {
     public enum Role: String, Sendable { case user, assistant }
     public let id: UUID
@@ -11,6 +21,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     public let sources: [String]
     public let suggestions: [String]
     public let unverifiedNumbers: [String]
+    public let rawOutputs: [ChatToolOutput]
 
     public init(
         id: UUID = UUID(),
@@ -18,7 +29,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         text: String,
         sources: [String] = [],
         suggestions: [String] = [],
-        unverifiedNumbers: [String] = []
+        unverifiedNumbers: [String] = [],
+        rawOutputs: [ChatToolOutput] = []
     ) {
         self.id = id
         self.role = role
@@ -26,6 +38,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         self.sources = sources
         self.suggestions = suggestions
         self.unverifiedNumbers = unverifiedNumbers
+        self.rawOutputs = rawOutputs
     }
 }
 
@@ -34,23 +47,31 @@ public struct ChatReply: Sendable {
     public let sources: [String]
     public let suggestions: [String]
     public let unverifiedNumbers: [String]
+    public let rawOutputs: [ChatToolOutput]
     public init(
         text: String,
         sources: [String],
         suggestions: [String] = [],
-        unverifiedNumbers: [String] = []
+        unverifiedNumbers: [String] = [],
+        rawOutputs: [ChatToolOutput] = []
     ) {
         self.text = text
         self.sources = sources
         self.suggestions = suggestions
         self.unverifiedNumbers = unverifiedNumbers
+        self.rawOutputs = rawOutputs
     }
 }
 
 public protocol ChatFactsProviding: IntelligenceCapabilityProviding {
     var recordedEnvelopes: [IntelligenceEnvelope] { get }
     var recordedSources: [String] { get }
+    var recordedOutputs: [ChatToolOutput] { get }
     func resetRecord()
+}
+
+public extension ChatFactsProviding {
+    var recordedOutputs: [ChatToolOutput] { [] }
 }
 
 public enum ChatError: LocalizedError {
@@ -111,6 +132,19 @@ public enum ChatIntent {
     public static func requiresPlan(_ question: String) -> Bool {
         !planToolNames(question).isEmpty
     }
+
+    public static func planQuery(_ question: String) -> String {
+        let text = question.lowercased()
+        if let range = text.range(of: "\\d{4}-\\d{2}-\\d{2}", options: .regularExpression) {
+            return String(text[range])
+        }
+        if text.contains("yesterday") { return "yesterday" }
+        if text.contains("today") { return "today" }
+        if let range = text.range(of: "\\d+\\s*weeks?", options: .regularExpression) {
+            return String(text[range]).filter(\.isNumber)
+        }
+        return ""
+    }
 }
 
 public enum ChatPrompt {
@@ -145,13 +179,21 @@ public enum ChatPrompt {
         data.union(questionTime.intersection(timeNumbers(in: answer)))
     }
 
+    public static func today(now: Date = Date(), calendar: Calendar = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: now)
+    }
+
     public static func build(
         question: String,
         history: [ChatMessage],
         correction: String? = nil,
         maxCharacters: Int = 2_400
     ) -> String {
-        var lines: [String] = []
+        var lines: [String] = ["Today: \(today())"]
         for message in history.suffix(6) {
             let prefix = message.role == .user ? "Athlete" : "Assistant"
             lines.append("\(prefix): \(String(message.text.prefix(400)))")
@@ -160,8 +202,12 @@ public enum ChatPrompt {
         if let correction {
             lines.append("Correction: \(correction)")
         }
-        let text = lines.joined(separator: "\n")
-        return String(text.suffix(maxCharacters))
+        var text = lines.joined(separator: "\n")
+        while text.count > maxCharacters, lines.count > 2 {
+            lines.remove(at: 1)
+            text = lines.joined(separator: "\n")
+        }
+        return text
     }
 }
 
@@ -228,19 +274,26 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
     ) async throws -> Attempt {
         let planNames = includePlan ? ChatIntent.planToolNames(question) : []
         let usePlan = !planNames.isEmpty
+        let planFacts = usePlan
+            ? await loadPlanFacts(question: question, names: planNames)
+            : nil
+        let injectPlan = planFacts != nil
         let promptHistory = usePlan ? Array(history.suffix(2)) : history
         let attempts: [[ChatMessage]] = [promptHistory, []]
 
         for (index, historyForPrompt) in attempts.enumerated() {
-            let prompt = ChatPrompt.build(
+            let base = ChatPrompt.build(
                 question: question,
                 history: historyForPrompt,
                 correction: correction,
                 maxCharacters: usePlan ? 1_200 : 2_400
             )
-            facts.resetRecord()
+            let prompt = injectPlan
+                ? base + "\n\nPlan facts:\n" + (planFacts ?? "")
+                : base
+            if !injectPlan { facts.resetRecord() }
             let failureLog = ToolFailureLog()
-            let tools = IntelligenceTools.make(
+            let tools = injectPlan ? [] as [any Tool] : IntelligenceTools.make(
                 provider: facts,
                 failureLog: failureLog,
                 includePlan: usePlan,
@@ -253,7 +306,7 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                 instructions: instructions
             )
             do {
-                let options = usePlan
+                let options = usePlan && !injectPlan
                     ? GenerationOptions(toolCallingMode: .required)
                     : GenerationOptions()
                 let response = try await session.respond(
@@ -289,7 +342,8 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                     text: text,
                     sources: facts.recordedSources,
                     suggestions: suggestions,
-                    unverifiedNumbers: ungrounded
+                    unverifiedNumbers: ungrounded,
+                    rawOutputs: facts.recordedOutputs
                 )
                 return ungrounded.isEmpty ? .grounded(reply) : .soft(reply)
             } catch let error as ChatError {
@@ -304,14 +358,39 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         )
     }
 
+    private func loadPlanFacts(question: String, names: [String]) async -> String? {
+        guard let plan = facts as? any PlanFactsProviding else { return nil }
+        facts.resetRecord()
+        let query = ChatIntent.planQuery(question)
+        var blocks: [String] = []
+        for name in names {
+            do {
+                switch name {
+                case "prescription":
+                    blocks.append("[prescription]\n" + (try await plan.prescription(query: query)))
+                case "programme_summary":
+                    blocks.append("[programme]\n" + (try await plan.programmeSummary(query: query)))
+                case "adherence":
+                    blocks.append("[adherence]\n" + (try await plan.adherence(query: query)))
+                default:
+                    break
+                }
+            } catch {
+                blocks.append("[\(name) unavailable] \(error.localizedDescription)")
+            }
+        }
+        return blocks.isEmpty ? nil : blocks.joined(separator: "\n\n")
+    }
+
     private var instructions: String {
         "You are a training assistant on the athlete's iPhone. Answer only from the facts the tools "
         + "return; call a tool before making a data claim. Never invent a number in the factual "
         + "answer. You may suggest changes and discuss medical considerations, but put them in the "
         + "suggestions field, never in the answer: they are proposals, not facts, and they are never "
         + "applied. If the tools cannot answer, say so plainly. If a tool says it could not find "
-        + "something, ask the athlete to clarify; never repeat a raw tool error. Convert today and "
-        + "yesterday to a YYYY-MM-DD date before calling a plan tool. When asked for a prescription, list "
+        + "something, ask the athlete to clarify; never repeat a raw tool error. Resolve today and "
+        + "yesterday relative to the Today line before calling a plan tool, never relative to the "
+        + "latest data. When asked for a prescription, list "
         + "every item, not just the first. Keep the answer under 150 words."
     }
 

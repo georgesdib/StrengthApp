@@ -319,6 +319,14 @@ extension IntelligenceNarrativeTests {
         XCTAssertTrue(withPlan.map(\.name).contains("adherence"))
     }
 
+    func testPlanQueryExtractsDatesAndWeeks() {
+        XCTAssertEqual(ChatIntent.planQuery("what was prescribed yesterday"), "yesterday")
+        XCTAssertEqual(ChatIntent.planQuery("what was prescribed on 2026-11-14"), "2026-11-14")
+        XCTAssertEqual(ChatIntent.planQuery("how is adherence over 12 weeks"), "12")
+        XCTAssertEqual(ChatIntent.planQuery("what was prescribed today"), "today")
+        XCTAssertEqual(ChatIntent.planQuery("how is my squat"), "")
+    }
+
     func testPlanIntentSelectsOnlyTheNeededTool() {
         XCTAssertEqual(ChatIntent.planToolNames("what was prescribed yesterday"), ["prescription"])
         XCTAssertEqual(ChatIntent.planToolNames("how is my adherence"), ["adherence"])

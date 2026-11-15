@@ -48,7 +48,8 @@ final class TrainingChatModel: ObservableObject {
                     text: reply.text,
                     sources: reply.sources,
                     suggestions: reply.suggestions,
-                    unverifiedNumbers: reply.unverifiedNumbers
+                    unverifiedNumbers: reply.unverifiedNumbers,
+                    rawOutputs: reply.rawOutputs
                 )
             )
         } catch {

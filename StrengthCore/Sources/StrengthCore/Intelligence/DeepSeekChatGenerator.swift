@@ -249,7 +249,10 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
                 )
                 if unverified.isEmpty {
                     return ChatReply(
-                        text: text, sources: facts.recordedSources, suggestions: suggestions
+                        text: text,
+                        sources: facts.recordedSources,
+                        suggestions: suggestions,
+                        rawOutputs: facts.recordedOutputs
                     )
                 }
                 if attempt == 0 {
@@ -268,7 +271,8 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
                     text: text,
                     sources: facts.recordedSources,
                     suggestions: suggestions,
-                    unverifiedNumbers: unverified
+                    unverifiedNumbers: unverified,
+                    rawOutputs: facts.recordedOutputs
                 )
             }
             if toolRounds >= 4 {
@@ -303,7 +307,7 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
         + "and discuss medical considerations, but put them in the suggestions list, never in the "
         + "answer: they are proposals, not facts, and they are never applied. If the tools cannot "
         + "answer, say so plainly. Return a JSON object with keys answer (string) and suggestions "
-        + "(array of strings, empty when none). Convert today and yesterday to YYYY-MM-DD before calling "
+        + "(array of strings, empty when none). Resolve today and yesterday relative to the Today line before calling "
         + "a plan tool. When asked for a prescription, list every item, not just the first. Keep the "
         + "answer under 150 words."
     }

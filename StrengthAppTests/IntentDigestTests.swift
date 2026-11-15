@@ -143,6 +143,31 @@ final class IntentDigestTests: XCTestCase {
                        "Fallback: not enough comparable sessions for a trend yet.")
     }
 
+    func testAverageDurationDigestNamesTheWindowAndTheSample() throws {
+        let digest = AverageDurationDigest(envelope: try decode(overview), weeks: 4)
+
+        XCTAssertEqual(digest.sessionCount, 8)
+        XCTAssertEqual(digest.meanMinutes, 54.4)
+        XCTAssertTrue(digest.dialog.contains("over the last 4 weeks"))
+        XCTAssertTrue(digest.dialog.contains("54.4 minutes"))
+        XCTAssertTrue(digest.dialog.contains("based on 8 sessions"))
+        XCTAssertEqual(digest.lines.first?.label, "Average")
+    }
+
+    func testAverageDurationDigestSaysWhenNothingWasRecorded() throws {
+        let empty = """
+        {"schema_version":"intelligence.envelope.v1","capability":"get_overview",
+         "status":"no_data","as_of":"2026-11-15",
+         "period":{"start":"2026-10-19","end":"2026-11-15","days":28,"weeks":4,
+                   "timezone":"Europe/London"},
+         "facts":{},"observations":[],"coverage":{},"missing":[],"limitations":[]}
+        """
+        let digest = AverageDurationDigest(envelope: try decode(empty), weeks: 8)
+
+        XCTAssertNil(digest.meanMinutes)
+        XCTAssertEqual(digest.dialog, "No session durations were recorded over the last 8 weeks.")
+    }
+
     func testLastWorkoutDialogStatesDurationAndSets() {
         let summary = LastWorkoutSummary(
             occurredOn: "2026-11-14",
@@ -181,7 +206,7 @@ final class StubIntentProvider: IntentDataProviding {
     var catalogue: [ExerciseEntity] = []
     var catalogueCalls = 0
 
-    func overview() async throws -> IntelligenceEnvelope {
+    func overview(windowWeeks: Int) async throws -> IntelligenceEnvelope {
         throw IntentServiceError.notPaired
     }
 

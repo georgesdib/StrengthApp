@@ -53,6 +53,11 @@ final class IntentSnippetTests: XCTestCase {
         XCTAssertNotNil(render(view))
     }
 
+    func testAverageDurationSnippetRenders() throws {
+        let digest = AverageDurationDigest(envelope: try envelope(overview), weeks: 4)
+        XCTAssertNotNil(render(AverageDurationSnippetView(digest: digest)))
+    }
+
     func testLastWorkoutSnippetRendersWithAndWithoutData() {
         let summary = LastWorkoutSummary(
             occurredOn: "2026-11-14", sessionType: "lower_a", durationMin: 52,

@@ -28,8 +28,8 @@ final class LiveIntentDataProvider: IntentDataProviding {
         return IOSSession(baseURL: baseURL, token: token, deviceID: device.deviceID)
     }
 
-    func overview() async throws -> IntelligenceEnvelope {
-        try await client.overview(session: session())
+    func overview(windowWeeks: Int) async throws -> IntelligenceEnvelope {
+        try await client.overview(session: session(), windowWeeks: windowWeeks)
     }
 
     func weeklyReview() async throws -> IntelligenceEnvelope {

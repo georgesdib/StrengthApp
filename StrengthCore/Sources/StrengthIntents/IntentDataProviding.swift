@@ -24,7 +24,7 @@ public enum IntentServiceError: LocalizedError, Equatable {
 /// Main-actor bound because the app's API client is: intents hop once with `await`.
 @MainActor
 public protocol IntentDataProviding: AnyObject {
-    func overview() async throws -> IntelligenceEnvelope
+    func overview(windowWeeks: Int) async throws -> IntelligenceEnvelope
     func weeklyReview() async throws -> IntelligenceEnvelope
     func progression(exerciseID: String) async throws -> IntelligenceEnvelope
     func exerciseCatalogue() async throws -> [ExerciseEntity]

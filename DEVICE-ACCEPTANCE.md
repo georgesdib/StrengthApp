@@ -398,7 +398,11 @@ simulator (iOS 27.2). The physical-device Siri checks below are **not yet signed
 - [ ] "How is <exercise> progressing in StrengthApp" asks for the exercise when it is missing and
       answers with direction, change and session count when it is supplied.
 - [ ] Shortcuts lists the four actions with their phrases.
-- [ ] Siri shows the snippet card as well as speaking the dialog (weekly review and overview).
+- [ ] Siri shows the snippet card as well as speaking the dialog (weekly review, overview, average
+      duration).
+- [ ] "Average workout duration in StrengthApp" answers with the mean and the sample size, and a
+      follow-up ("...over the last 12 weeks") changes the window.
+- [ ] The average-duration card shows Average, Sessions and the measured subset when they differ.
 - [ ] Unpaired or offline: the dialog says to pair or that the request failed; no crash, no hang.
 - [ ] No intent starts a workout or writes to the server (read-only).
 

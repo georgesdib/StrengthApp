@@ -47,6 +47,26 @@ struct LastWorkoutSnippetView: View {
     }
 }
 
+struct AverageDurationSnippetView: View {
+    let digest: AverageDurationDigest
+
+    var body: some View {
+        SnippetCard(
+            title: "Average session",
+            subtitle: "Last " + String(digest.weeks) + (digest.weeks == 1 ? " week" : " weeks")
+        ) {
+            ForEach(digest.lines, id: \.label) { line in
+                SnippetFactRow(label: line.label, value: line.value)
+            }
+            if digest.lines.isEmpty {
+                Text("No session durations recorded in this window.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 struct ProgressionSnippetView: View {
     let name: String
     let direction: String?

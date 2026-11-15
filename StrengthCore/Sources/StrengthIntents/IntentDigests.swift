@@ -138,6 +138,61 @@ public struct OverviewDigest: Equatable {
     }
 }
 
+// MARK: - Average session duration
+
+/// The overview envelope's duration block: a window aggregate, never a per-session value.
+public struct AverageDurationDigest: Equatable {
+    public let weeks: Int
+    public let sessionCount: Int?
+    public let meanMinutes: Double?
+    public let measuredCount: Int?
+    public let measuredMeanMinutes: Double?
+
+    public init(envelope: IntelligenceEnvelope, weeks: Int) {
+        let duration = envelope.facts["attendance"]?.value.objectValue?["duration"]?.objectValue
+        self.weeks = weeks
+        sessionCount = duration?["n"]?.intValue
+        meanMinutes = duration?["mean_min"]?.doubleValue
+        measuredCount = duration?["measured_n"]?.intValue
+        measuredMeanMinutes = duration?["measured_mean_min"]?.doubleValue
+    }
+
+    /// The spoken sentence. It always names the window and the sample size, because the mean is a
+    /// window aggregate and mixes measured and estimated durations.
+    public var dialog: String {
+        let window = "the last " + String(weeks) + (weeks == 1 ? " week" : " weeks")
+        guard let meanMinutes else {
+            return "No session durations were recorded over " + window + "."
+        }
+        var text = "Your average workout over " + window + " was " + LastWorkoutSummary.minutesText(meanMinutes)
+        if let sessionCount, sessionCount > 0 {
+            text += ", based on " + String(sessionCount) + (sessionCount == 1 ? " session" : " sessions")
+            if let measuredCount, measuredCount > 0, let measuredMeanMinutes {
+                text += ", " + String(measuredCount) + " measured (average "
+                    + LastWorkoutSummary.minutesText(measuredMeanMinutes) + ")"
+            }
+        }
+        return text + "."
+    }
+
+    public var lines: [IntentFactLine] {
+        var lines: [IntentFactLine] = []
+        if let meanMinutes {
+            lines.append(.init(label: "Average", value: LastWorkoutSummary.minutesText(meanMinutes)))
+        }
+        if let sessionCount {
+            lines.append(.init(label: "Sessions", value: String(sessionCount)))
+        }
+        if let measuredMeanMinutes, let measuredCount {
+            lines.append(.init(
+                label: "Measured",
+                value: LastWorkoutSummary.minutesText(measuredMeanMinutes) + " (" + String(measuredCount) + ")"
+            ))
+        }
+        return lines
+    }
+}
+
 // MARK: - Weekly review
 
 public struct WeeklyReviewDigest: Equatable {

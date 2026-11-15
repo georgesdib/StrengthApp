@@ -29,7 +29,7 @@ struct TrainingOverviewIntent: AppIntent {
     func perform() async throws -> some IntentResult & ShowsSnippetView & ProvidesDialog {
         let envelope = try await IntentCall.run {
             let provider = try await IntentServices.provider()
-            return try await provider.overview()
+            return try await provider.overview(windowWeeks: 4)
         }
         let digest = OverviewDigest(envelope: envelope)
         return .result(
@@ -61,6 +61,35 @@ struct LastWorkoutIntent: AppIntent {
         return .result(
             dialog: IntentDialog(stringLiteral: summary.dialog),
             view: LastWorkoutSnippetView(summary: summary)
+        )
+    }
+}
+
+/// "What was my average workout duration over the past N weeks?" — the envelope's window aggregate.
+struct AverageSessionDurationIntent: AppIntent {
+    static var title: LocalizedStringResource = "Average Workout Duration"
+    static var description = IntentDescription(
+        "Report the average session duration over a number of weeks, with the sample size behind it."
+    )
+    static var openAppWhenRun: Bool = false
+
+    @Parameter(title: "Weeks", default: 4, inclusiveRange: (lowerBound: 1, upperBound: 52))
+    var weeks: Int
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Average workout duration over the last \(\.$weeks) weeks")
+    }
+
+    func perform() async throws -> some IntentResult & ShowsSnippetView & ProvidesDialog {
+        let window = weeks
+        let envelope = try await IntentCall.run {
+            let provider = try await IntentServices.provider()
+            return try await provider.overview(windowWeeks: window)
+        }
+        let digest = AverageDurationDigest(envelope: envelope, weeks: window)
+        return .result(
+            dialog: IntentDialog(stringLiteral: digest.dialog),
+            view: AverageDurationSnippetView(digest: digest)
         )
     }
 }

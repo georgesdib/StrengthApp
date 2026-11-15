@@ -32,6 +32,15 @@ struct StrengthShortcuts: AppShortcutsProvider {
             systemImageName: "calendar"
         )
         AppShortcut(
+            intent: AverageSessionDurationIntent(),
+            phrases: [
+                "Average workout duration in \(.applicationName)",
+                "Average session length in \(.applicationName)",
+            ],
+            shortTitle: "Average duration",
+            systemImageName: "timer"
+        )
+        AppShortcut(
             intent: ExerciseProgressionIntent(),
             phrases: [
                 "How is \(\.$exercise) progressing in \(.applicationName)",

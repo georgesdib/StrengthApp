@@ -50,6 +50,12 @@ struct ProgressDashboardView: View {
                                 detail: model.narrativeDetail
                             )
                         }
+                        if model.chatEnabled {
+                            NavigationLink("Chat") {
+                                TrainingChatView(model: model)
+                            }
+                            .accessibilityIdentifier("training-chat-link")
+                        }
                     }
                 }
 

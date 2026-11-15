@@ -58,6 +58,11 @@ public enum NarrativeAvailability: Equatable, Sendable {
     case unavailable(String)
 
     public var isAvailable: Bool { self == .available }
+
+    public var reasonText: String {
+        if case .unavailable(let reason) = self { return reason }
+        return "The on-device model is not available."
+    }
 }
 
 #if canImport(FoundationModels) && os(iOS)
@@ -157,9 +162,16 @@ public enum NarrativeValidator {
         "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
     ]
 
-    private static func numbers(in narrative: GeneratedNarrative) -> [String] {
-        let text = ([narrative.headline, narrative.limitation] + narrative.observations)
-            .joined(separator: " ")
+    public static func validate(text: String, allowedNumbers: Set<String>, maxLength: Int = 2_000) throws {
+        guard text.count <= maxLength else { throw NarrativeError.tooLong }
+        if let ungrounded = numbers(in: text).first(where: {
+            !isGrounded($0, allowedNumbers: allowedNumbers)
+        }) {
+            throw NarrativeError.notGrounded(ungrounded)
+        }
+    }
+
+    public static func numbers(in text: String) -> [String] {
         // Do not read the digit inside e1RM, 1RM, RIR2 or sRPE2 as a claim.
         let pattern = "(?<![A-Za-z0-9_])\\d+(?:[.,]\\d+)?(?![A-Za-z0-9_])"
             + "|\\b(?:two|three|four|five|six|seven|eight|nine|ten)\\b"
@@ -170,16 +182,25 @@ public enum NarrativeValidator {
         }
     }
 
+    private static func numbers(in narrative: GeneratedNarrative) -> [String] {
+        numbers(in: ([narrative.headline, narrative.limitation] + narrative.observations)
+            .joined(separator: " "))
+    }
+
     private static func grounded(_ number: String, context: NarrativeContext) -> Bool {
+        isGrounded(number, allowedNumbers: context.allowedNumbers)
+    }
+
+    public static func isGrounded(_ number: String, allowedNumbers: Set<String>) -> Bool {
         var candidates = [number, number.replacingOccurrences(of: ",", with: "")]
         if number.contains(",") {
             let noComma = number.replacingOccurrences(of: ",", with: "")
             candidates.append(noComma)
             candidates.append(number.replacingOccurrences(of: ",", with: "."))
         }
-        if candidates.contains(where: context.allowedNumbers.contains) { return true }
+        if candidates.contains(where: allowedNumbers.contains) { return true }
         if let digit = numberWords[number.lowercased()] {
-            return context.allowedNumbers.contains(digit)
+            return allowedNumbers.contains(digit)
         }
         return false
     }
@@ -197,7 +218,13 @@ public extension NarrativeContext {
                            allowedNumbers: allowedNumbers(in: envelope))
     }
 
-    private static func allowedNumbers(in envelope: IntelligenceEnvelope) -> Set<String> {
+    public static func allowedNumbers(in envelopes: [IntelligenceEnvelope]) -> Set<String> {
+        envelopes.reduce(into: Set<String>()) { union, envelope in
+            union.formUnion(allowedNumbers(in: envelope))
+        }
+    }
+
+    public static func allowedNumbers(in envelope: IntelligenceEnvelope) -> Set<String> {
         var numbers: Set<String> = []
         let grouping = NumberFormatter()
         grouping.locale = Locale(identifier: "en_US_POSIX")
@@ -390,10 +417,4 @@ public struct FoundationNarrativeGenerator: NarrativeGenerating {
     }
 }
 
-private extension NarrativeAvailability {
-    var reasonText: String {
-        if case .unavailable(let reason) = self { return reason }
-        return "The on-device model is not available."
-    }
-}
 #endif

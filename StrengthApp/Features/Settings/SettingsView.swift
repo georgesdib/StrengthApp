@@ -117,6 +117,20 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Chat") {
+                    Toggle("Chat with your training", isOn: $model.chatEnabled)
+                    if model.chatEnabled {
+                        let availability = FoundationNarrativeGenerator().availability()
+                        Text(availabilityText(availability))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("On-device conversation over your own data. Nothing is sent to a server "
+                         + "and the conversation is not saved.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Intelligence") {
                     Toggle("Explain training on this iPhone", isOn: $model.narrativeEnabled)
                     if model.narrativeEnabled {

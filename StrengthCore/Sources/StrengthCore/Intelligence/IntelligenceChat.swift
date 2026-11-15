@@ -1,0 +1,160 @@
+import Foundation
+#if canImport(FoundationModels) && os(iOS)
+import FoundationModels
+#endif
+
+public struct ChatMessage: Identifiable, Equatable, Sendable {
+    public enum Role: String, Sendable { case user, assistant }
+    public let id: UUID
+    public let role: Role
+    public let text: String
+    public let sources: [String]
+
+    public init(id: UUID = UUID(), role: Role, text: String, sources: [String] = []) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.sources = sources
+    }
+}
+
+public struct ChatReply: Sendable {
+    public let text: String
+    public let sources: [String]
+    public init(text: String, sources: [String]) {
+        self.text = text
+        self.sources = sources
+    }
+}
+
+public protocol ChatFactsProviding: IntelligenceCapabilityProviding {
+    var recordedEnvelopes: [IntelligenceEnvelope] { get }
+    var recordedSources: [String] { get }
+    func resetRecord()
+}
+
+public enum ChatError: LocalizedError {
+    case unavailable(String)
+    case notGrounded(String)
+    case tooLong
+    case failed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unavailable(let reason): return reason
+        case .notGrounded(let number):
+            return "I could not ground that answer in your data (number: \(number)). Try asking about this week instead."
+        case .tooLong: return "The answer was too long. Try a narrower question."
+        case .failed(let message): return message
+        }
+    }
+}
+
+@MainActor
+public protocol TrainingChatGenerating {
+    func availability() -> NarrativeAvailability
+    func reply(to question: String, history: [ChatMessage]) async throws -> ChatReply
+}
+
+public enum ChatPrompt {
+    public static func build(question: String, history: [ChatMessage], maxCharacters: Int = 2_400) -> String {
+        var lines: [String] = []
+        for message in history.suffix(6) {
+            let prefix = message.role == .user ? "Athlete" : "Assistant"
+            lines.append("\(prefix): \(String(message.text.prefix(400)))")
+        }
+        lines.append("Question: \(question)")
+        let text = lines.joined(separator: "\n")
+        return String(text.suffix(maxCharacters))
+    }
+}
+
+#if canImport(FoundationModels) && os(iOS)
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@MainActor
+public final class FoundationChatGenerator: TrainingChatGenerating {
+    private let facts: any ChatFactsProviding
+
+    public init(facts: any ChatFactsProviding) {
+        self.facts = facts
+    }
+
+    public func availability() -> NarrativeAvailability {
+        switch SystemLanguageModel.default.availability {
+        case .available: return .available
+        case .unavailable(.deviceNotEligible):
+            return .unavailable(NarrativeUnavailableReason.deviceNotEligible.message)
+        case .unavailable(.appleIntelligenceNotEnabled):
+            return .unavailable(NarrativeUnavailableReason.appleIntelligenceNotEnabled.message)
+        case .unavailable(.modelNotReady):
+            return .unavailable(NarrativeUnavailableReason.modelNotReady.message)
+        @unknown default:
+            return .unavailable("The on-device model is not available right now.")
+        }
+    }
+
+    public func reply(to question: String, history: [ChatMessage]) async throws -> ChatReply {
+        guard availability().isAvailable else {
+            throw ChatError.unavailable(availability().reasonText)
+        }
+        let prompt = ChatPrompt.build(question: question, history: history)
+        for toolLimit in [5, 3] {
+            facts.resetRecord()
+            let tools = Array(IntelligenceTools.make(provider: facts).prefix(toolLimit))
+            let session = LanguageModelSession(
+                model: SystemLanguageModel.default,
+                tools: tools,
+                instructions: instructions
+            )
+            do {
+                let response = try await session.respond(to: prompt)
+                let text = response.content
+                let envelopes = facts.recordedEnvelopes
+                if let ungrounded = NarrativeValidator.numbers(in: text).first(where: {
+                    !NarrativeValidator.isGrounded(
+                        $0, allowedNumbers: NarrativeContext.allowedNumbers(in: envelopes)
+                    )
+                }) {
+                    throw ChatError.notGrounded(ungrounded)
+                }
+                guard text.count <= 2_500 else { throw ChatError.tooLong }
+                return ChatReply(text: text, sources: facts.recordedSources)
+            } catch let error as ChatError {
+                throw error
+            } catch {
+                if isContextOverflow(error), toolLimit == 5 { continue }
+                throw mapped(error)
+            }
+        }
+        throw ChatError.failed("The conversation was too large for the on-device model.")
+    }
+
+    private var instructions: String {
+        "You are a training data assistant on the athlete's iPhone. Answer only from the facts the "
+        + "tools return; call a tool before making a data claim. Never invent a number, never "
+        + "prescribe a load or a plan, and never give medical advice. If the tools cannot answer, say "
+        + "so plainly and suggest what to ask instead. Keep answers under 150 words."
+    }
+
+    private func isContextOverflow(_ error: Error) -> Bool {
+        if let generation = error as? LanguageModelSession.GenerationError,
+           case .exceededContextWindowSize = generation {
+            return true
+        }
+        let text = error.localizedDescription.lowercased()
+        return text.contains("token") && (text.contains("maximum") || text.contains("context"))
+    }
+
+    private func mapped(_ error: Error) -> ChatError {
+        if isContextOverflow(error) {
+            return .failed("The conversation was too large for the on-device model.")
+        }
+        if let generation = error as? LanguageModelSession.GenerationError,
+           case .unsupportedLanguageOrLocale = generation {
+            return .unavailable("The on-device model does not support this language yet.")
+        }
+        return .failed(error.localizedDescription)
+    }
+}
+
+#endif

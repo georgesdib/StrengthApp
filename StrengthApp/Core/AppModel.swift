@@ -62,6 +62,11 @@ final class AppModel: ObservableObject {
     ) {
         didSet { UserDefaults.standard.set(narrativeEnabled, forKey: "intelligence.narrative.enabled") }
     }
+    @Published var chatEnabled: Bool = UserDefaults.standard.bool(
+        forKey: "intelligence.chat.enabled"
+    ) {
+        didSet { UserDefaults.standard.set(chatEnabled, forKey: "intelligence.chat.enabled") }
+    }
     @Published var narrativeDetail: NarrativeDetail = NarrativeDetail(
         rawValue: UserDefaults.standard.string(forKey: "intelligence.narrative.detail") ?? ""
     ) ?? .standard {
@@ -1851,6 +1856,17 @@ final class AppModel: ObservableObject {
 
     func makeNarrativeGenerator() -> any NarrativeGenerating {
         FoundationNarrativeGenerator()
+    }
+
+    func makeChatModel() -> TrainingChatModel {
+        guard let session else {
+            return TrainingChatModel(generator: UnavailableChatGenerator())
+        }
+        return TrainingChatModel(
+            generator: FoundationChatGenerator(
+                facts: ChatToolbox(client: client, session: session)
+            )
+        )
     }
 
     func loadOverviewEnvelope() async throws -> IntelligenceEnvelope {

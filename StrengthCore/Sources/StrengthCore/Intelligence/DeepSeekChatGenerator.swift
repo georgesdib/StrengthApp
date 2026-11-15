@@ -182,9 +182,13 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
         facts.resetRecord()
         failureLog.reset()
         let planNames = includePlan ? ChatIntent.planToolNames(question) : []
-        let planFacts = planNames.isEmpty
+        let planResult = planNames.isEmpty
             ? nil
             : await ChatPlanFacts.load(question: question, names: planNames, facts: facts)
+        if let planResult, planResult.status == .failure {
+            throw ChatPlanFailure.error(for: planResult)
+        }
+        let planFacts = planResult?.context
         let injectPlan = planFacts != nil
         let system = instructions
             + (planFacts.map { "\n\nPlan facts (use these; do not call plan tools):\n" + $0 } ?? "")

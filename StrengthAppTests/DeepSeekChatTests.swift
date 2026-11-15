@@ -44,7 +44,7 @@ private final class StubDeepSeekAPI: DeepSeekCompleting, @unchecked Sendable {
     func validateKey() async throws {}
 }
 
-private final class StubFacts: ChatFactsProviding, @unchecked Sendable {
+private final class StubFacts: ChatFactsProviding, PlanFactsProviding, @unchecked Sendable {
     private let envelope: IntelligenceEnvelope
 
     init(envelope: IntelligenceEnvelope) {
@@ -53,6 +53,8 @@ private final class StubFacts: ChatFactsProviding, @unchecked Sendable {
 
     var recordedEnvelopes: [IntelligenceEnvelope] = []
     var recordedSources: [String] = []
+    var planErrors: [String: Error] = [:]
+    var planText = "prescription facts"
     func resetRecord() {
         recordedEnvelopes = []
         recordedSources = []
@@ -62,6 +64,25 @@ private final class StubFacts: ChatFactsProviding, @unchecked Sendable {
         recordedEnvelopes.append(envelope)
         recordedSources.append("weekly review")
         return NarrativeContext.projectionText(envelope)
+    }
+
+    private func recordPlan(_ source: String) -> String {
+        recordedEnvelopes.append(envelope)
+        recordedSources.append(source)
+        return planText
+    }
+
+    func prescription(query: String) async throws -> String {
+        if let error = planErrors["prescription"] { throw error }
+        return recordPlan("prescription")
+    }
+    func programmeSummary(query: String) async throws -> String {
+        if let error = planErrors["programme_summary"] { throw error }
+        return recordPlan("programme")
+    }
+    func adherence(query: String) async throws -> String {
+        if let error = planErrors["adherence"] { throw error }
+        return recordPlan("adherence")
     }
 
     func trainingOverview(asOf: String?, windowWeeks: Int) async throws -> String { record() }
@@ -158,6 +179,50 @@ final class DeepSeekChatTests: XCTestCase {
         XCTAssertEqual(reply.text, "Two sessions this week.")
         XCTAssertEqual(reply.suggestions, ["Try 105 kg next week."])
         XCTAssertTrue(reply.unverifiedNumbers.isEmpty)
+    }
+
+    func testPlanFactsAllFailIsFailure() async {
+        let facts = StubFacts(envelope: try! envelope())
+        facts.planErrors["prescription"] = APIError.unauthorized
+        let result = await ChatPlanFacts.load(
+            question: "what was prescribed yesterday", names: ["prescription"], facts: facts
+        )
+        XCTAssertEqual(result.status, .failure)
+        XCTAssertEqual(result.failures["prescription"], .unauthorized)
+        XCTAssertNil(result.context)
+    }
+
+    func testPlanFactsMixedIsPartial() async {
+        let facts = StubFacts(envelope: try! envelope())
+        facts.planErrors["adherence"] = APIError.transport("offline")
+        let result = await ChatPlanFacts.load(
+            question: "prescription and adherence", names: ["prescription", "adherence"],
+            facts: facts
+        )
+        XCTAssertEqual(result.status, .partial)
+        XCTAssertEqual(result.missing, ["adherence"])
+        XCTAssertTrue(result.context?.contains("prescription facts") ?? false)
+        XCTAssertTrue(result.context?.contains("Unavailable plan sections") ?? false)
+    }
+
+    func testPlanFailureStopsDeepSeekGeneration() async {
+        let facts = StubFacts(envelope: try! envelope())
+        facts.planErrors["prescription"] = APIError.unauthorized
+        let api = StubDeepSeekAPI(responses: [])
+        let generator = DeepSeekChatGenerator(
+            api: api, keyPresent: true, facts: facts, includePlan: true
+        )
+        do {
+            _ = try await generator.reply(to: "what was prescribed yesterday", history: [])
+            XCTFail("expected an unavailable error")
+        } catch let error as ChatError {
+            guard case .unavailable = error else {
+                return XCTFail("expected unavailable, got \(error)")
+            }
+        } catch {
+            return XCTFail("expected unavailable, got \(error)")
+        }
+        XCTAssertTrue(api.calls.isEmpty)
     }
 
     func testMissingKeyIsUnavailable() {

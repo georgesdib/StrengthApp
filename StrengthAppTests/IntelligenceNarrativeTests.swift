@@ -333,6 +333,10 @@ extension IntelligenceNarrativeTests {
         XCTAssertEqual(
             ChatIntent.planToolNames("what does my programme look like"), ["programme_summary"]
         )
+        XCTAssertEqual(ChatIntent.planToolNames("What am I training today?"), ["prescription"])
+        XCTAssertEqual(ChatIntent.planToolNames("What exercises are scheduled?"), ["prescription"])
+        XCTAssertEqual(ChatIntent.planToolNames("What should I be doing this week?"), ["prescription"])
+        XCTAssertEqual(ChatIntent.planToolNames("Show me today's lifts."), ["prescription"])
         let tools = IntelligenceTools.make(
             provider: StubProvider(), includePlan: true, includeBase: false,
             planNames: ["prescription"]
@@ -389,6 +393,46 @@ extension IntelligenceNarrativeTests {
         XCTAssertEqual(card?.forDate, "2026-11-14")
         XCTAssertEqual(card?.sessionType, "bench_hinge")
         XCTAssertEqual(card?.items.count, 3)
+    }
+
+    func testPlanProjectionKeepsNoDataAndUnknowns() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        let noData = """
+        {"schema_version":"intelligence.envelope.v1","intelligence_version":"1.0.0",
+         "capability":"get_prescription","status":"no_data","as_of":"2026-11-13",
+         "period":{"start":"2026-11-13","end":"2026-11-13","days":1,"weeks":1,"timezone":"GMT"},
+         "subject":{"athlete":"self"},"units":{},"facts":{},
+         "evidence":[],"coverage":{},"missing":["no persisted prescription matches the request"],
+         "limitations":["Read-only."],"quality_flags":[],"privacy":{"class":"health"},
+         "provenance":{"builder_version":"context.v1"},"generated_at":"2026-11-16T07:02:11Z"}
+        """
+        let noDataText = PlanProjection.text(
+            try decoder.decode(IntelligenceEnvelope.self, from: Data(noData.utf8))
+        )
+        XCTAssertTrue(noDataText.contains("status=no_data"))
+        XCTAssertTrue(noDataText.contains("no persisted prescription"))
+        XCTAssertFalse(noDataText.contains("date=unknown"))
+
+        let adherence = """
+        {"schema_version":"intelligence.envelope.v1","intelligence_version":"1.0.0",
+         "capability":"get_adherence_analysis","status":"ok","as_of":"2026-11-15",
+         "period":{"start":"2026-08-24","end":"2026-11-15","days":84,"weeks":12,"timezone":"GMT"},
+         "subject":{"athlete":"self"},"units":{},
+         "facts":{"totals":{"value":{},"basis":"derived","method":"test","unit":null,"n":null,"gate":null,"note":null},
+                  "coverage":{"value":{},"basis":"derived","method":"test","unit":null,"n":null,"gate":null,"note":null},
+                  "periods":{"value":[],"basis":"derived","method":"test","unit":null,"n":null,"gate":null,"note":null},
+                  "exercises":{"value":[],"basis":"derived","method":"test","unit":null,"n":null,"gate":null,"note":null}},
+         "evidence":[],"coverage":{},"missing":[],"limitations":[],"quality_flags":[],
+         "privacy":{"class":"health"},"provenance":{"builder_version":"context.v1"},
+         "generated_at":"2026-11-16T07:02:11Z"}
+        """
+        let adherenceText = PlanProjection.text(
+            try decoder.decode(IntelligenceEnvelope.self, from: Data(adherence.utf8))
+        )
+        XCTAssertTrue(adherenceText.contains("workouts=n/a"))
+        XCTAssertFalse(adherenceText.contains("workouts=0"))
     }
 
     func testBudgetTrimsObservationsFirst() {

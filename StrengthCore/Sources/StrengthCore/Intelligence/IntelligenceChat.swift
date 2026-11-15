@@ -119,13 +119,21 @@ public enum ChatIntent {
     public static func planToolNames(_ question: String) -> [String] {
         let text = question.lowercased()
         var names: Set<String> = []
-        if text.contains("prescription") || text.contains("prescribed") {
+        let prescriptionPhrases = [
+            "prescription", "prescribed", "training today", "train today",
+            "exercises scheduled", "exercises are scheduled", "scheduled exercises", "what should i be doing",
+            "what should i do today", "what should i train", "what am i training",
+            "what am i doing today", "today's lifts", "today's workout", "today's session",
+            "session today", "workout today", "lifts today", "scheduled today",
+        ]
+        if prescriptionPhrases.contains(where: { text.contains($0) }) {
             names.insert("prescription")
         }
         if text.contains("programme") || text.contains("program ") || text.contains("block") {
             names.insert("programme_summary")
         }
-        if text.contains("adherence") || text.contains("compliance") {
+        if text.contains("adherence") || text.contains("compliance")
+            || text.contains("missed session") {
             names.insert("adherence")
         }
         if text.contains(" plan") || text.contains("plan ") {
@@ -153,16 +161,68 @@ public enum ChatIntent {
     }
 }
 
+public enum ChatPlanFactsStatus: String, Sendable {
+    case success
+    case partial
+    case failure
+}
+
+public struct ChatPlanFactsResult: Sendable {
+    public let status: ChatPlanFactsStatus
+    public let context: String?
+    public let missing: [String]
+    public let failures: [String: CapabilityFailure]
+
+    public init(
+        status: ChatPlanFactsStatus,
+        context: String?,
+        missing: [String],
+        failures: [String: CapabilityFailure]
+    ) {
+        self.status = status
+        self.context = context
+        self.missing = missing
+        self.failures = failures
+    }
+}
+
+public enum ChatPlanFailure {
+    public static func error(for result: ChatPlanFactsResult) -> ChatError {
+        let failures = Array(result.failures.values)
+        if failures.contains(.unauthorized) {
+            return .unavailable("Your training data could not be accessed. Check the pairing.")
+        }
+        if failures.contains(where: { $0 == .unavailable || $0 == .server }) {
+            return .failed("Your training data is temporarily unavailable. Try again.")
+        }
+        if !failures.isEmpty, failures.allSatisfy({ $0 == .notFound }) {
+            return .failed("No plan data was found for that request.")
+        }
+        if failures.contains(.invalidIdentifier) {
+            return .failed("That plan request was not valid.")
+        }
+        return .failed("Plan data could not be loaded.")
+    }
+}
+
 public enum ChatPlanFacts {
     public static func load(
         question: String,
         names: [String],
         facts: any ChatFactsProviding
-    ) async -> String? {
-        guard let plan = facts as? any PlanFactsProviding else { return nil }
+    ) async -> ChatPlanFactsResult {
+        guard let plan = facts as? any PlanFactsProviding else {
+            return ChatPlanFactsResult(
+                status: .failure, context: nil, missing: names,
+                failures: Dictionary(uniqueKeysWithValues: names.map { ($0, .unknown) })
+            )
+        }
         facts.resetRecord()
         let query = ChatIntent.planQuery(question)
         var blocks: [String] = []
+        var missing: [String] = []
+        var failures: [String: CapabilityFailure] = [:]
+
         for name in names {
             do {
                 switch name {
@@ -173,13 +233,30 @@ public enum ChatPlanFacts {
                 case "adherence":
                     blocks.append("[adherence]\n" + (try await plan.adherence(query: query)))
                 default:
-                    break
+                    continue
                 }
             } catch {
-                blocks.append("[\(name) unavailable] \(error.localizedDescription)")
+                missing.append(name)
+                failures[name] = CapabilityFailure(error)
             }
         }
-        return blocks.isEmpty ? nil : blocks.joined(separator: "\n\n")
+
+        if blocks.isEmpty {
+            return ChatPlanFactsResult(
+                status: .failure, context: nil, missing: names, failures: failures
+            )
+        }
+        var context = blocks.joined(separator: "\n\n")
+        if !missing.isEmpty {
+            context += "\n\nUnavailable plan sections (do not make claims about them): "
+                + missing.joined(separator: ", ")
+        }
+        return ChatPlanFactsResult(
+            status: missing.isEmpty ? .success : .partial,
+            context: context,
+            missing: missing,
+            failures: failures
+        )
     }
 }
 
@@ -310,9 +387,13 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
     ) async throws -> Attempt {
         let planNames = includePlan ? ChatIntent.planToolNames(question) : []
         let usePlan = !planNames.isEmpty
-        let planFacts = usePlan
+        let planResult = usePlan
             ? await ChatPlanFacts.load(question: question, names: planNames, facts: facts)
             : nil
+        if let planResult, planResult.status == .failure {
+            throw ChatPlanFailure.error(for: planResult)
+        }
+        let planFacts = planResult?.context
         let injectPlan = planFacts != nil
         let promptHistory = usePlan ? Array(history.suffix(2)) : history
         let attempts: [[ChatMessage]] = [promptHistory, []]

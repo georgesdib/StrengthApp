@@ -1,12 +1,14 @@
 import XCTest
 
 @testable import StrengthApp
+import StrengthCore
 
 @MainActor
 final class WorkoutAutomationTests: XCTestCase {
     private var defaults: UserDefaults!
     private var opener: StubShortcutOpener!
     private var automation: WorkoutAutomation!
+    private var sceneRunner: StubSceneRunner!
     private var suite = ""
 
     override func setUp() {
@@ -17,7 +19,8 @@ final class WorkoutAutomationTests: XCTestCase {
         defaults = UserDefaults(suiteName: suite)
         defaults.removePersistentDomain(forName: suite)
         opener = StubShortcutOpener()
-        automation = WorkoutAutomation(defaults: defaults, opener: opener)
+        sceneRunner = StubSceneRunner()
+        automation = WorkoutAutomation(defaults: defaults, opener: opener, sceneRunner: sceneRunner)
     }
 
     override func tearDown() {
@@ -82,11 +85,67 @@ final class WorkoutAutomationTests: XCTestCase {
         XCTAssertEqual(opener.urls.count, 2)
     }
 
+    func testSceneRunsBeforeTheShortcut() async {
+        let scene = SceneSelection(homeID: "h1", sceneID: "s1", label: "Home — Gym")
+        automation.startScene = scene
+        automation.startShortcut = "Gym lights"
+
+        let ran = await automation.handle(.started, sessionID: "w1")
+
+        XCTAssertTrue(ran)
+        XCTAssertEqual(sceneRunner.ran.map(\.sceneID), ["s1"])
+        XCTAssertEqual(opener.urls.count, 1)
+        XCTAssertEqual(automation.startScene?.label, "Home — Gym")
+    }
+
+    func testSceneFiresOncePerEvent() async {
+        automation.startScene = SceneSelection(homeID: "h1", sceneID: "s1", label: "Home — Gym")
+
+        let first = await automation.handle(.started, sessionID: "w1")
+        let second = await automation.handle(.started, sessionID: "w1")
+
+        XCTAssertTrue(first)
+        XCTAssertFalse(second)
+        XCTAssertEqual(sceneRunner.ran.count, 1)
+    }
+
+    func testRefusedSceneIsRetried() async {
+        automation.startScene = SceneSelection(homeID: "h1", sceneID: "s1", label: "Home — Gym")
+        sceneRunner.result = false
+
+        let refused = await automation.handle(.started, sessionID: "w1")
+        XCTAssertFalse(refused)
+        sceneRunner.result = true
+        let retried = await automation.handle(.started, sessionID: "w1")
+        XCTAssertTrue(retried)
+        XCTAssertEqual(sceneRunner.ran.count, 2)
+    }
+
+    func testSceneSelectionRoundTripsThroughJSON() {
+        let scene = SceneSelection(homeID: "h1", sceneID: "s1", label: "Home — Gym")
+        XCTAssertEqual(SceneSelection.decode(scene.jsonString), scene)
+        XCTAssertNil(SceneSelection.decode(nil))
+        XCTAssertNil(SceneSelection.decode("not json"))
+    }
+
     func testURLShape() {
         let url = WorkoutAutomation.url(forShortcutNamed: "Lights & fan")
         XCTAssertEqual(url?.scheme, "shortcuts")
         XCTAssertEqual(url?.host, "run-shortcut")
         XCTAssertEqual(url?.query, "name=Lights%20%26%20fan")
+    }
+}
+
+@MainActor
+private final class StubSceneRunner: SceneRunning {
+    var ran: [SceneSelection] = []
+    var result = true
+
+    func scenes() async -> [SceneSelection] { [] }
+
+    func run(_ selection: SceneSelection) async -> Bool {
+        ran.append(selection)
+        return result
     }
 }
 

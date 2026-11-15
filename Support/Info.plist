@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSHomeKitUsageDescription</key>
+	<string>Strength runs the Home scene you choose when a workout starts or ends.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>StrengthApp connects to your own strength-coach server on your local network.</string>
     <key>NSHealthShareUsageDescription</key>

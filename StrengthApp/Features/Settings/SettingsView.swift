@@ -11,6 +11,21 @@ struct SettingsView: View {
     @State private var isTestingDeepSeek = false
     @AppStorage(WorkoutAutomation.startShortcutKey) private var startShortcutName = ""
     @AppStorage(WorkoutAutomation.endShortcutKey) private var endShortcutName = ""
+    @State private var scenes: [SceneSelection] = []
+    @State private var startSceneID = WorkoutAutomation.shared.startScene?.sceneID ?? ""
+    @State private var endSceneID = WorkoutAutomation.shared.endScene?.sceneID ?? ""
+
+    private func loadScenes() async {
+        let loaded = await WorkoutAutomation.shared.availableScenes()
+        scenes = loaded
+        // Drop a selection whose scene no longer exists rather than running a stale identifier.
+        if !startSceneID.isEmpty, !loaded.contains(where: { $0.sceneID == startSceneID }) {
+            startSceneID = ""
+        }
+        if !endSceneID.isEmpty, !loaded.contains(where: { $0.sceneID == endSceneID }) {
+            endSceneID = ""
+        }
+    }
 
     private func availabilityText(_ availability: NarrativeAvailability) -> String {
         switch availability {
@@ -242,6 +257,48 @@ struct SettingsView: View {
                 } footer: {
                     Text("Leave a field empty to turn that channel off. The Shortcut runs with no "
                          + "input, and Shortcuts comes to the foreground briefly when a workout starts.")
+                }
+
+                Section {
+                    Picker("Start scene", selection: $startSceneID) {
+                        Text("None").tag("")
+                        ForEach(scenes, id: \.sceneID) { scene in
+                            Text(scene.label).tag(scene.sceneID)
+                        }
+                    }
+                    Picker("End scene", selection: $endSceneID) {
+                        Text("None").tag("")
+                        ForEach(scenes, id: \.sceneID) { scene in
+                            Text(scene.label).tag(scene.sceneID)
+                        }
+                    }
+                    Button("Test start scene") {
+                        if let scene = scenes.first(where: { $0.sceneID == startSceneID }) {
+                            Task { await WorkoutAutomation.shared.testScene(scene) }
+                        }
+                    }
+                    .disabled(startSceneID.isEmpty)
+                    Button("Test end scene") {
+                        if let scene = scenes.first(where: { $0.sceneID == endSceneID }) {
+                            Task { await WorkoutAutomation.shared.testScene(scene) }
+                        }
+                    }
+                    .disabled(endSceneID.isEmpty)
+                    Button("Reload scenes") {
+                        Task { await loadScenes() }
+                    }
+                } header: {
+                    Text("Home scenes")
+                } footer: {
+                    Text("Scene first, then the Shortcut. Home access is requested when scenes load. "
+                         + "A missing home or scene is skipped, and the workout is never blocked.")
+                }
+                .task { await loadScenes() }
+                .onChange(of: startSceneID) { _, newValue in
+                    WorkoutAutomation.shared.startScene = scenes.first { $0.sceneID == newValue }
+                }
+                .onChange(of: endSceneID) { _, newValue in
+                    WorkoutAutomation.shared.endScene = scenes.first { $0.sceneID == newValue }
                 }
 
                 WatchSettingsSection(model: model)

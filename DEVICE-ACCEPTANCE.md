@@ -447,3 +447,35 @@ on the iPhone 17 simulator. The owner confirmed every physical-device check belo
 - [x] The shortcut receives no input: a shortcut whose first action reads "Shortcut Input" still runs.
 
 Owner confirmation: pass 2026-11-15 · Build: INT-7b-1 · Device: physical iPhone · iOS: 27.2
+
+---
+
+# INT-7b-2 HomeKit scenes acceptance — phone slice delivered, watch slice pending
+
+**Status 2026-11-15:** the phone executes a chosen scene on start and end, after the entitlement and
+usage string were added. The watch half (choice synced from the phone, executed on the watch) is **not
+implemented yet**.
+
+## Automated
+
+- [x] The scene runs before the Shortcut, once per session and event.
+- [x] A refused scene is forgotten so a later transition can retry, and the workout is untouched.
+- [x] `SceneSelection` survives a JSON round-trip and tolerates corrupt storage.
+- [x] Ten automation tests pass on the iPhone 17 simulator.
+
+## Physical device (owner to confirm)
+
+- [ ] Settings shows "Home scenes" with a start and end picker, populated from the homes the app can
+      see; the first open asks for Home access.
+- [ ] Choosing a scene and starting a workout runs it; finishing or abandoning runs the end scene.
+- [ ] With both pickers on "None", no scene runs.
+- [ ] A scene deleted after selection is skipped; the workout still starts and finishes.
+- [ ] Denying Home access leaves both pickers empty and never blocks a workout.
+
+## Known gap
+
+- [ ] The watch does not run scenes yet. The phone selection is not yet sent over WatchConnectivity,
+      and the watch executor is not wired into `WatchExecutionController`. Recorded in the plan as the
+      remaining half of 7b-2.
+
+Owner confirmation: pending · Build: INT-7b-2 (phone) · Device: physical iPhone · iOS: 27.2

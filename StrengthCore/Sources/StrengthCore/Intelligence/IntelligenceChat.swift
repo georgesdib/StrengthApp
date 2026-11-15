@@ -147,6 +147,36 @@ public enum ChatIntent {
     }
 }
 
+public enum ChatPlanFacts {
+    public static func load(
+        question: String,
+        names: [String],
+        facts: any ChatFactsProviding
+    ) async -> String? {
+        guard let plan = facts as? any PlanFactsProviding else { return nil }
+        facts.resetRecord()
+        let query = ChatIntent.planQuery(question)
+        var blocks: [String] = []
+        for name in names {
+            do {
+                switch name {
+                case "prescription":
+                    blocks.append("[prescription]\n" + (try await plan.prescription(query: query)))
+                case "programme_summary":
+                    blocks.append("[programme]\n" + (try await plan.programmeSummary(query: query)))
+                case "adherence":
+                    blocks.append("[adherence]\n" + (try await plan.adherence(query: query)))
+                default:
+                    break
+                }
+            } catch {
+                blocks.append("[\(name) unavailable] \(error.localizedDescription)")
+            }
+        }
+        return blocks.isEmpty ? nil : blocks.joined(separator: "\n\n")
+    }
+}
+
 public enum ChatPrompt {
     /// Numbers used as a time window ("last 3 months") are not data claims. They only ground when
     /// the answer also uses them as a time window, so "3 sessions" cannot borrow "3 months".
@@ -275,7 +305,7 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         let planNames = includePlan ? ChatIntent.planToolNames(question) : []
         let usePlan = !planNames.isEmpty
         let planFacts = usePlan
-            ? await loadPlanFacts(question: question, names: planNames)
+            ? await ChatPlanFacts.load(question: question, names: planNames, facts: facts)
             : nil
         let injectPlan = planFacts != nil
         let promptHistory = usePlan ? Array(history.suffix(2)) : history
@@ -306,9 +336,10 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                 instructions: instructions
             )
             do {
-                let options = usePlan && !injectPlan
+                var options = usePlan && !injectPlan
                     ? GenerationOptions(toolCallingMode: .required)
                     : GenerationOptions()
+                options.maximumResponseTokens = usePlan ? 900 : 600
                 let response = try await session.respond(
                     to: prompt, generating: ChatAnswer.self, options: options
                 )
@@ -358,30 +389,6 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         )
     }
 
-    private func loadPlanFacts(question: String, names: [String]) async -> String? {
-        guard let plan = facts as? any PlanFactsProviding else { return nil }
-        facts.resetRecord()
-        let query = ChatIntent.planQuery(question)
-        var blocks: [String] = []
-        for name in names {
-            do {
-                switch name {
-                case "prescription":
-                    blocks.append("[prescription]\n" + (try await plan.prescription(query: query)))
-                case "programme_summary":
-                    blocks.append("[programme]\n" + (try await plan.programmeSummary(query: query)))
-                case "adherence":
-                    blocks.append("[adherence]\n" + (try await plan.adherence(query: query)))
-                default:
-                    break
-                }
-            } catch {
-                blocks.append("[\(name) unavailable] \(error.localizedDescription)")
-            }
-        }
-        return blocks.isEmpty ? nil : blocks.joined(separator: "\n\n")
-    }
-
     private var instructions: String {
         "You are a training assistant on the athlete's iPhone. Answer only from the facts the tools "
         + "return; call a tool before making a data claim. Never invent a number in the factual "
@@ -390,8 +397,8 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         + "applied. If the tools cannot answer, say so plainly. If a tool says it could not find "
         + "something, ask the athlete to clarify; never repeat a raw tool error. Resolve today and "
         + "yesterday relative to the Today line before calling a plan tool, never relative to the "
-        + "latest data. When asked for a prescription, list "
-        + "every item, not just the first. Keep the answer under 150 words."
+        + "latest data. When asked for a prescription, list every item, not just the first; the answer "
+        + "may exceed 150 words in that case. Keep other answers under 150 words."
     }
 
     private func isContextOverflow(_ error: Error) -> Bool {

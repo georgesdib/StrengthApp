@@ -129,8 +129,8 @@ public final class DeepSeekClient: DeepSeekCompleting, @unchecked Sendable {
         let body = Request(
             model: "deepseek-chat",
             messages: messages,
-            tools: tools,
-            toolChoice: "auto",
+            tools: tools.isEmpty ? nil : tools,
+            toolChoice: tools.isEmpty ? nil : "auto",
             temperature: 0.2,
             maxTokens: 1_200,
             stream: false
@@ -195,8 +195,8 @@ public final class DeepSeekClient: DeepSeekCompleting, @unchecked Sendable {
     private struct Request: Encodable {
         let model: String
         let messages: [DeepSeekMessage]
-        let tools: [DeepSeekTool]
-        let toolChoice: String
+        let tools: [DeepSeekTool]?
+        let toolChoice: String?
         let temperature: Double
         let maxTokens: Int
         let stream: Bool

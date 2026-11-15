@@ -181,9 +181,16 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
         }
         facts.resetRecord()
         failureLog.reset()
+        let planNames = includePlan ? ChatIntent.planToolNames(question) : []
+        let planFacts = planNames.isEmpty
+            ? nil
+            : await ChatPlanFacts.load(question: question, names: planNames, facts: facts)
+        let injectPlan = planFacts != nil
+        let system = instructions
+            + (planFacts.map { "\n\nPlan facts (use these; do not call plan tools):\n" + $0 } ?? "")
 
         var messages: [DeepSeekMessage] = [
-            DeepSeekMessage(role: "system", content: instructions),
+            DeepSeekMessage(role: "system", content: system),
         ]
         for message in history.suffix(6) {
             messages.append(
@@ -199,7 +206,8 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
         for attempt in 0..<2 {
             while toolRounds < 4 {
                 let result = try await api.complete(
-                    messages: messages, tools: DeepSeekTools.specs(includePlan: includePlan)
+                    messages: messages,
+                    tools: injectPlan ? [] : DeepSeekTools.specs(includePlan: includePlan)
                 )
                 if !result.toolCalls.isEmpty {
                     messages.append(

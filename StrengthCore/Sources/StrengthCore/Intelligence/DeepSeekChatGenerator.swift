@@ -21,7 +21,19 @@ public enum ChatGrounding {
 }
 
 public enum DeepSeekTools {
-    public static let specs: [DeepSeekTool] = [
+    public static func specs(includePlan: Bool = false) -> [DeepSeekTool] {
+        var tools = baseSpecs
+        if includePlan {
+            tools += [
+                tool(name: "prescription", description: "Read-only training prescription. Pass a date (YYYY-MM-DD) or prescription id; an empty string asks for the current prescription.", query: "Date, prescription id, or empty string."),
+                tool(name: "programme_summary", description: "Read-only training programme block summary. Pass a date (YYYY-MM-DD) or an empty string for today.", query: "Date or empty string."),
+                tool(name: "adherence", description: "Read-only adherence analysis. Pass a number of weeks or a date (YYYY-MM-DD); an empty string uses twelve weeks.", query: "Weeks, date, or empty string."),
+            ]
+        }
+        return tools
+    }
+
+    private static let baseSpecs: [DeepSeekTool] = [
         tool(
             name: "training_overview",
             description: "Read-only four-week training overview: compliance, performance, volume and readiness coverage.",
@@ -97,6 +109,21 @@ public enum DeepSeekTools {
                 return try await provider.sessionDetails(workoutID: query)
             case "readiness_status":
                 return try await provider.readinessStatus(from: "", to: "")
+            case "prescription":
+                guard let plan = provider as? any PlanFactsProviding else {
+                    return "Plan data is not available in this build."
+                }
+                return try await plan.prescription(query: query)
+            case "programme_summary":
+                guard let plan = provider as? any PlanFactsProviding else {
+                    return "Plan data is not available in this build."
+                }
+                return try await plan.programmeSummary(query: query)
+            case "adherence":
+                guard let plan = provider as? any PlanFactsProviding else {
+                    return "Plan data is not available in this build."
+                }
+                return try await plan.adherence(query: query)
             default:
                 return "No such training tool is available."
             }
@@ -127,16 +154,19 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
     private let api: any DeepSeekCompleting
     private let keyPresent: Bool
     private let facts: any ChatFactsProviding
+    private let includePlan: Bool
     private let failureLog = ToolFailureLog()
 
     public init(
         api: any DeepSeekCompleting,
         keyPresent: Bool,
-        facts: any ChatFactsProviding
+        facts: any ChatFactsProviding,
+        includePlan: Bool = false
     ) {
         self.api = api
         self.keyPresent = keyPresent
         self.facts = facts
+        self.includePlan = includePlan
     }
 
     public func availability() -> NarrativeAvailability {
@@ -169,7 +199,7 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
         for attempt in 0..<2 {
             while toolRounds < 4 {
                 let result = try await api.complete(
-                    messages: messages, tools: DeepSeekTools.specs
+                    messages: messages, tools: DeepSeekTools.specs(includePlan: includePlan)
                 )
                 if !result.toolCalls.isEmpty {
                     messages.append(
@@ -195,8 +225,13 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
                     toolRounds += 1
                     continue
                 }
-                guard let text = result.content, !text.isEmpty else {
+                guard let raw = result.content, !raw.isEmpty else {
                     throw ChatError.failed("DeepSeek returned an empty answer.")
+                }
+                let parsed = Self.parse(raw)
+                let text = parsed.answer
+                let suggestions = Array(parsed.suggestions.prefix(3)).map {
+                    String($0.prefix(240))
                 }
                 guard text.count <= 2_500 else { throw ChatError.tooLong }
                 let envelopes = facts.recordedEnvelopes
@@ -213,7 +248,9 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
                     text: text, question: question, history: history, envelopes: envelopes
                 )
                 if unverified.isEmpty {
-                    return ChatReply(text: text, sources: facts.recordedSources)
+                    return ChatReply(
+                        text: text, sources: facts.recordedSources, suggestions: suggestions
+                    )
                 }
                 if attempt == 0 {
                     messages.append(DeepSeekMessage(role: "assistant", content: text))
@@ -230,6 +267,7 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
                 return ChatReply(
                     text: text,
                     sources: facts.recordedSources,
+                    suggestions: suggestions,
                     unverifiedNumbers: unverified
                 )
             }
@@ -240,10 +278,31 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
         throw ChatError.failed("The answer could not be generated.")
     }
 
+    private struct AnswerPayload: Decodable {
+        let answer: String
+        let suggestions: [String]?
+    }
+
+    private static func parse(_ raw: String) -> (answer: String, suggestions: [String]) {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}") else {
+            return (raw, [])
+        }
+        let json = String(text[start...end])
+        guard let data = json.data(using: .utf8),
+              let payload = try? JSONDecoder().decode(AnswerPayload.self, from: data),
+              !payload.answer.isEmpty else {
+            return (raw, [])
+        }
+        return (payload.answer, payload.suggestions ?? [])
+    }
+
     private var instructions: String {
-        "You are a training data assistant. Answer only from the facts the tools return; call a "
-        + "tool before making a data claim. Never invent a number, never prescribe a load or a plan, "
-        + "and never give medical advice. If the tools cannot answer, say so plainly and suggest "
-        + "what to ask instead. Keep answers under 150 words."
+        "You are a training assistant. Answer only from the facts the tools return; call a tool "
+        + "before making a data claim. Never invent a number in the answer. You may suggest changes "
+        + "and discuss medical considerations, but put them in the suggestions list, never in the "
+        + "answer: they are proposals, not facts, and they are never applied. If the tools cannot "
+        + "answer, say so plainly. Return a JSON object with keys answer (string) and suggestions "
+        + "(array of strings, empty when none). Keep the answer under 150 words."
     }
 }

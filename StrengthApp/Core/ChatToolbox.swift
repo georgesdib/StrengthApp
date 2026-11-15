@@ -2,7 +2,7 @@ import Foundation
 import StrengthCore
 
 /// REST-backed facts for the chat tools. Records every envelope so the answer can be grounded.
-final class ChatToolbox: ChatFactsProviding, @unchecked Sendable {
+final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Sendable {
     private let client: IOSAPIClient
     private let session: IOSSession
     private let lock = NSLock()
@@ -78,6 +78,53 @@ final class ChatToolbox: ChatFactsProviding, @unchecked Sendable {
             session: session, sessionID: latest.sessionId
         )
         return record(envelope, source: "session details")
+    }
+
+    func prescription(query: String) async throws -> String {
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let envelope: IntelligenceEnvelope
+        if value.isEmpty {
+            envelope = try await client.prescription(session: session)
+        } else if Self.isDate(value) {
+            envelope = try await client.prescription(session: session, forDate: value)
+        } else {
+            envelope = try await client.prescription(session: session, prescriptionID: value)
+        }
+        return record(envelope, source: "prescription")
+    }
+
+    func programmeSummary(query: String) async throws -> String {
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let envelope = try await client.programmeSummary(
+            session: session,
+            asOf: Self.isDate(value) ? value : nil,
+            blockWeeks: 4
+        )
+        return record(envelope, source: "programme")
+    }
+
+    func adherence(query: String) async throws -> String {
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let weeks = Int(value) {
+            return record(
+                try await client.adherence(session: session, weeks: weeks),
+                source: "adherence"
+            )
+        }
+        return record(
+            try await client.adherence(
+                session: session,
+                asOf: Self.isDate(value) ? value : nil,
+                weeks: 12
+            ),
+            source: "adherence"
+        )
+    }
+
+    private static func isDate(_ value: String) -> Bool {
+        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+        return parts.count == 3 && parts[0].count == 4 && Int(parts[0]) != nil
+            && parts[1].count == 2 && parts[2].count == 2
     }
 
     func readinessStatus(from: String, to: String) async throws -> String {

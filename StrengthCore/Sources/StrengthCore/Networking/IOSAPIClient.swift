@@ -776,6 +776,48 @@ public final class IOSAPIClient {
         )
     }
 
+    public func prescription(
+        session: IOSSession,
+        prescriptionID: String? = nil,
+        forDate: String? = nil,
+        includeProvenance: Bool = true
+    ) async throws -> IntelligenceEnvelope {
+        var query = [
+            URLQueryItem(name: "include_provenance", value: includeProvenance ? "true" : "false"),
+        ]
+        if let prescriptionID { query.append(URLQueryItem(name: "prescription_id", value: prescriptionID)) }
+        if let forDate { query.append(URLQueryItem(name: "for_date", value: forDate)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/prescription", query: query, session: session
+        )
+    }
+
+    public func programmeSummary(
+        session: IOSSession,
+        asOf: String? = nil,
+        blockWeeks: Int = 4
+    ) async throws -> IntelligenceEnvelope {
+        var query = [URLQueryItem(name: "block_weeks", value: String(blockWeeks))]
+        if let asOf { query.append(URLQueryItem(name: "as_of", value: asOf)) }
+        return try await get(
+            path: "api/ios/v1/intelligence/programme-summary", query: query, session: session
+        )
+    }
+
+    public func adherence(
+        session: IOSSession,
+        asOf: String? = nil,
+        weeks: Int? = 12
+    ) async throws -> IntelligenceEnvelope {
+        var query: [URLQueryItem] = []
+        if let asOf { query.append(URLQueryItem(name: "as_of", value: asOf)) }
+        if let weeks { query.append(URLQueryItem(name: "weeks", value: String(weeks))) }
+        query.append(URLQueryItem(name: "group_by", value: "week"))
+        return try await get(
+            path: "api/ios/v1/intelligence/adherence", query: query, session: session
+        )
+    }
+
     public func intelligenceSessionDetails(
         session: IOSSession,
         workoutID: String? = nil,

@@ -9,6 +9,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     public let role: Role
     public let text: String
     public let sources: [String]
+    public let suggestions: [String]
     public let unverifiedNumbers: [String]
 
     public init(
@@ -16,12 +17,14 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         role: Role,
         text: String,
         sources: [String] = [],
+        suggestions: [String] = [],
         unverifiedNumbers: [String] = []
     ) {
         self.id = id
         self.role = role
         self.text = text
         self.sources = sources
+        self.suggestions = suggestions
         self.unverifiedNumbers = unverifiedNumbers
     }
 }
@@ -29,10 +32,17 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
 public struct ChatReply: Sendable {
     public let text: String
     public let sources: [String]
+    public let suggestions: [String]
     public let unverifiedNumbers: [String]
-    public init(text: String, sources: [String], unverifiedNumbers: [String] = []) {
+    public init(
+        text: String,
+        sources: [String],
+        suggestions: [String] = [],
+        unverifiedNumbers: [String] = []
+    ) {
         self.text = text
         self.sources = sources
+        self.suggestions = suggestions
         self.unverifiedNumbers = unverifiedNumbers
     }
 }
@@ -56,6 +66,21 @@ public enum ChatError: LocalizedError {
         }
     }
 }
+
+#if canImport(FoundationModels) && os(iOS)
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@Generable
+public struct ChatAnswer {
+    @Guide(description: "The factual answer, grounded in tool results.")
+    public var answer: String
+    @Guide(description: "Optional suggestions for changes. Empty when none are requested. These are proposals, not facts.")
+    public var suggestions: [String]
+    public init(answer: String = "", suggestions: [String] = []) {
+        self.answer = answer
+        self.suggestions = suggestions
+    }
+}
+#endif
 
 @MainActor
 public protocol TrainingChatGenerating {
@@ -120,9 +145,11 @@ public enum ChatPrompt {
 @MainActor
 public final class FoundationChatGenerator: TrainingChatGenerating {
     private let facts: any ChatFactsProviding
+    private let includePlan: Bool
 
-    public init(facts: any ChatFactsProviding) {
+    public init(facts: any ChatFactsProviding, includePlan: Bool = false) {
         self.facts = facts
+        self.includePlan = includePlan
     }
 
     public func availability() -> NarrativeAvailability {
@@ -181,7 +208,9 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
             facts.resetRecord()
             let failureLog = ToolFailureLog()
             let tools = Array(
-                IntelligenceTools.make(provider: facts, failureLog: failureLog).prefix(toolLimit)
+                IntelligenceTools.make(
+                    provider: facts, failureLog: failureLog, includePlan: includePlan
+                ).prefix(toolLimit)
             )
             let session = LanguageModelSession(
                 model: SystemLanguageModel.default,
@@ -189,8 +218,12 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                 instructions: instructions
             )
             do {
-                let response = try await session.respond(to: prompt)
-                let text = response.content
+                let response = try await session.respond(to: prompt, generating: ChatAnswer.self)
+                let content = response.content
+                let text = content.answer
+                let suggestions = Array(content.suggestions.prefix(3)).map {
+                    String($0.prefix(240))
+                }
                 let envelopes = facts.recordedEnvelopes
                 let failures = failureLog.failures
                 if envelopes.isEmpty, failures.contains(.unauthorized) {
@@ -229,11 +262,13 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
     }
 
     private var instructions: String {
-        "You are a training data assistant on the athlete's iPhone. Answer only from the facts the "
-        + "tools return; call a tool before making a data claim. Never invent a number, never "
-        + "prescribe a load or a plan, and never give medical advice. If the tools cannot answer, say "
-        + "so plainly and suggest what to ask instead. If a tool says it could not find something, ask the "
-        + "athlete to clarify; never repeat a raw tool error. Keep answers under 150 words."
+        "You are a training assistant on the athlete's iPhone. Answer only from the facts the tools "
+        + "return; call a tool before making a data claim. Never invent a number in the factual "
+        + "answer. You may suggest changes and discuss medical considerations, but put them in the "
+        + "suggestions field, never in the answer: they are proposals, not facts, and they are never "
+        + "applied. If the tools cannot answer, say so plainly. If a tool says it could not find "
+        + "something, ask the athlete to clarify; never repeat a raw tool error. Keep the answer under "
+        + "150 words."
     }
 
     private func isContextOverflow(_ error: Error) -> Bool {

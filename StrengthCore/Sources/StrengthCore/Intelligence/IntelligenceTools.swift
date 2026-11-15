@@ -13,6 +13,12 @@ public protocol IntelligenceCapabilityProviding: Sendable {
 }
 
 /// Safe, model-facing classification of a failed capability call.
+public protocol PlanFactsProviding: Sendable {
+    func prescription(query: String) async throws -> String
+    func programmeSummary(query: String) async throws -> String
+    func adherence(query: String) async throws -> String
+}
+
 public enum CapabilityFailure: String, Sendable, Equatable, CaseIterable {
     case notFound
     case invalidIdentifier
@@ -128,15 +134,24 @@ public struct NarrativeToolQuery {
 public enum IntelligenceTools {
     public static func make(
         provider: any IntelligenceCapabilityProviding,
-        failureLog: ToolFailureLog? = nil
+        failureLog: ToolFailureLog? = nil,
+        includePlan: Bool = false
     ) -> [any Tool] {
-        [
+        var tools: [any Tool] = [
             TrainingOverviewTool(provider: provider, failureLog: failureLog),
             ExerciseProgressionTool(provider: provider, failureLog: failureLog),
             WeeklyReviewTool(provider: provider, failureLog: failureLog),
             SessionDetailsTool(provider: provider, failureLog: failureLog),
             ReadinessStatusTool(provider: provider, failureLog: failureLog),
         ]
+        if includePlan {
+            tools += [
+                PrescriptionTool(provider: provider, failureLog: failureLog),
+                ProgrammeSummaryTool(provider: provider, failureLog: failureLog),
+                AdherenceTool(provider: provider, failureLog: failureLog),
+            ]
+        }
+        return tools
     }
 }
 
@@ -267,6 +282,96 @@ public struct SessionDetailsTool: Tool {
                 return "Session data is temporarily unavailable. Try again."
             case .unknown:
                 return "Session data could not be loaded right now."
+            }
+        }
+    }
+}
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+public struct PrescriptionTool: Tool {
+    public typealias Arguments = NarrativeToolQuery
+    private let provider: any IntelligenceCapabilityProviding
+    private let failureLog: ToolFailureLog?
+    public init(provider: any IntelligenceCapabilityProviding, failureLog: ToolFailureLog? = nil) {
+        self.provider = provider
+        self.failureLog = failureLog
+    }
+    public let name = "prescription"
+    public let description = "Read-only training prescription. Pass a date (YYYY-MM-DD) or a prescription id; an empty string asks for the current prescription."
+    public func call(arguments: NarrativeToolQuery) async throws -> String {
+        guard let plan = provider as? any PlanFactsProviding else {
+            return "Plan data is not available in this build."
+        }
+        do {
+            return try await plan.prescription(query: arguments.query)
+        } catch {
+            let failure = CapabilityFailure(error)
+            failureLog?.record(failure)
+            switch failure {
+            case .unauthorized: return "The prescription could not be accessed. The pairing may need attention."
+            case .unavailable, .server: return "Prescription data is temporarily unavailable. Try again."
+            case .notFound: return "No prescription was found for that date."
+            case .invalidIdentifier, .unknown: return "The prescription could not be loaded right now."
+            }
+        }
+    }
+}
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+public struct ProgrammeSummaryTool: Tool {
+    public typealias Arguments = NarrativeToolQuery
+    private let provider: any IntelligenceCapabilityProviding
+    private let failureLog: ToolFailureLog?
+    public init(provider: any IntelligenceCapabilityProviding, failureLog: ToolFailureLog? = nil) {
+        self.provider = provider
+        self.failureLog = failureLog
+    }
+    public let name = "programme_summary"
+    public let description = "Read-only training programme block summary. Pass a date (YYYY-MM-DD) or an empty string for today."
+    public func call(arguments: NarrativeToolQuery) async throws -> String {
+        guard let plan = provider as? any PlanFactsProviding else {
+            return "Plan data is not available in this build."
+        }
+        do {
+            return try await plan.programmeSummary(query: arguments.query)
+        } catch {
+            let failure = CapabilityFailure(error)
+            failureLog?.record(failure)
+            switch failure {
+            case .unauthorized: return "The programme could not be accessed. The pairing may need attention."
+            case .unavailable, .server: return "Programme data is temporarily unavailable. Try again."
+            case .notFound: return "No programme was found for that date."
+            case .invalidIdentifier, .unknown: return "The programme could not be loaded right now."
+            }
+        }
+    }
+}
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+public struct AdherenceTool: Tool {
+    public typealias Arguments = NarrativeToolQuery
+    private let provider: any IntelligenceCapabilityProviding
+    private let failureLog: ToolFailureLog?
+    public init(provider: any IntelligenceCapabilityProviding, failureLog: ToolFailureLog? = nil) {
+        self.provider = provider
+        self.failureLog = failureLog
+    }
+    public let name = "adherence"
+    public let description = "Read-only adherence analysis. Pass a number of weeks or a date (YYYY-MM-DD); an empty string uses twelve weeks."
+    public func call(arguments: NarrativeToolQuery) async throws -> String {
+        guard let plan = provider as? any PlanFactsProviding else {
+            return "Plan data is not available in this build."
+        }
+        do {
+            return try await plan.adherence(query: arguments.query)
+        } catch {
+            let failure = CapabilityFailure(error)
+            failureLog?.record(failure)
+            switch failure {
+            case .unauthorized: return "Adherence could not be accessed. The pairing may need attention."
+            case .unavailable, .server: return "Adherence data is temporarily unavailable. Try again."
+            case .notFound: return "No adherence data was found."
+            case .invalidIdentifier, .unknown: return "Adherence could not be loaded right now."
             }
         }
     }

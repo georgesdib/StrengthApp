@@ -130,6 +130,13 @@ struct SettingsView: View {
                         }
                         .accessibilityIdentifier("chat-model-picker")
 
+                        Toggle("Include plan and prescription data", isOn: $model.chatPlanEnabled)
+                            .accessibilityIdentifier("chat-plan-toggle")
+                        Text("Adds the current prescription, programme summary and adherence to chat. "
+                             + "The model may suggest changes; suggestions are never applied.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
                         if model.chatModelChoice == .deepSeek {
                             SecureField("DeepSeek API key", text: $deepSeekKeyInput)
                                 .textContentType(.password)

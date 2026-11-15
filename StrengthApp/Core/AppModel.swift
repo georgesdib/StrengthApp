@@ -74,6 +74,11 @@ final class AppModel: ObservableObject {
             UserDefaults.standard.set(chatModelChoice.rawValue, forKey: "intelligence.chat.model")
         }
     }
+    @Published var chatPlanEnabled: Bool = UserDefaults.standard.bool(
+        forKey: "intelligence.chat.plan"
+    ) {
+        didSet { UserDefaults.standard.set(chatPlanEnabled, forKey: "intelligence.chat.plan") }
+    }
     @Published private(set) var deepSeekKeyPresent = false
     private let deepSeekKeyStore: any DeepSeekKeyStoring = KeychainDeepSeekKeyStore()
     @Published var narrativeDetail: NarrativeDetail = NarrativeDetail(
@@ -1880,14 +1885,16 @@ final class AppModel: ObservableObject {
                 generator: DeepSeekChatGenerator(
                     api: DeepSeekClient(apiKey: key),
                     keyPresent: key?.isEmpty == false,
-                    facts: ChatToolbox(client: client, session: session)
+                    facts: ChatToolbox(client: client, session: session),
+                    includePlan: chatPlanEnabled
                 ),
                 modelLabel: "DeepSeek"
             )
         }
         return TrainingChatModel(
             generator: FoundationChatGenerator(
-                facts: ChatToolbox(client: client, session: session)
+                facts: ChatToolbox(client: client, session: session),
+                includePlan: chatPlanEnabled
             ),
             modelLabel: "On-device"
         )

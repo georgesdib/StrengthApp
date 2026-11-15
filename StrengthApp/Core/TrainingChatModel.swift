@@ -41,6 +41,7 @@ final class TrainingChatModel: ObservableObject {
                     role: .assistant,
                     text: reply.text,
                     sources: reply.sources,
+                    suggestions: reply.suggestions,
                     unverifiedNumbers: reply.unverifiedNumbers
                 )
             )

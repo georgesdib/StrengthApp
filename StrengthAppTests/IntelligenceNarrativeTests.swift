@@ -285,6 +285,16 @@ extension IntelligenceNarrativeTests {
         XCTAssertEqual(CapabilityFailure(APIError.http(status: 503, message: "", fields: [:])), .server)
     }
 
+    func testPlanToolsAreOnlyAddedWhenEnabled() throws {
+        let base = IntelligenceTools.make(provider: StubProvider())
+        let withPlan = IntelligenceTools.make(provider: StubProvider(), includePlan: true)
+        XCTAssertEqual(base.count, 5)
+        XCTAssertEqual(withPlan.count, 8)
+        XCTAssertTrue(withPlan.map(\.name).contains("prescription"))
+        XCTAssertTrue(withPlan.map(\.name).contains("programme_summary"))
+        XCTAssertTrue(withPlan.map(\.name).contains("adherence"))
+    }
+
     func testBudgetTrimsObservationsFirst() {
         let facts = """
         capability: get_weekly_review

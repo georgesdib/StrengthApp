@@ -87,6 +87,24 @@ struct TrainingChatView: View {
                     message.role == .user ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.12),
                     in: RoundedRectangle(cornerRadius: 12)
                 )
+            if !message.suggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(
+                        "Suggestion — not applied. Not medical advice.",
+                        systemImage: "lightbulb"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    ForEach(Array(message.suggestions.enumerated()), id: \.offset) { _, line in
+                        Text("• \(line)").font(.callout)
+                    }
+                }
+                .padding(8)
+                .background(
+                    Color.orange.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+            }
             if !message.unverifiedNumbers.isEmpty {
                 Label(
                     "Unverified numbers: \(message.unverifiedNumbers.joined(separator: ", "))",

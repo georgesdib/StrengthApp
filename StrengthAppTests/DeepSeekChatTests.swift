@@ -144,6 +144,22 @@ final class DeepSeekChatTests: XCTestCase {
         XCTAssertTrue(api.calls[1].contains { $0.role == "user" && ($0.content?.contains("Correction") ?? false) })
     }
 
+    func testStructuredAnswerSeparatesSuggestions() async throws {
+        let api = StubDeepSeekAPI(responses: [
+            DeepSeekChatResult(
+                content: "{\"answer\":\"Two sessions this week.\",\"suggestions\":[\"Try 105 kg next week.\"]}",
+                toolCalls: []
+            ),
+        ])
+        let generator = DeepSeekChatGenerator(
+            api: api, keyPresent: true, facts: StubFacts(envelope: try envelope())
+        )
+        let reply = try await generator.reply(to: "What should I change?", history: [])
+        XCTAssertEqual(reply.text, "Two sessions this week.")
+        XCTAssertEqual(reply.suggestions, ["Try 105 kg next week."])
+        XCTAssertTrue(reply.unverifiedNumbers.isEmpty)
+    }
+
     func testMissingKeyIsUnavailable() {
         let generator = DeepSeekChatGenerator(
             api: StubDeepSeekAPI(responses: []), keyPresent: false,
@@ -201,7 +217,7 @@ final class DeepSeekChatTests: XCTestCase {
         )
         let result = try await client.complete(
             messages: [DeepSeekMessage(role: "user", content: "hello")],
-            tools: DeepSeekTools.specs
+            tools: DeepSeekTools.specs()
         )
         XCTAssertEqual(result.toolCalls.first?.function.name, "weekly_review")
     }

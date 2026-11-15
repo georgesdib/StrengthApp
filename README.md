@@ -247,6 +247,19 @@ xcrun simctl install 'iPhone 17' <DerivedData>/Build/Products/Debug-iphonesimula
 xcrun simctl launch 'iPhone 17' com.georgesdibpersonalteam.StrengthApp
 ```
 
+Install on the paired physical iPhone (device build plus CoreDevice):
+
+```bash
+./scripts/install-iphone.sh            # Debug build for the connected iPhone, then install
+./scripts/install-iphone.sh --launch   # also launch it
+CONFIGURATION=Release ./scripts/install-iphone.sh
+DRY_RUN=1 ./scripts/install-iphone.sh  # print the resolved device, build nothing
+```
+
+The script picks the paired physical iPhone from `xcrun devicectl list devices` (simulators are
+ignored); set `IPHONE_UDID` to override. It is the phone counterpart of
+`scripts/install-watch.sh`.
+
 Two failure modes that are environmental rather than code:
 
 - **"Test crashed with signal kill before establishing connection"** means the simulator session

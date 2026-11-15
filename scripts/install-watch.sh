@@ -7,7 +7,8 @@
 # result, which is what the phase 6 acceptance run needs.
 #
 # Environment overrides:
-#   WATCH_UDID  CoreDevice identifier of the watch (default: the paired watch on the local network)
+#   WATCH_UDID  device identifier of the watch (default: its hardware UDID when available,
+#               otherwise the CoreDevice identifier)
 #   APP_PATH    path to StrengthWatch.app (default: newest Debug-iphoneos build)
 set -euo pipefail
 
@@ -34,12 +35,15 @@ for device in devices:
         continue
     # Simulators report sameMachine; a paired watch on the LAN reports localNetwork.
     if connection.get("transportType") == "localNetwork":
-        print(device["identifier"])
+        # devicectl accepts both; prefer the hardware UDID and fall back to the CoreDevice
+        # identifier when it is absent.
+        print(hardware.get("udid") or device["identifier"])
         break
 PY
 )
   if [[ -z "$WATCH_UDID" ]]; then
     echo "error: no paired watch on the local network; wake it, keep it on its charger and retry" >&2
+    echo "       (or set WATCH_UDID to the watch's hardware UDID)" >&2
     exit 1
   fi
 fi
@@ -54,4 +58,15 @@ fi
 
 echo "watch: $WATCH_UDID"
 echo "app:   $APP_PATH"
-xcrun devicectl device install app --device "$WATCH_UDID" "$APP_PATH"
+
+attempt=1
+until xcrun devicectl device install app --device "$WATCH_UDID" "$APP_PATH"; do
+  if [[ "$attempt" -ge 3 ]]; then
+    echo "error: install failed after 3 attempts." >&2
+    echo "       Wake the watch, keep it on its charger and on the same network, then retry." >&2
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+  echo "install did not reach the watch; retrying in 5 s (attempt $attempt/3)..." >&2
+  sleep 5
+done

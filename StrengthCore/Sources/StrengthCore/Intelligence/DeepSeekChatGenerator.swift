@@ -260,7 +260,9 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
                         text: text,
                         sources: facts.recordedSources,
                         suggestions: suggestions,
-                        rawOutputs: facts.recordedOutputs
+                        rawOutputs: facts.recordedOutputs,
+                        planCard: facts.recordedEnvelopes
+                            .compactMap { PlanProjection.prescriptionCard($0) }.last
                     )
                 }
                 if attempt == 0 {
@@ -280,7 +282,9 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
                     sources: facts.recordedSources,
                     suggestions: suggestions,
                     unverifiedNumbers: unverified,
-                    rawOutputs: facts.recordedOutputs
+                    rawOutputs: facts.recordedOutputs,
+                    planCard: facts.recordedEnvelopes
+                        .compactMap { PlanProjection.prescriptionCard($0) }.last
                 )
             }
             if toolRounds >= 4 {

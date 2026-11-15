@@ -385,6 +385,10 @@ extension IntelligenceNarrativeTests {
         XCTAssertTrue(text.contains("dumbbell_row"))
         XCTAssertTrue(text.contains("face_pull"))
         XCTAssertFalse(text.contains("secret"))
+        let card = PlanProjection.prescriptionCard(envelope)
+        XCTAssertEqual(card?.forDate, "2026-11-14")
+        XCTAssertEqual(card?.sessionType, "bench_hinge")
+        XCTAssertEqual(card?.items.count, 3)
     }
 
     func testBudgetTrimsObservationsFirst() {

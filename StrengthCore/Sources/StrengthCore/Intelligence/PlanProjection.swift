@@ -2,6 +2,53 @@ import Foundation
 
 /// Compact, capability-specific projections for the plan tools. The generic envelope projection
 /// is too large for a multi-item prescription or a 12-week adherence payload.
+public struct PrescriptionCard: Identifiable, Equatable, Sendable {
+    public struct Item: Identifiable, Equatable, Sendable {
+        public let id: String
+        public let exerciseID: String
+        public let sets: Int
+        public let repsLow: Int
+        public let repsHigh: Int
+        public let loadKg: Double?
+        public let loadBasis: String?
+        public let rir: Int?
+        public let restS: Int?
+
+        public init(
+            id: String,
+            exerciseID: String,
+            sets: Int,
+            repsLow: Int,
+            repsHigh: Int,
+            loadKg: Double?,
+            loadBasis: String?,
+            rir: Int?,
+            restS: Int?
+        ) {
+            self.id = id
+            self.exerciseID = exerciseID
+            self.sets = sets
+            self.repsLow = repsLow
+            self.repsHigh = repsHigh
+            self.loadKg = loadKg
+            self.loadBasis = loadBasis
+            self.rir = rir
+            self.restS = restS
+        }
+    }
+
+    public let id = UUID()
+    public let forDate: String
+    public let sessionType: String
+    public let items: [Item]
+
+    public init(forDate: String, sessionType: String, items: [Item]) {
+        self.forDate = forDate
+        self.sessionType = sessionType
+        self.items = items
+    }
+}
+
 public enum PlanProjection {
     public static func text(_ envelope: IntelligenceEnvelope) -> String {
         switch envelope.capability {
@@ -10,6 +57,34 @@ public enum PlanProjection {
         case "get_programme_block_summary": return programme(envelope)
         default: return NarrativeContext.projectionText(envelope)
         }
+    }
+
+    public static func prescriptionCard(_ envelope: IntelligenceEnvelope) -> PrescriptionCard? {
+        guard envelope.capability == "get_prescription" else { return nil }
+        let head = object(value(envelope, "prescription"))
+        let items: [PrescriptionCard.Item] = array(value(envelope, "items")).enumerated().compactMap {
+            index, item in
+            let row = object(item)
+            let exercise = optionalString(row, "exercise_id") ?? ""
+            guard !exercise.isEmpty else { return nil }
+            return PrescriptionCard.Item(
+                id: "\(index)-\(exercise)",
+                exerciseID: exercise,
+                sets: integer(row, "sets"),
+                repsLow: integer(row, "reps_low"),
+                repsHigh: integer(row, "reps_high"),
+                loadKg: number(row, "load_kg"),
+                loadBasis: optionalString(row, "load_basis"),
+                rir: optionalInt(row, "rir_target"),
+                restS: optionalInt(row, "rest_s")
+            )
+        }
+        guard !items.isEmpty else { return nil }
+        return PrescriptionCard(
+            forDate: optionalString(head, "for_date") ?? "unknown",
+            sessionType: optionalString(head, "session_type") ?? "unknown",
+            items: items
+        )
     }
 
     private static func prescription(_ envelope: IntelligenceEnvelope) -> String {

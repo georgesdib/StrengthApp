@@ -102,6 +102,27 @@ final class TrainingChatTests: XCTestCase {
         XCTAssertEqual(model.messages.last?.rawOutputs.first?.text, "activity: 2")
     }
 
+    func testPlanCardIsCarriedToTheMessage() async {
+        let card = PrescriptionCard(
+            forDate: "2026-11-14", sessionType: "bench_hinge",
+            items: [
+                .init(
+                    id: "0-bench", exerciseID: "bench_press_narrow", sets: 4,
+                    repsLow: 3, repsHigh: 5, loadKg: 92, loadBasis: "external",
+                    rir: 3, restS: 180
+                ),
+            ]
+        )
+        let model = TrainingChatModel(
+            generator: StubChatGenerator(
+                reply: ChatReply(text: "Prescription.", sources: ["prescription"], planCard: card)
+            )
+        )
+        await model.send("What was prescribed?")
+        XCTAssertEqual(model.messages.last?.planCard?.forDate, "2026-11-14")
+        XCTAssertEqual(model.messages.last?.planCard?.items.count, 1)
+    }
+
     func testPromptKeepsOnlyTheRecentTurns() {
         let history = (0..<10).map {
             ChatMessage(role: .user, text: "question \($0) \(String(repeating: "x", count: 500))")

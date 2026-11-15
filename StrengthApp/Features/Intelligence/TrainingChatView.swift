@@ -78,9 +78,45 @@ struct TrainingChatView: View {
         .onDisappear { chat.reset() }
     }
 
+    private func planItemDetail(_ item: PrescriptionCard.Item) -> String {
+        let reps = item.repsLow == item.repsHigh
+            ? "\(item.repsLow)" : "\(item.repsLow)-\(item.repsHigh)"
+        var parts = ["\(item.sets)x\(reps)"]
+        if let load = item.loadKg {
+            parts.append(load == load.rounded() ? "\(Int(load)) kg" : String(format: "%.1f kg", load))
+        }
+        if let rir = item.rir { parts.append("RIR \(rir)") }
+        return parts.joined(separator: " · ")
+    }
+
     @ViewBuilder
     private func messageBubble(_ message: ChatMessage) -> some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+            if let card = message.planCard {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Prescription").font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text(card.forDate).font(.caption.weight(.medium))
+                    }
+                    Text(card.sessionType).font(.caption2).foregroundStyle(.secondary)
+                    ForEach(card.items) { item in
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(item.exerciseID).font(.caption)
+                            Spacer(minLength: 8)
+                            Text(planItemDetail(item))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(
+                    Color.secondary.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+                .accessibilityIdentifier("plan-card")
+            }
             Text(message.text)
                 .padding(10)
                 .background(

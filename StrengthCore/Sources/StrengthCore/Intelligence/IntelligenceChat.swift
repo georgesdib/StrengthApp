@@ -22,6 +22,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     public let suggestions: [String]
     public let unverifiedNumbers: [String]
     public let rawOutputs: [ChatToolOutput]
+    public let planCard: PrescriptionCard?
 
     public init(
         id: UUID = UUID(),
@@ -30,7 +31,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         sources: [String] = [],
         suggestions: [String] = [],
         unverifiedNumbers: [String] = [],
-        rawOutputs: [ChatToolOutput] = []
+        rawOutputs: [ChatToolOutput] = [],
+        planCard: PrescriptionCard? = nil
     ) {
         self.id = id
         self.role = role
@@ -39,6 +41,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         self.suggestions = suggestions
         self.unverifiedNumbers = unverifiedNumbers
         self.rawOutputs = rawOutputs
+        self.planCard = planCard
     }
 }
 
@@ -48,18 +51,21 @@ public struct ChatReply: Sendable {
     public let suggestions: [String]
     public let unverifiedNumbers: [String]
     public let rawOutputs: [ChatToolOutput]
+    public let planCard: PrescriptionCard?
     public init(
         text: String,
         sources: [String],
         suggestions: [String] = [],
         unverifiedNumbers: [String] = [],
-        rawOutputs: [ChatToolOutput] = []
+        rawOutputs: [ChatToolOutput] = [],
+        planCard: PrescriptionCard? = nil
     ) {
         self.text = text
         self.sources = sources
         self.suggestions = suggestions
         self.unverifiedNumbers = unverifiedNumbers
         self.rawOutputs = rawOutputs
+        self.planCard = planCard
     }
 }
 
@@ -374,7 +380,9 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                     sources: facts.recordedSources,
                     suggestions: suggestions,
                     unverifiedNumbers: ungrounded,
-                    rawOutputs: facts.recordedOutputs
+                    rawOutputs: facts.recordedOutputs,
+                    planCard: facts.recordedEnvelopes
+                        .compactMap { PlanProjection.prescriptionCard($0) }.last
                 )
                 return ungrounded.isEmpty ? .grounded(reply) : .soft(reply)
             } catch let error as ChatError {

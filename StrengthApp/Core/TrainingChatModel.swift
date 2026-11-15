@@ -49,7 +49,8 @@ final class TrainingChatModel: ObservableObject {
                     sources: reply.sources,
                     suggestions: reply.suggestions,
                     unverifiedNumbers: reply.unverifiedNumbers,
-                    rawOutputs: reply.rawOutputs
+                    rawOutputs: reply.rawOutputs,
+                    planCard: reply.planCard
                 )
             )
         } catch {

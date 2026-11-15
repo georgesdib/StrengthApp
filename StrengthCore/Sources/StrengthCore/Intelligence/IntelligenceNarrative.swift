@@ -230,6 +230,13 @@ public extension NarrativeContext {
         grouping.locale = Locale(identifier: "en_US_POSIX")
         grouping.numberStyle = .decimal
         grouping.maximumFractionDigits = 0
+        func trimZeros(_ text: String) -> String {
+            guard text.contains(".") else { return text }
+            var trimmed = text
+            while trimmed.hasSuffix("0") { trimmed.removeLast() }
+            if trimmed.hasSuffix(".") { trimmed.removeLast() }
+            return trimmed
+        }
         func add(_ value: Double) {
             if value == value.rounded() {
                 numbers.insert(String(Int(value)))
@@ -237,13 +244,33 @@ public extension NarrativeContext {
                     numbers.insert(grouped)
                 }
             }
-            numbers.insert(String(format: "%.1f", value))
-            numbers.insert(String(format: "%.2f", value))
+            for format in ["%.1f", "%.2f", "%.3f"] {
+                let text = String(format: format, value)
+                numbers.insert(text)
+                numbers.insert(trimZeros(text))
+            }
             // A ratio may be repeated as a percentage.
             if value > 0, value <= 1 {
                 let percent = value * 100
                 numbers.insert(String(Int(percent.rounded())))
                 numbers.insert(String(format: "%.1f", percent))
+                numbers.insert(trimZeros(String(format: "%.1f", percent)))
+            }
+        }
+        // A string fact may legitimately carry a value such as "5.3 kg" or "80%". Only numeric-like
+        // strings are parsed, so instruction-like text cannot widen the set.
+        let numericString = try! NSRegularExpression(
+            pattern: "^[0-9][0-9.,:/\\-\\s]*(kg|lb|lbs|%|s|sec|reps|days|weeks|bpm|ms|cm|in|h|min|km|mi|m)?$",
+            options: [.caseInsensitive]
+        )
+        func addNumericString(_ text: String) {
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            guard numericString.firstMatch(in: text, range: range) != nil else { return }
+            for token in NarrativeValidator.numbers(in: text) {
+                numbers.insert(token)
+                if let value = Double(token.replacingOccurrences(of: ",", with: ".")) {
+                    add(value)
+                }
             }
         }
         func walk(_ value: JSONValue) {
@@ -251,7 +278,8 @@ public extension NarrativeContext {
             case .number(let number): add(number)
             case .array(let items): items.forEach(walk)
             case .object(let object): object.values.forEach(walk)
-            case .string, .bool, .null: break
+            case .string(let text): addNumericString(text)
+            case .bool, .null: break
             }
         }
         for fact in envelope.facts.values {

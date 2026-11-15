@@ -483,11 +483,11 @@ Owner confirmation: pass 2026-11-15 · Build: INT-7b-2 (phone and watch) · Devi
 
 ---
 
-# INT-7b-3 Action button and watch Siri acceptance — implemented, device checks pending
+# INT-7b-3 Action button and watch Siri acceptance — complete (owner-confirmed 2026-11-15)
 
 **Status 2026-11-15:** the watch target links `StrengthIntents`, declares its own read-only intents and
 App Shortcuts, registers a watch-side data provider, and implements `StartWorkoutIntent` plus the
-donated finish intent. The physical checks below are not yet signed off.
+donated finish intent. The owner confirmed every physical check below.
 
 ## Automated
 
@@ -495,23 +495,23 @@ donated finish intent. The physical checks below are not yet signed off.
 - [x] The phone scheme still builds and the iOS suite passes (run through `scripts/ci.sh`).
 - [x] `StrengthWorkoutStyle` is a single `Strength` case; the issued plan decides the session content.
 
-## Physical device (owner to confirm)
+## Physical device — owner-confirmed
 
-- [ ] Settings > Action button > Workout lists Strength; choosing it and pressing the button starts the
+- [x] Settings > Action button > Workout lists Strength; choosing it and pressing the button starts the
       plan the iPhone already requested for the watch.
-- [ ] With no watch-targeted plan, the button answers "Request a workout on your iPhone first" and opens
+- [x] With no watch-targeted plan, the button answers "Request a workout on your iPhone first" and opens
       the app instead of starting anything.
-- [ ] While a session is running, the second press brings the session forward and does **not** finish it
+- [x] While a session is running, the second press brings the session forward and does **not** finish it
       (owner chose "open the finish screen", 2026-11-15); sRPE is entered and Finish is tapped by hand.
-- [ ] Watch Siri answers the four read-only questions (last workout, overview, weekly review, exercise
+- [x] Watch Siri answers the four read-only questions (last workout, overview, weekly review, exercise
       progression) after the watch app has been opened once.
-- [ ] With the watch unpaired, those phrases answer with the pairing message instead of hanging.
+- [x] With the watch unpaired, those phrases answer with the pairing message instead of hanging.
 
-Owner confirmation: pending · Build: INT-7b-3 · Device: Apple Watch · watchOS 27.2
+Owner confirmation: pass 2026-11-15 · Build: INT-7b-3 · Device: Apple Watch · watchOS 27.2
 
 ---
 
-# INT-7c Shortcuts start and finish acceptance — implemented, device checks pending
+# INT-7c Shortcuts start and finish acceptance — complete (owner-confirmed 2026-11-15)
 
 **Status 2026-11-15:** the Shortcuts app can start a workout and open the finish screen on both the
 phone and the watch. Ending never finishes by itself — it opens the screen where sRPE is recorded,
@@ -523,14 +523,14 @@ matching the Action button's behaviour.
 - [x] The phone start intent refuses to invent a plan: no issued prescription means a message, not a
       workout.
 
-## Physical device (owner to confirm)
+## Physical device — owner-confirmed
 
-- [ ] With no requested workout, "Start Workout" says to request one and opens the app; nothing starts.
-- [ ] With a requested workout, "Start Workout" starts it and lands on the active workout.
-- [ ] "Finish Workout" on the phone opens the running workout; sRPE is entered and Finish is pressed by
+- [x] With no requested workout, "Start Workout" says to request one and opens the app; nothing starts.
+- [x] With a requested workout, "Start Workout" starts it and lands on the active workout.
+- [x] "Finish Workout" on the phone opens the running workout; sRPE is entered and Finish is pressed by
       hand.
-- [ ] "Finish Workout" on the watch opens the finish screen; the same applies after the Action button's
+- [x] "Finish Workout" on the watch opens the finish screen; the same applies after the Action button's
       second press.
-- [ ] Both intents work from the Shortcuts app and from Siri's intents list.
+- [x] Both intents work from the Shortcuts app and from Siri's intents list.
 
-Owner confirmation: pending · Build: INT-7c · Device: iPhone + Watch · iOS 27.2 / watchOS 27.2
+Owner confirmation: pass 2026-11-15 · Build: INT-7c · Device: iPhone + Watch · iOS 27.2 / watchOS 27.2

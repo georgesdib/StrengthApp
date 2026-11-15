@@ -35,6 +35,9 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
         envelopes.append(envelope)
         sources.insert(source)
         lock.unlock()
+        if ["prescription", "adherence", "programme"].contains(source) {
+            return PlanProjection.text(envelope)
+        }
         return NarrativeContext.projectionText(envelope)
     }
 

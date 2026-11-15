@@ -312,6 +312,52 @@ extension IntelligenceNarrativeTests {
         XCTAssertTrue(withPlan.map(\.name).contains("adherence"))
     }
 
+    func testPlanProjectionKeepsEveryPrescriptionItem() throws {
+        let json = """
+        {
+          "schema_version": "intelligence.envelope.v1",
+          "intelligence_version": "1.0.0",
+          "capability": "get_prescription",
+          "status": "ok",
+          "as_of": "2026-11-14",
+          "period": {"start": "2026-11-14", "end": "2026-11-14", "days": 1, "weeks": 1,
+                     "timezone": "GMT"},
+          "subject": {"athlete": "self"},
+          "units": {"load": "kg"},
+          "facts": {
+            "prescription": {"value": {"for_date": "2026-11-14", "session_type": "bench_hinge",
+                                       "fallback_level": "fatigue_reduced", "template_digest": "secret"},
+                             "basis": "observed", "method": "test", "unit": null, "n": null,
+                             "gate": null, "note": null},
+            "items": {"value": [
+              {"exercise_id": "bench_press_narrow", "sets": 3, "reps_low": 5, "reps_high": 5,
+               "load_kg": 80, "load_basis": "absolute", "rir_target": 2, "rest_s": 120,
+               "essential": true},
+              {"exercise_id": "dumbbell_row", "sets": 3, "reps_low": 8, "reps_high": 10,
+               "load_kg": 30, "load_basis": "absolute", "rir_target": 2, "rest_s": 90,
+               "essential": false},
+              {"exercise_id": "face_pull", "sets": 2, "reps_low": 12, "reps_high": 15,
+               "load_kg": 20, "load_basis": "absolute", "rir_target": 2, "rest_s": 60,
+               "essential": false}
+            ], "basis": "observed", "method": "test", "unit": null, "n": 3, "gate": null,
+               "note": null}
+          },
+          "evidence": [], "coverage": {}, "missing": [], "limitations": [],
+          "quality_flags": [], "privacy": {"class": "health"},
+          "provenance": {"builder_version": "context.v1"},
+          "generated_at": "2026-11-16T07:02:11Z"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let envelope = try decoder.decode(IntelligenceEnvelope.self, from: Data(json.utf8))
+        let text = PlanProjection.text(envelope)
+        XCTAssertTrue(text.contains("bench_press_narrow"))
+        XCTAssertTrue(text.contains("dumbbell_row"))
+        XCTAssertTrue(text.contains("face_pull"))
+        XCTAssertFalse(text.contains("secret"))
+    }
+
     func testBudgetTrimsObservationsFirst() {
         let facts = """
         capability: get_weekly_review

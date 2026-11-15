@@ -133,7 +133,8 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         "You are a training data assistant on the athlete's iPhone. Answer only from the facts the "
         + "tools return; call a tool before making a data claim. Never invent a number, never "
         + "prescribe a load or a plan, and never give medical advice. If the tools cannot answer, say "
-        + "so plainly and suggest what to ask instead. Keep answers under 150 words."
+        + "so plainly and suggest what to ask instead. If a tool says it could not find something, ask the "
+        + "athlete to clarify; never repeat a raw tool error. Keep answers under 150 words."
     }
 
     private func isContextOverflow(_ error: Error) -> Bool {

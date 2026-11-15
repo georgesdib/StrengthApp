@@ -104,6 +104,31 @@ struct AverageSessionDurationIntent: AppIntent {
     }
 }
 
+/// "Average workout duration over the last 12 weeks" — the same aggregate over a fixed window.
+///
+/// A separate intent exists because an App Shortcut phrase cannot carry a free-form number: a
+/// parameter in a phrase needs a fixed option set. This gives the exact sentence a literal match
+/// instead of falling through to Siri's model, which just opened the app.
+struct AverageSessionDuration12WeeksIntent: AppIntent {
+    static var title: LocalizedStringResource = "Average Workout Duration (12 weeks)"
+    static var description = IntentDescription(
+        "Report the average session duration over the last 12 weeks, with the sample size behind it."
+    )
+    static var openAppWhenRun: Bool = false
+
+    func perform() async throws -> some IntentResult & ShowsSnippetView & ProvidesDialog {
+        let envelope = try await IntentCall.run {
+            let provider = try await IntentServices.provider()
+            return try await provider.overview(windowWeeks: 12)
+        }
+        let digest = AverageDurationDigest(envelope: envelope, weeks: 12)
+        return .result(
+            dialog: IntentDialog(stringLiteral: digest.dialog),
+            view: AverageDurationSnippetView(digest: digest)
+        )
+    }
+}
+
 /// "How is my trap bar deadlift progressing?" — one exercise's deterministic progression envelope.
 struct ExerciseProgressionIntent: AppIntent {
     static var title: LocalizedStringResource = "Exercise Progression"

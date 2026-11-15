@@ -23,8 +23,8 @@ text = open(path, encoding="utf-8").read()
 problems = []
 
 shortcuts = len(re.findall(r"AppShortcut\(", text))
-if shortcuts != 5:
-    problems.append(f"expected 5 AppShortcut entries, found {shortcuts}")
+if shortcuts != 6:
+    problems.append(f"expected 6 AppShortcut entries, found {shortcuts}")
 
 for key in ("shortTitle:", "systemImageName:"):
     count = len(re.findall(re.escape(key), text))

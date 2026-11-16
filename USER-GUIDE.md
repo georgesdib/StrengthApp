@@ -218,8 +218,23 @@ saved HealthKit workout. It is not used for readiness, fatigue, progression or p
 - **Apple Watch** — pair, replace or revoke the watch credential.
 - **HealthKit** — opt-in readiness import.
 - **Daily reminder** — one nudge a day at a time you choose.
+- **Today summary** — the two-part prose block at the top of Today.
 - **Forget this device** — removes the local token; the server-side device record is managed
   separately with the server CLI.
+
+### Today summary
+
+The top of **Today** can carry a short block in two parts: **Where you stand**, a plain summary of
+your readiness and the session in front of you, and **Nudge**, a line or two of encouragement. It uses
+the same model you selected for Chat: Apple Intelligence on the iPhone, or DeepSeek.
+
+With DeepSeek selected, loading the card sends your readiness and four-week training facts to DeepSeek.
+Plan details travel only while **Include plan and prescription data** is on. The footer under the card
+always names the model that wrote it, so you can tell at a glance where the words came from. If the
+selected model is unavailable — Apple Intelligence off, or no DeepSeek key saved — the card says so and
+offers nothing else; it never quietly switches to the other model. **Refresh** rewrites it; otherwise it
+is generated once per day and session and reused. Turn the whole block off under
+**Settings → Today summary**.
 
 ### Daily reminder
 

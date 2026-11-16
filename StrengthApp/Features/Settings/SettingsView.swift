@@ -295,6 +295,21 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Today summary") {
+                    Toggle("Summary at the top of Today", isOn: $model.todaySummaryEnabled)
+                        .accessibilityIdentifier("today-summary-toggle")
+                    if model.todaySummaryEnabled {
+                        Text(model.chatModelChoice == .deepSeek
+                             ? "Uses DeepSeek, the model selected for Chat. When the card loads, "
+                                + "your readiness and four-week facts are sent to DeepSeek; plan "
+                                + "details are included only while \"Include plan and prescription "
+                                + "data\" is on."
+                             : "Uses Apple Intelligence on this iPhone. The facts stay on the device.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Daily reminder") {
                     Toggle("Remind me to train", isOn: $model.reminderEnabled)
                         .accessibilityIdentifier("reminder-toggle")

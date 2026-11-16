@@ -157,6 +157,13 @@ final class AppModel: ObservableObject {
     }
     @Published private(set) var notificationsAuthorized = true
     @Published private(set) var lastReminderOutcome: String?
+    @Published var todaySummaryEnabled: Bool = (UserDefaults.standard.object(
+        forKey: "todaySummary.enabled"
+    ) as? Bool) ?? true {
+        didSet {
+            UserDefaults.standard.set(todaySummaryEnabled, forKey: "todaySummary.enabled")
+        }
+    }
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
     @Published private(set) var mutationFailureAmbiguous = false
@@ -756,6 +763,83 @@ final class AppModel: ObservableObject {
 
     private static func sessionLabel(_ value: String) -> String {
         value.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    // MARK: - Today summary
+
+    func makeTodaySummaryModel() -> TodaySummaryModel {
+        let facts: @MainActor () async -> TodaySummaryFacts = { [weak self] in
+            await self?.todaySummaryFacts()
+                ?? TodaySummaryFacts(date: Self.isoDate(), readinessLogged: false)
+        }
+        // The configured chat model is the configured agent. There is no silent fallback: a
+        // DeepSeek selection with no key shows the reason instead of using the on-device model.
+        if chatModelChoice == .deepSeek {
+            let key = (try? deepSeekKeyStore.load()) ?? nil
+            return TodaySummaryModel(
+                generator: DeepSeekTodaySummaryGenerator(
+                    api: DeepSeekClient(apiKey: key),
+                    keyPresent: key?.isEmpty == false
+                ),
+                modelLabel: "DeepSeek",
+                sendsFactsOffDevice: true,
+                facts: facts
+            )
+        }
+        return TodaySummaryModel(
+            generator: FoundationTodaySummaryGenerator(),
+            modelLabel: "On this iPhone",
+            sendsFactsOffDevice: false,
+            facts: facts
+        )
+    }
+
+    func todaySummaryFacts() async -> TodaySummaryFacts {
+        // The chat plan toggle is the athlete's consent for plan and prescription data leaving the
+        // device. With DeepSeek selected and that toggle off, the summary is written without it.
+        let includePlan = chatModelChoice == .onDevice || chatPlanEnabled
+        let planned = includePlan ? currentNudgeFacts().planned : nil
+        var overview: String?
+        if let session {
+            let toolbox = ChatToolbox(client: client, session: session)
+            overview = try? await toolbox.trainingOverview(asOf: nil, windowWeeks: 4)
+        }
+        return TodaySummaryFacts(
+            date: today?.date ?? Self.isoDate(),
+            readinessLogged: today?.readiness?.isLogged ?? false,
+            readinessScore: today?.readinessScore?.score,
+            sessionLabel: planned?.label,
+            exerciseCount: planned?.exerciseCount,
+            leadLift: planned?.focusName,
+            leadLoadKg: planned?.focusLoadKg,
+            overviewFacts: overview
+        )
+    }
+
+    /// The day, the readiness answer, the issued plan and the model choice. A change in any of them
+    /// is a different summary, so the card reloads; nothing else does.
+    var todaySummaryFingerprint: String {
+        let score = today?.readinessScore?.score.map { String($0) } ?? "-"
+        let planId: String
+        if case .issued(let issued) = prescriptionState {
+            planId = issued.issuedPlanId
+        } else {
+            planId = "-"
+        }
+        return [
+            today?.date ?? "",
+            String(today?.readiness?.isLogged ?? false),
+            score,
+            planId,
+            chatModelChoice.rawValue,
+        ].joined(separator: "|")
+    }
+
+    private static func isoDate() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
     }
 
     // MARK: Reads

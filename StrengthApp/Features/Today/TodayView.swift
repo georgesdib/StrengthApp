@@ -21,6 +21,10 @@ struct TodayView: View {
     var body: some View {
         NavigationStack {
             List {
+                if model.todaySummaryEnabled {
+                    TodaySummarySection(model: model)
+                        .id(model.chatModelChoice)
+                }
                 if let error = model.errorMessage {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle")

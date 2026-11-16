@@ -562,4 +562,19 @@ are **not run yet** — simulator success is not proof of notification delivery.
 - [ ] With a Focus mode on, confirm the reminder's behaviour (this build adds no time-sensitive
       entitlement, so Focus may hold it).
 
+## First device run — 2026-11-16 (two defects found)
+
+- **Wrong readiness state.** The reminder said readiness had not been logged after it had been. Cause:
+  the server omits `known` when a day has a usable merged row and sends `known: false` only when it
+  has none, and the client tested for `known == true`. Fixed with `ReadinessPayload.isLogged`
+  (`known ?? true`) and a decoding test that pins both shapes.
+- **No model prose.** The readiness facts contain no numbers, so any numeral the model wrote failed
+  the grounding check and the template always shipped. The composer now retries once with a
+  digits-forbidden instruction, and Settings reports the last composition's origin and reason.
+- **Not mirrored to the watch.** Expected behaviour, not a defect: iOS mirrors an iPhone notification
+  only while the iPhone is locked or asleep.
+
+Both fixes are covered by `NudgeSchedulerTests` (20 tests). The physical-device list above still
+needs a re-run against the fixed build.
+
 Owner confirmation: pending.

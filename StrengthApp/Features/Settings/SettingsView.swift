@@ -317,6 +317,12 @@ struct SettingsView: View {
                         Text(reminderMessageSource)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                        if let outcome = model.lastReminderOutcome {
+                            Text("Last reminder: \(outcome).")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("reminder-last-outcome")
+                        }
                     }
                     Text("One reminder a day. It is skipped when you have already trained, and "
                          + "nothing leaves this iPhone.")

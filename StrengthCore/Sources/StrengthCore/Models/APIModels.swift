@@ -81,6 +81,10 @@ public struct ReadinessPayload: Decodable {
     public let bodyweightKg: Double?
     public let sources: [String: String]?
     public let healthkit: [String: HealthKitReadinessProvenance]?
+
+    /// The server sends `known: false` only when the day has no usable row, and omits the key
+    /// entirely when a merged row exists, so an absent value means the day was logged.
+    public var isLogged: Bool { known ?? true }
 }
 
 public struct HealthKitReadinessProvenance: Decodable, Equatable {

@@ -30,6 +30,7 @@ private final class FakeAuthorizer: NotificationAuthorizing {
 private struct FakeGenerator: NudgeGenerating {
     var available = true
     var message: NudgeMessage?
+    var strictMessage: NudgeMessage?
 
     func availability() -> NarrativeAvailability {
         available ? .available : .unavailable("No model here.")
@@ -38,6 +39,11 @@ private struct FakeGenerator: NudgeGenerating {
     func generate(facts: NudgeFacts) async throws -> NudgeMessage {
         guard let message else { throw NarrativeError.failed("No message.") }
         return message
+    }
+
+    func generateStrict(facts: NudgeFacts) async throws -> NudgeMessage {
+        guard let strictMessage else { return try await generate(facts: facts) }
+        return strictMessage
     }
 }
 
@@ -195,6 +201,20 @@ final class NudgeSchedulerTests: XCTestCase {
         XCTAssertEqual(center.added.last?.content.body, NudgeCopy.generic().body)
     }
 
+    // MARK: - Readiness detection
+
+    func testReadinessWithoutTheKnownKeyCountsAsLogged() throws {
+        // The server sends known:false only for a day with no usable row; a merged row omits
+        // the key. Reading a missing key as "not logged" is what made the first reminder wrong.
+        let logged = Data(#"{"date":"2026-11-16","readiness":{"on_date":"2026-11-16","sleep":3}}"#.utf8)
+        let today = try JSONDecoder().decode(TodayResponse.self, from: logged)
+        XCTAssertEqual(today.readiness?.isLogged, true)
+
+        let missing = Data(#"{"date":"2026-11-16","readiness":{"on_date":"2026-11-16","known":false}}"#.utf8)
+        let empty = try JSONDecoder().decode(TodayResponse.self, from: missing)
+        XCTAssertEqual(empty.readiness?.isLogged, false)
+    }
+
     // MARK: - Copy
 
     func testTemplateIsDeterministicAndShort() {
@@ -232,27 +252,49 @@ final class NudgeSchedulerTests: XCTestCase {
         let generated = NudgeMessage(
             title: "Squat day", body: "5×5 at 100 kg is waiting for you.", origin: .onDeviceModel
         )
-        let message = await NudgeComposer.compose(
+        let composition = await NudgeComposer.compose(
             facts: facts(), generator: FakeGenerator(message: generated)
         )
-        XCTAssertEqual(message, generated)
+        XCTAssertEqual(composition.message, generated)
+        XCTAssertNil(composition.fallback)
+        XCTAssertTrue(composition.usedOnDeviceModel)
     }
 
     func testUngroundedNumberFallsBackToTheTemplate() async {
         let invented = NudgeMessage(
             title: "Big day", body: "Let's put 140 kg on the bar.", origin: .onDeviceModel
         )
-        let message = await NudgeComposer.compose(
+        let composition = await NudgeComposer.compose(
             facts: facts(), generator: FakeGenerator(message: invented)
         )
-        XCTAssertEqual(message, NudgeCopy.message(for: facts()))
+        XCTAssertEqual(composition.message, NudgeCopy.message(for: facts()))
+        XCTAssertEqual(composition.fallback, .ungroundedNumber("140"))
+    }
+
+    func testStrictRetryRescuesADigitFromADigitFreeMessage() async {
+        // Facts about a missing readiness entry carry no numbers at all, so a model that adds
+        // "5 minutes" would otherwise always fall back to the template.
+        let invented = NudgeMessage(
+            title: "Readiness first", body: "Two minutes now and 5 more tomorrow.", origin: .onDeviceModel
+        )
+        let strict = NudgeMessage(
+            title: "Readiness first", body: "Log it now, then train.", origin: .onDeviceModel
+        )
+        let composition = await NudgeComposer.compose(
+            facts: NudgeFacts(readiness: .missing),
+            generator: FakeGenerator(message: invented, strictMessage: strict)
+        )
+        XCTAssertEqual(composition.message, strict)
+        XCTAssertNil(composition.fallback)
     }
 
     func testUnavailableModelFallsBackToTheTemplate() async {
-        let message = await NudgeComposer.compose(
+        let composition = await NudgeComposer.compose(
             facts: facts(), generator: FakeGenerator(available: false)
         )
-        XCTAssertEqual(message, NudgeCopy.message(for: facts()))
+        XCTAssertEqual(composition.message, NudgeCopy.message(for: facts()))
+        XCTAssertEqual(composition.fallback, .modelUnavailable("No model here."))
+        XCTAssertFalse(composition.usedOnDeviceModel)
     }
 
     func testOverlongCopyIsRejected() throws {

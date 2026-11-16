@@ -45,6 +45,7 @@ final class NudgeScheduler {
 
     private static let lastCompletedKey = "nudge.lastSessionCompletedAt"
     private static let signatureKey = "nudge.scheduleSignature"
+    private static let lastOutcomeKey = "nudge.lastComposition"
 
     private let center: any NudgeCenter
     private let defaults: UserDefaults
@@ -93,7 +94,9 @@ final class NudgeScheduler {
             if isSuppressed(date, facts: facts, now: now) { continue }
             let message: NudgeMessage
             if planned.isEmpty, let facts, calendar.isDate(date, inSameDayAs: now) {
-                message = await NudgeComposer.compose(facts: facts, generator: generator)
+                let composition = await NudgeComposer.compose(facts: facts, generator: generator)
+                message = composition.message
+                record(composition)
             } else {
                 // Any other day would be quoting facts that are already stale by then.
                 message = NudgeCopy.generic()
@@ -119,6 +122,15 @@ final class NudgeScheduler {
 
     var lastSessionCompletedAt: Date? {
         defaults.object(forKey: Self.lastCompletedKey) as? Date
+    }
+
+    /// Why the last reminder said what it said: the model, or the template and the reason.
+    var lastOutcomeSummary: String? {
+        defaults.string(forKey: Self.lastOutcomeKey)
+    }
+
+    private func record(_ composition: NudgeComposition) {
+        defaults.set(composition.summary, forKey: Self.lastOutcomeKey)
     }
 
     func clear() async {

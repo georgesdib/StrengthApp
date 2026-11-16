@@ -155,6 +155,7 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var notificationsAuthorized = true
+    @Published private(set) var lastReminderOutcome: String?
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
     @Published private(set) var mutationFailureAmbiguous = false
@@ -696,7 +697,7 @@ final class AppModel: ObservableObject {
     func handleNudgeTap() {
         guard phase == .paired else { return }
         selectedTab = .today
-        if canWriteReadiness, today?.readiness?.known != true {
+        if canWriteReadiness, today?.readiness?.isLogged != true {
             showReadinessSheet = true
         }
     }
@@ -713,6 +714,7 @@ final class AppModel: ObservableObject {
             minute: reminderMinute,
             facts: reminderEnabled ? currentNudgeFacts() : nil
         )
+        lastReminderOutcome = nudges.lastOutcomeSummary
     }
 
     private func scheduleNudgeRefresh() {
@@ -726,7 +728,7 @@ final class AppModel: ObservableObject {
     }
 
     private func currentNudgeFacts() -> NudgeFacts {
-        let readiness: NudgeFacts.Readiness = today?.readiness?.known == true
+        let readiness: NudgeFacts.Readiness = today?.readiness?.isLogged == true
             ? .logged(score: today?.readinessScore?.score)
             : .missing
         var planned: NudgeFacts.PlannedSession?

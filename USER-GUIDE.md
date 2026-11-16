@@ -233,6 +233,16 @@ open the phone, the phone cannot see the session, so the reminder may still arri
 notification opens Today; **Log readiness** opens the readiness form directly. If notifications are
 off for the app, the Settings row says so instead of pretending the reminder is armed.
 
+**Why the wording is sometimes plain.** The message is written by Apple Intelligence when it is
+available. When it is not — Apple Intelligence off, the model still downloading, or a generation that
+failed its own grounding check — the app sends built-in wording instead of guessing. Settings shows a
+**Last reminder** line saying which happened and why, so a plain message is never a mystery.
+
+**Mirroring to the watch.** The reminder is an iPhone notification, so the Apple Watch shows it only
+under Apple's mirroring rules: the iPhone must be locked or asleep, and the watch unlocked and on your
+wrist. If you are using the iPhone when it arrives, it stays on the iPhone. There is no per-app switch
+in the app for this — it is Watch app → Notifications → Mirror my iPhone, plus the locked-phone rule.
+
 ### Apple Watch pairing
 
 The watch uses the **Home Server** only. Set a valid Home Server before pairing; the watch never

@@ -163,27 +163,99 @@ public enum NudgeCopy {
     }
 }
 
+/// The rendered message plus why the model was not used, so the app can say so instead of
+/// silently shipping the template.
+public struct NudgeComposition: Sendable, Equatable {
+    public enum Fallback: Sendable, Equatable {
+        case modelUnavailable(String)
+        case modelFailed(String)
+        case ungroundedNumber(String)
+        case tooLong
+    }
+
+    public let message: NudgeMessage
+    public let fallback: Fallback?
+
+    public init(message: NudgeMessage, fallback: Fallback?) {
+        self.message = message
+        self.fallback = fallback
+    }
+
+    public var usedOnDeviceModel: Bool { message.origin == .onDeviceModel }
+
+    /// One line for Settings, in the second person and without internal jargon.
+    public var summary: String {
+        if usedOnDeviceModel { return "written on this iPhone by the on-device model" }
+        switch fallback {
+        case .modelUnavailable(let reason):
+            return "the built-in wording — \(reason)"
+        case .modelFailed:
+            return "the built-in wording — the on-device model did not answer"
+        case .ungroundedNumber(let number):
+            return "the built-in wording — the model added a number that is not in your record (\(number))"
+        case .tooLong:
+            return "the built-in wording — the model's message was too long"
+        case nil:
+            return "the built-in wording"
+        }
+    }
+}
+
 public protocol NudgeGenerating: Sendable {
     func availability() -> NarrativeAvailability
     func generate(facts: NudgeFacts) async throws -> NudgeMessage
+    /// A second attempt that must avoid numbers altogether, for facts that contain none.
+    func generateStrict(facts: NudgeFacts) async throws -> NudgeMessage
+}
+
+public extension NudgeGenerating {
+    func generateStrict(facts: NudgeFacts) async throws -> NudgeMessage {
+        try await generate(facts: facts)
+    }
 }
 
 public enum NudgeComposer {
     /// Model text when it validates, deterministic copy otherwise. There is nowhere to fall back to
-    /// but the template, which is the point: no cloud model is reachable from this path.
+    /// but the template, which is the point: no cloud model is reachable from this path. One strict
+    /// retry handles the case where the facts carry no numbers at all and the model invents one.
     public static func compose(
         facts: NudgeFacts,
         generator: any NudgeGenerating
-    ) async -> NudgeMessage {
-        guard generator.availability().isAvailable else {
-            return NudgeCopy.message(for: facts)
+    ) async -> NudgeComposition {
+        let availability = generator.availability()
+        guard availability.isAvailable else {
+            return NudgeComposition(
+                message: NudgeCopy.message(for: facts),
+                fallback: .modelUnavailable(availability.reasonText)
+            )
         }
-        do {
-            let message = try await generator.generate(facts: facts)
-            try validate(message, facts: facts)
-            return message
-        } catch {
-            return NudgeCopy.message(for: facts)
+        var lastError: NarrativeError?
+        for strict in [false, true] {
+            do {
+                let message = strict
+                    ? try await generator.generateStrict(facts: facts)
+                    : try await generator.generate(facts: facts)
+                try validate(message, facts: facts)
+                return NudgeComposition(message: message, fallback: nil)
+            } catch let error as NarrativeError {
+                lastError = error
+            } catch {
+                lastError = .failed(error.localizedDescription)
+            }
+        }
+        return NudgeComposition(
+            message: NudgeCopy.message(for: facts),
+            fallback: fallback(for: lastError)
+        )
+    }
+
+    static func fallback(for error: NarrativeError?) -> NudgeComposition.Fallback {
+        guard let error else { return .modelFailed("No message.") }
+        switch error {
+        case .unavailable(let reason): return .modelUnavailable(reason)
+        case .notGrounded(let number): return .ungroundedNumber(number)
+        case .tooLong: return .tooLong
+        case .failed(let message): return .modelFailed(message)
         }
     }
 

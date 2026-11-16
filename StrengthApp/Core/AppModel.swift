@@ -494,9 +494,9 @@ final class AppModel: ObservableObject {
         }
         guard !blocked.isEmpty else { return nil }
         let subject = blocked.joined(separator: " and ")
-        return "\(subject) uses http:// with a public host name, which iOS refuses. "
-            + "Use https://, or an IP address, a .local name or a single-word host name on your "
-            + "local network."
+        return "\(subject) uses http:// with an address iOS refuses. Use https://, or a "
+            + "private-network address (192.168.x.x, 10.x.x.x), a .local name or a single-word "
+            + "host name. A tailnet or VPN address needs https://."
     }
 
     func saveServerSettings() async -> Bool {

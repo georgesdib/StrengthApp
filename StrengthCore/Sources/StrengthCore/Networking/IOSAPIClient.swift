@@ -184,8 +184,8 @@ extension URLError.Code {
     var clientFacingMessage: String? {
         switch self {
         case .appTransportSecurityRequiresSecureConnection:
-            return "iOS refuses plain http:// to a public address. Use https://, or an IP address, "
-                + "a .local name or a single-word host name on your local network."
+            return "iOS refuses plain http:// to this address. Use https://, or a private-network "
+                + "address (192.168.x.x, 10.x.x.x), a .local name or a single-word host name."
         default:
             return nil
         }

@@ -10,11 +10,11 @@ enum ServerRoute: String, Equatable {
 
 /// Which configured addresses the app can actually load.
 ///
-/// App Transport Security permits cleartext `http://` only to local resources: unqualified host
-/// names, `.local` names and IP address literals (`NSAllowsLocalNetworking` in
-/// `Support/Info.plist`). Every other host needs `https://`; the system refuses the request
-/// before a packet leaves the phone. Checking here turns a confusing failure at request time into
-/// a warning while the owner is still editing the field.
+/// The shipped `NSAllowsLocalNetworking` policy is narrower than "any IP address": measured on
+/// the iOS 27.2 runtime, cleartext `http://` loads to private, loopback and link-local addresses
+/// and to `.local` or single-word names, and is refused with -1022 for public addresses and for
+/// CGNAT ranges such as Tailscale's 100.64.0.0/10. Checking here turns a confusing failure at
+/// request time into a warning while the owner is still editing the field.
 enum ServerAddressPolicy {
     /// True when the address is cleartext HTTP to a host the system will refuse.
     static func cleartextIsBlocked(_ raw: String) -> Bool {
@@ -28,18 +28,39 @@ enum ServerAddressPolicy {
         return !isLocalHost(host)
     }
 
-    /// A local resource in the ATS sense: an IP literal, a `.local` name or an unqualified name.
-    /// A host name with a public suffix is not, even when it currently resolves to a LAN address.
+    /// A local resource in the ATS sense: a private, loopback or link-local IP literal, a
+    /// `.local` name or an unqualified name. A host name with a public suffix is not one, even
+    /// when it currently resolves to a LAN address.
     static func isLocalHost(_ host: String) -> Bool {
         var name = host.lowercased()
         if name.hasPrefix("["), name.hasSuffix("]") {
             name = String(name.dropFirst().dropLast())
         }
+        if let address = IPv4Address(name) {
+            let bytes = Array(address.rawValue)
+            guard bytes.count == 4 else { return false }
+            switch bytes[0] {
+            case 10, 127: return true
+            case 172: return (16...31).contains(bytes[1])
+            case 192: return bytes[1] == 168
+            case 169: return bytes[1] == 254
+            default: return false
+            }
+        }
+        if let address = IPv6Address(name) {
+            let bytes = Array(address.rawValue)
+            guard bytes.count == 16 else { return false }
+            if bytes.allSatisfy({ $0 == 0 }) { return false }
+            if bytes.dropLast().allSatisfy({ $0 == 0 }), bytes[15] == 1 { return true }
+            if (bytes[0] & 0xfe) == 0xfc { return true }
+            if bytes[0] == 0xfe, (bytes[1] & 0xc0) == 0x80 { return true }
+            return false
+        }
         if name == "localhost" || name.hasSuffix(".local") { return true }
-        if !name.contains(".") { return true }
-        return IPv4Address(name) != nil || IPv6Address(name) != nil
+        return !name.contains(".")
     }
 }
+
 struct ServerConfiguration: Equatable {
     var homeURL: String
     var awayURL: String

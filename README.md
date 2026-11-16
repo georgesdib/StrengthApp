@@ -121,8 +121,9 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 - **Settings** — Home Server, Away Server, Prefer Home Server, active route, Exercise Library,
   Apple Watch Pair/Status/Revoke, device id/label, app version, opt-in HealthKit readiness, Forget
   this device (local token only), re-pair instructions. An `http://` address only loads on the
-  local network (an IP address, a `.local` name or a single-word host); any other host needs
-  `https://`, and the field warns when an address cannot load.
+  local network (a private-network address, a `.local` name or a single-word host); anything
+  else, including a tailnet or VPN address, needs `https://`. Saving an address that cannot
+  load shows a warning instead of failing later.
 - **Apple Watch** — credential status plus the Home server's watch-targeted work. A watch-targeted
   plan is started, logged and finished on the watch (working sets and loggable warm-up sets,
   form rating, mean velocity for external-load work even without a target, rest with +15s/−15s

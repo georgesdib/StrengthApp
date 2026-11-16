@@ -217,8 +217,21 @@ saved HealthKit workout. It is not used for readiness, fatigue, progression or p
 - **Exercise Library** — catalogue and history.
 - **Apple Watch** — pair, replace or revoke the watch credential.
 - **HealthKit** — opt-in readiness import.
+- **Daily reminder** — one nudge a day at a time you choose.
 - **Forget this device** — removes the local token; the server-side device record is managed
   separately with the server CLI.
+
+### Daily reminder
+
+Turn on **Settings → Daily reminder** and choose a time. At that time the app posts one local
+notification that names a concrete fact from your record — a planned session, its lead lift and load,
+or a missing readiness entry — and asks you to train. The wording is written on the iPhone: by Apple
+Intelligence when it is available, otherwise from the built-in text. Nothing is sent to a server.
+
+The reminder is skipped on a day you have already trained. If you train on the watch only and never
+open the phone, the phone cannot see the session, so the reminder may still arrive. Tapping the
+notification opens Today; **Log readiness** opens the readiness form directly. If notifications are
+off for the app, the Settings row says so instead of pretending the reminder is armed.
 
 ### Apple Watch pairing
 

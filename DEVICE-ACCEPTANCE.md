@@ -534,3 +534,32 @@ matching the Action button's behaviour.
 - [x] Both intents work from the Shortcuts app and from Siri's intents list.
 
 Owner confirmation: pass 2026-11-15 · Build: INT-7c · Device: iPhone + Watch · iOS 27.2 / watchOS 27.2
+
+---
+
+# INT-10 Daily reminder acceptance — outstanding
+
+**Status 2026-11-16:** implemented on the iOS client; automated tests pass. The physical-device checks
+are **not run yet** — simulator success is not proof of notification delivery.
+
+## Automated
+
+- [x] `xcodebuild test -only-testing:StrengthAppTests/NudgeSchedulerTests` — 18 tests, 0 failures.
+- [x] `NudgeSchedulerTests`, `AppModelTests` and `RestTimerTests` pass together (29 tests).
+- [x] The iOS scheme builds for the iPhone 18 Pro simulator (iOS 27.2).
+- [x] The full `scripts/ci.sh` gate: both schemes build and 425 tests pass (1 skipped).
+
+## Physical device — outstanding
+
+- [ ] Enable the reminder, set it two minutes ahead, background the app and receive it on time.
+- [ ] The message names only facts the app already shows; with Apple Intelligence off it uses the
+      built-in wording rather than failing.
+- [ ] Tapping the notification opens Today; with readiness missing it presents the readiness form.
+- [ ] The **Log readiness** action opens the readiness form directly.
+- [ ] Complete a session before the reminder time and confirm no reminder fires that day.
+- [ ] Change the time, foreground the app, and confirm one pending reminder on each of the next seven
+      days and no duplicates.
+- [ ] With a Focus mode on, confirm the reminder's behaviour (this build adds no time-sensitive
+      entitlement, so Focus may hold it).
+
+Owner confirmation: pending.

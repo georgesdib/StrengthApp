@@ -19,7 +19,7 @@ final class RestNotificationManager {
     private let defaults: UserDefaults
     private let identifierKey = "restNotificationIdentifier"
     private var generation = UUID()
-    private var authorizationRequested = false
+    private let authorizer = NotificationAuthorizer.shared
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -48,7 +48,18 @@ final class RestNotificationManager {
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([category])
+        let logReadiness = UNNotificationAction(
+            identifier: NudgeScheduler.readinessActionIdentifier,
+            title: "Log readiness",
+            options: [.foreground]
+        )
+        let nudge = UNNotificationCategory(
+            identifier: NudgeScheduler.categoryIdentifier,
+            actions: [logReadiness],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category, nudge])
     }
 
     func requestAuthorizationIfNeeded() {
@@ -106,25 +117,8 @@ final class RestNotificationManager {
     }
 
     private func ensureAuthorization(completion: @escaping (Bool) -> Void) {
-        center.getNotificationSettings { [weak self] settings in
-            guard let self else { return }
-            Task { @MainActor in
-                if settings.authorizationStatus == .authorized
-                    || settings.authorizationStatus == .provisional {
-                    completion(true)
-                    return
-                }
-                guard settings.authorizationStatus == .notDetermined,
-                      !self.authorizationRequested else {
-                    completion(false)
-                    return
-                }
-                self.authorizationRequested = true
-                let granted = (try? await self.center.requestAuthorization(
-                    options: [.alert, .sound]
-                )) ?? false
-                completion(granted)
-            }
+        Task { @MainActor in
+            completion(await self.authorizer.ensureAuthorized())
         }
     }
 }
@@ -157,6 +151,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        if response.notification.request.content.categoryIdentifier
+            == NudgeScheduler.categoryIdentifier {
+            Task { @MainActor in
+                NudgeRouter.shared.requestReadiness()
+            }
+            completionHandler()
+            return
+        }
         let identifier = response.actionIdentifier
         if identifier == RestNotificationManager.doneActionIdentifier
             || identifier == UNNotificationDefaultActionIdentifier {

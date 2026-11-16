@@ -8,6 +8,13 @@ struct OfflineRecoveryConflict: Equatable {
     let pendingOperationCount: Int
 }
 
+enum AppTab: Hashable {
+    case today
+    case history
+    case progress
+    case settings
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     enum Phase: Equatable {
@@ -119,6 +126,35 @@ final class AppModel: ObservableObject {
     @Published private(set) var isSaving = false
     /// One rest interval for the whole app; the tab shell renders it on every screen.
     let restTimer = RestTimerModel()
+    @Published var selectedTab: AppTab = .today
+    @Published var showReadinessSheet = false
+    /// Daily reminder. The time is stored as hour and minute so a DST change follows the device clock.
+    @Published var reminderEnabled: Bool = UserDefaults.standard.bool(forKey: "nudge.enabled") {
+        didSet {
+            UserDefaults.standard.set(reminderEnabled, forKey: "nudge.enabled")
+            Task { @MainActor in
+                if reminderEnabled { _ = await self.nudges.requestAuthorization() }
+                await self.refreshNudges()
+            }
+        }
+    }
+    @Published var reminderHour: Int = UserDefaults.standard.object(
+        forKey: "nudge.hour"
+    ) as? Int ?? 18 {
+        didSet {
+            UserDefaults.standard.set(reminderHour, forKey: "nudge.hour")
+            scheduleNudgeRefresh()
+        }
+    }
+    @Published var reminderMinute: Int = UserDefaults.standard.object(
+        forKey: "nudge.minute"
+    ) as? Int ?? 0 {
+        didSet {
+            UserDefaults.standard.set(reminderMinute, forKey: "nudge.minute")
+            scheduleNudgeRefresh()
+        }
+    }
+    @Published private(set) var notificationsAuthorized = true
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
     @Published private(set) var mutationFailureAmbiguous = false
@@ -163,6 +199,9 @@ final class AppModel: ObservableObject {
     private var healthKitFollowUp = false
     private var networkMonitor: NetworkMonitor?
     private var restDoneCancellable: AnyCancellable?
+    private var nudgeTapCancellable: AnyCancellable?
+    private var nudgeRefreshTask: Task<Void, Never>?
+    private let nudges = NudgeScheduler.shared
     private var offlineRetryTask: Task<Void, Never>?
     private var offlineRetryAttempt = 0
     private let exerciseCatalogueCache: ExerciseCatalogueCache
@@ -244,6 +283,14 @@ final class AppModel: ObservableObject {
             .sink { [weak self] _ in
                 Task { @MainActor in
                     self?.handleRestNotificationDone()
+                }
+            }
+        nudgeTapCancellable = NotificationCenter.default
+            .publisher(for: NudgeRouter.tapped)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.handlePendingNudgeTap()
                 }
             }
     }
@@ -620,6 +667,92 @@ final class AppModel: ObservableObject {
         if phase == .paired, let session {
             await watchPairing.foreground(session: session, homeBaseURL: store.homeServerURL)
         }
+        handlePendingNudgeTap()
+        scheduleNudgeRefresh()
+    }
+
+    // MARK: - Daily reminder
+
+    var reminderTime: Date {
+        get {
+            var components = DateComponents()
+            components.hour = reminderHour
+            components.minute = reminderMinute
+            return Calendar.current.date(from: components) ?? Date()
+        }
+        set {
+            let components = Calendar.current.dateComponents([.hour, .minute], from: newValue)
+            if let hour = components.hour { reminderHour = hour }
+            if let minute = components.minute { reminderMinute = minute }
+        }
+    }
+
+    func handlePendingNudgeTap() {
+        guard NudgeRouter.shared.consume() else { return }
+        handleNudgeTap()
+    }
+
+    /// A tap lands on Today, and opens readiness when that is the thing actually missing.
+    func handleNudgeTap() {
+        guard phase == .paired else { return }
+        selectedTab = .today
+        if canWriteReadiness, today?.readiness?.known != true {
+            showReadinessSheet = true
+        }
+    }
+
+    func refreshNudges() async {
+        notificationsAuthorized = await nudges.isAuthorized
+        guard phase == .paired else {
+            await nudges.clear()
+            return
+        }
+        await nudges.refresh(
+            enabled: reminderEnabled,
+            hour: reminderHour,
+            minute: reminderMinute,
+            facts: reminderEnabled ? currentNudgeFacts() : nil
+        )
+    }
+
+    private func scheduleNudgeRefresh() {
+        nudgeRefreshTask?.cancel()
+        nudgeRefreshTask = Task { @MainActor [weak self] in
+            // Collapse the burst of refreshes a foreground or a mutation produces.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, !Task.isCancelled else { return }
+            await self.refreshNudges()
+        }
+    }
+
+    private func currentNudgeFacts() -> NudgeFacts {
+        let readiness: NudgeFacts.Readiness = today?.readiness?.known == true
+            ? .logged(score: today?.readinessScore?.score)
+            : .missing
+        var planned: NudgeFacts.PlannedSession?
+        if case .issued(let issued) = prescriptionState {
+            let items = issued.plan.items
+            let focus = items.first { ($0.loadKg ?? 0) > 0 } ?? items.first
+            planned = NudgeFacts.PlannedSession(
+                label: issued.plan.sessionLabel ?? Self.sessionLabel(issued.sessionType),
+                exerciseCount: items.count,
+                focusName: focus.flatMap { item in
+                    exerciseCatalogue.first { $0.id == item.exerciseId }?.display
+                },
+                focusSets: focus?.sets,
+                focusReps: focus?.repsLabel,
+                focusLoadKg: focus?.loadKg
+            )
+        }
+        return NudgeFacts(
+            readiness: readiness,
+            planned: planned,
+            sessionInProgress: activeWorkout != nil
+        )
+    }
+
+    private static func sessionLabel(_ value: String) -> String {
+        value.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
     // MARK: Reads
@@ -722,6 +855,7 @@ final class AppModel: ObservableObject {
             }
             _ = apply(.activeWorkoutChanged(reconciled))
             isOffline = false
+            scheduleNudgeRefresh()
             if !healthKitEnabled {
                 healthKitState = .featureDisabled
             } else if !canUseHealthKit {
@@ -1851,6 +1985,7 @@ final class AppModel: ObservableObject {
             workoutRefreshGrace = false
             restTimer.dismiss()
             clearOfflineCaptureAfterServerCompletion()
+            nudges.recordSessionCompleted()
             await refresh()
             await loadHistory(reset: true)
             return true

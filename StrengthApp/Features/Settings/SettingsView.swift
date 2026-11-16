@@ -78,6 +78,13 @@ struct SettingsView: View {
         }
     }
 
+    private var reminderMessageSource: String {
+        let availability = FoundationNudgeGenerator().availability()
+        return availability.isAvailable
+            ? "The message is written on this iPhone from your own facts."
+            : "The message uses the built-in wording. " + availability.reasonText
+    }
+
     private func availabilityText(_ availability: NarrativeAvailability) -> String {
         switch availability {
         case .available: return "The on-device model is ready."
@@ -284,6 +291,35 @@ struct SettingsView: View {
                     }
                     Text("Uses Apple Intelligence on this iPhone. The facts stay on the device, "
                          + "nothing is sent to a server, and explanations are not saved.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Daily reminder") {
+                    Toggle("Remind me to train", isOn: $model.reminderEnabled)
+                        .accessibilityIdentifier("reminder-toggle")
+                    if model.reminderEnabled {
+                        DatePicker(
+                            "Time",
+                            selection: Binding(
+                                get: { model.reminderTime },
+                                set: { model.reminderTime = $0 }
+                            ),
+                            displayedComponents: .hourAndMinute
+                        )
+                        .accessibilityIdentifier("reminder-time")
+                        if !model.notificationsAuthorized {
+                            Text("Notifications are off for this app. Turn them on in iOS Settings "
+                                 + "to receive the reminder.")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                        }
+                        Text(reminderMessageSource)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("One reminder a day. It is skipped when you have already trained, and "
+                         + "nothing leaves this iPhone.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

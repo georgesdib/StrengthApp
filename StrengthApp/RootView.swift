@@ -41,15 +41,24 @@ struct MainTabView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        TabView {
+        TabView(selection: $model.selectedTab) {
             TodayView(model: model)
                 .tabItem { Label("Today", systemImage: "sun.max") }
+                .tag(AppTab.today)
             HistoryView(model: model)
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                .tag(AppTab.history)
             ProgressDashboardView(model: model)
                 .tabItem { Label("Progress", systemImage: "chart.line.uptrend.xyaxis") }
+                .tag(AppTab.progress)
             SettingsView(model: model)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(AppTab.settings)
+        }
+        .sheet(isPresented: $model.showReadinessSheet) {
+            NavigationStack {
+                ReadinessFormView(model: model)
+            }
         }
         .safeAreaInset(edge: .bottom) {
             RestTimerBar(timer: model.restTimer)

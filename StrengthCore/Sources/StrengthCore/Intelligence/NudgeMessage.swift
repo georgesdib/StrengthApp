@@ -79,11 +79,6 @@ public struct NudgeFacts: Sendable, Equatable {
         return lines.joined(separator: "\n")
     }
 
-    /// The only numbers a generated message may repeat.
-    public var allowedNumbers: Set<String> {
-        Set(NarrativeValidator.numbers(in: factText))
-    }
-
     static func number(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
@@ -169,7 +164,6 @@ public struct NudgeComposition: Sendable, Equatable {
     public enum Fallback: Sendable, Equatable {
         case modelUnavailable(String)
         case modelFailed(String)
-        case ungroundedNumber(String)
         case tooLong
     }
 
@@ -189,10 +183,8 @@ public struct NudgeComposition: Sendable, Equatable {
         switch fallback {
         case .modelUnavailable(let reason):
             return "the built-in wording — \(reason)"
-        case .modelFailed:
-            return "the built-in wording — the on-device model did not answer"
-        case .ungroundedNumber(let number):
-            return "the built-in wording — the model added a number that is not in your record (\(number))"
+        case .modelFailed(let reason):
+            return "the built-in wording — \(reason)"
         case .tooLong:
             return "the built-in wording — the model's message was too long"
         case nil:
@@ -204,20 +196,11 @@ public struct NudgeComposition: Sendable, Equatable {
 public protocol NudgeGenerating: Sendable {
     func availability() -> NarrativeAvailability
     func generate(facts: NudgeFacts) async throws -> NudgeMessage
-    /// A second attempt that must avoid numbers altogether, for facts that contain none.
-    func generateStrict(facts: NudgeFacts) async throws -> NudgeMessage
-}
-
-public extension NudgeGenerating {
-    func generateStrict(facts: NudgeFacts) async throws -> NudgeMessage {
-        try await generate(facts: facts)
-    }
 }
 
 public enum NudgeComposer {
-    /// Model text when it validates, deterministic copy otherwise. There is nowhere to fall back to
-    /// but the template, which is the point: no cloud model is reachable from this path. One strict
-    /// retry handles the case where the facts carry no numbers at all and the model invents one.
+    /// Model text when it arrives, deterministic copy otherwise. There is nowhere to fall back to
+    /// but the template, which is the point: no cloud model is reachable from this path.
     public static func compose(
         facts: NudgeFacts,
         generator: any NudgeGenerating
@@ -229,51 +212,39 @@ public enum NudgeComposer {
                 fallback: .modelUnavailable(availability.reasonText)
             )
         }
-        var lastError: NarrativeError?
-        for strict in [false, true] {
-            do {
-                let message = strict
-                    ? try await generator.generateStrict(facts: facts)
-                    : try await generator.generate(facts: facts)
-                try validate(message, facts: facts)
-                return NudgeComposition(message: message, fallback: nil)
-            } catch let error as NarrativeError {
-                lastError = error
-            } catch {
-                lastError = .failed(error.localizedDescription)
-            }
-        }
-        return NudgeComposition(
-            message: NudgeCopy.message(for: facts),
-            fallback: fallback(for: lastError)
-        )
-    }
-
-    static func fallback(for error: NarrativeError?) -> NudgeComposition.Fallback {
-        guard let error else { return .modelFailed("No message.") }
-        switch error {
-        case .unavailable(let reason): return .modelUnavailable(reason)
-        case .notGrounded(let number): return .ungroundedNumber(number)
-        case .tooLong: return .tooLong
-        case .failed(let message): return .modelFailed(message)
+        do {
+            let message = try await generator.generate(facts: facts)
+            try validate(message)
+            return NudgeComposition(message: message, fallback: nil)
+        } catch let error as NarrativeError {
+            return NudgeComposition(
+                message: NudgeCopy.message(for: facts),
+                fallback: fallback(for: error)
+            )
+        } catch {
+            return NudgeComposition(
+                message: NudgeCopy.message(for: facts),
+                fallback: .modelFailed(error.localizedDescription)
+            )
         }
     }
 
-    public static func validate(_ message: NudgeMessage, facts: NudgeFacts) throws {
+    /// A reminder is encouragement, not an explanation, so numbers are allowed here even when the
+    /// facts do not contain them. Only length is enforced: a body that overflows is unreadable on the
+    /// Lock Screen. The narrative surfaces keep the strict number-grounding check.
+    public static func validate(_ message: NudgeMessage) throws {
         guard message.title.count <= NudgeMessage.titleLimit,
               message.body.count <= NudgeMessage.bodyLimit else {
             throw NarrativeError.tooLong
         }
-        try NarrativeValidator.validate(
-            text: message.title,
-            allowedNumbers: facts.allowedNumbers,
-            maxLength: NudgeMessage.titleLimit
-        )
-        try NarrativeValidator.validate(
-            text: message.body,
-            allowedNumbers: facts.allowedNumbers,
-            maxLength: NudgeMessage.bodyLimit
-        )
+    }
+
+    static func fallback(for error: NarrativeError) -> NudgeComposition.Fallback {
+        switch error {
+        case .unavailable(let reason): return .modelUnavailable(reason)
+        case .tooLong: return .tooLong
+        case .notGrounded, .failed: return .modelFailed(error.errorDescription ?? "No message.")
+        }
     }
 }
 

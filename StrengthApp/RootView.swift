@@ -51,6 +51,9 @@ struct MainTabView: View {
             ProgressDashboardView(model: model)
                 .tabItem { Label("Progress", systemImage: "chart.line.uptrend.xyaxis") }
                 .tag(AppTab.progress)
+            ExplainView(model: model)
+                .tabItem { Label("Explain", systemImage: "doc.text.magnifyingglass") }
+                .tag(AppTab.explain)
             SettingsView(model: model)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)

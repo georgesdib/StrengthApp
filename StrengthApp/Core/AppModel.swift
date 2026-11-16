@@ -12,6 +12,7 @@ enum AppTab: Hashable {
     case today
     case history
     case progress
+    case explain
     case settings
 }
 
@@ -2076,6 +2077,13 @@ final class AppModel: ObservableObject {
 
     func makeNarrativeGenerator() -> any NarrativeGenerating {
         FoundationNarrativeGenerator()
+    }
+
+    func explain(_ question: String) async throws -> ExplainResponse {
+        guard let session else {
+            throw APIError.transport("Pair this iPhone with the server first.")
+        }
+        return try await client.explain(question: question, session: session)
     }
 
     func makeChatModel() -> TrainingChatModel {

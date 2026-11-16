@@ -30,7 +30,6 @@ private final class FakeAuthorizer: NotificationAuthorizing {
 private struct FakeGenerator: NudgeGenerating {
     var available = true
     var message: NudgeMessage?
-    var strictMessage: NudgeMessage?
 
     func availability() -> NarrativeAvailability {
         available ? .available : .unavailable("No model here.")
@@ -39,11 +38,6 @@ private struct FakeGenerator: NudgeGenerating {
     func generate(facts: NudgeFacts) async throws -> NudgeMessage {
         guard let message else { throw NarrativeError.failed("No message.") }
         return message
-    }
-
-    func generateStrict(facts: NudgeFacts) async throws -> NudgeMessage {
-        guard let strictMessage else { return try await generate(facts: facts) }
-        return strictMessage
     }
 }
 
@@ -260,32 +254,29 @@ final class NudgeSchedulerTests: XCTestCase {
         XCTAssertTrue(composition.usedOnDeviceModel)
     }
 
-    func testUngroundedNumberFallsBackToTheTemplate() async {
-        let invented = NudgeMessage(
-            title: "Big day", body: "Let's put 140 kg on the bar.", origin: .onDeviceModel
-        )
-        let composition = await NudgeComposer.compose(
-            facts: facts(), generator: FakeGenerator(message: invented)
-        )
-        XCTAssertEqual(composition.message, NudgeCopy.message(for: facts()))
-        XCTAssertEqual(composition.fallback, .ungroundedNumber("140"))
-    }
-
-    func testStrictRetryRescuesADigitFromADigitFreeMessage() async {
-        // Facts about a missing readiness entry carry no numbers at all, so a model that adds
-        // "5 minutes" would otherwise always fall back to the template.
-        let invented = NudgeMessage(
-            title: "Readiness first", body: "Two minutes now and 5 more tomorrow.", origin: .onDeviceModel
-        )
-        let strict = NudgeMessage(
-            title: "Readiness first", body: "Log it now, then train.", origin: .onDeviceModel
+    func testNumbersInTheMessageAreAllowed() async {
+        // A reminder is encouragement, not an explanation, so it may use numbers the facts do not
+        // contain. Facts about a missing readiness entry carry none at all.
+        let generated = NudgeMessage(
+            title: "Give it 20 minutes",
+            body: "Log readiness first, then train. Five minutes of rest between sets is plenty.",
+            origin: .onDeviceModel
         )
         let composition = await NudgeComposer.compose(
             facts: NudgeFacts(readiness: .missing),
-            generator: FakeGenerator(message: invented, strictMessage: strict)
+            generator: FakeGenerator(message: generated)
         )
-        XCTAssertEqual(composition.message, strict)
+        XCTAssertEqual(composition.message, generated)
         XCTAssertNil(composition.fallback)
+        XCTAssertTrue(composition.usedOnDeviceModel)
+    }
+
+    func testAFailedGenerationFallsBackWithItsReason() async {
+        let composition = await NudgeComposer.compose(
+            facts: facts(), generator: FakeGenerator(message: nil)
+        )
+        XCTAssertEqual(composition.message, NudgeCopy.message(for: facts()))
+        XCTAssertEqual(composition.fallback, .modelFailed("No message."))
     }
 
     func testUnavailableModelFallsBackToTheTemplate() async {
@@ -304,7 +295,7 @@ final class NudgeSchedulerTests: XCTestCase {
             body: String(repeating: "5 ", count: 100),
             origin: .onDeviceModel
         )
-        XCTAssertThrowsError(try NudgeComposer.validate(long, facts: facts))
+        XCTAssertThrowsError(try NudgeComposer.validate(long))
     }
 
     // MARK: - Helpers

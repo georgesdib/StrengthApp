@@ -569,8 +569,9 @@ are **not run yet** — simulator success is not proof of notification delivery.
   has none, and the client tested for `known == true`. Fixed with `ReadinessPayload.isLogged`
   (`known ?? true`) and a decoding test that pins both shapes.
 - **No model prose.** The readiness facts contain no numbers, so any numeral the model wrote failed
-  the grounding check and the template always shipped. The composer now retries once with a
-  digits-forbidden instruction, and Settings reports the last composition's origin and reason.
+  the grounding check and the template always shipped. The owner then asked for numbers to be allowed
+  in a reminder: the nudge now enforces only length, while the narrative surfaces keep the strict
+  number-grounding check. Settings reports the last composition's origin and reason.
 - **Not mirrored to the watch.** Expected behaviour, not a defect: iOS mirrors an iPhone notification
   only while the iPhone is locked or asleep.
 

@@ -235,7 +235,7 @@ off for the app, the Settings row says so instead of pretending the reminder is 
 
 **Why the wording is sometimes plain.** The message is written by Apple Intelligence when it is
 available. When it is not — Apple Intelligence off, the model still downloading, or a generation that
-failed its own grounding check — the app sends built-in wording instead of guessing. Settings shows a
+failed or ran long — the app sends built-in wording instead of guessing. Settings shows a
 **Last reminder** line saying which happened and why, so a plain message is never a mystery.
 
 **Mirroring to the watch.** The reminder is an iPhone notification, so the Apple Watch shows it only

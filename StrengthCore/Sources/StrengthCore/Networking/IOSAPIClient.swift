@@ -772,6 +772,23 @@ public final class IOSAPIClient {
     }
 
     /// One deterministic weekly-review envelope; `weekEnd` defaults to the last completed week.
+    /// Ask the paired server's local project-knowledge Explain endpoint.
+    public func explain(
+        question: String,
+        session: IOSSession
+    ) async throws -> ExplainResponse {
+        struct Body: Encodable { let question: String }
+        return try await post(
+            path: "api/intelligence/explain",
+            body: Body(question: question),
+            kind: .readiness,
+            targetId: nil,
+            session: session,
+            idempotencyKey: UUID().uuidString,
+            journaling: false
+        )
+    }
+
     public func weeklyReview(
         session: IOSSession,
         weekEnd: String? = nil

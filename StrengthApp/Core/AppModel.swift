@@ -136,7 +136,9 @@ final class AppModel: ObservableObject {
     @Published var awayServerText: String
     @Published var preferHome: Bool
     @Published private(set) var activeServerRoute: ServerRoute?
-    @Published private(set) var homeServerReachable: Bool?
+    @Published private(set) var homeServerProbe: ServerProbeResult?
+    /// Kept for routing and existing readers; the reason lives in homeServerProbe.
+    var homeServerReachable: Bool? { homeServerProbe.map(\.isReachable) }
     @Published private(set) var isCheckingHomeServer = false
     @Published private(set) var serverSettingsError: String?
     /// An address the app accepted but the system will refuse to load. Saving still succeeds: the
@@ -310,6 +312,7 @@ final class AppModel: ObservableObject {
         homeServerText = store.homeServerURL ?? ""
         awayServerText = store.awayServerURL ?? ""
         preferHome = store.preferHome
+        updateServerAddressWarning()
         let configuration = store.serverConfiguration
         let token = tokens.load()
         let pairedDevice = store.device
@@ -352,23 +355,21 @@ final class AppModel: ObservableObject {
         _ configuration: ServerConfiguration,
         token: String?
     ) async -> (route: ServerRoute, url: String)? {
-        var homeReachable: Bool?
+        var probe: ServerProbeResult?
         let home = configuration.homeURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let away = configuration.awayURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if configuration.preferHome, !home.isEmpty, !away.isEmpty, home != away,
            let token, let homeURL = try? IOSAPIClient.validatedBaseURL(home) {
             isCheckingHomeServer = true
-            homeReachable = await client.isServerReachable(
-                baseURL: homeURL, token: token
-            )
+            probe = await client.probeServer(baseURL: homeURL, token: token)
             isCheckingHomeServer = false
         }
-        homeServerReachable = homeReachable
+        homeServerProbe = probe
         return ServerConfiguration.select(
             homeURL: configuration.homeURL,
             awayURL: configuration.awayURL,
             preferHome: configuration.preferHome,
-            homeReachable: homeReachable
+            homeReachable: probe.map(\.isReachable)
         )
     }
 
@@ -473,14 +474,29 @@ final class AppModel: ObservableObject {
         if isCheckingHomeServer {
             return "Checking whether Home Server is reachable…"
         }
-        switch homeServerReachable {
-        case true:
+        switch homeServerProbe {
+        case .reachable:
             return "Home Server is reachable."
-        case false:
+        case .unauthorized:
+            return "Home Server answered but refused this device credential. Re-pair if it persists."
+        case .blockedByPolicy:
+            return "iOS refuses the Home Server address, so it is not merely unreachable. Use https:// or a local address."
+        case .serverError(let status):
+            return "Home Server answered HTTP \(status); Away Server is the fallback."
+        case .unreachable:
             return "Home Server is unreachable; Away Server is the fallback."
         case nil:
             return "Home Server is preferred; reachability is checked on launch, foreground and network changes."
         }
+    }
+
+    /// Re-check whatever is stored, not just what was typed: an address saved before this check
+    /// existed (or on another device) is exactly the case that failed without a warning.
+    private func updateServerAddressWarning() {
+        serverSettingsWarning = Self.cleartextWarning(
+            home: store.homeServerURL ?? "",
+            away: store.awayServerURL ?? ""
+        )
     }
 
     /// Addresses that can be stored but not loaded, named so the owner knows which field to fix.
@@ -501,7 +517,6 @@ final class AppModel: ObservableObject {
 
     func saveServerSettings() async -> Bool {
         serverSettingsError = nil
-        serverSettingsWarning = nil
         var home = homeServerText.trimmingCharacters(in: .whitespacesAndNewlines)
         var away = awayServerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !home.isEmpty || !away.isEmpty else {
@@ -527,7 +542,7 @@ final class AppModel: ObservableObject {
         if phase == .paired, let token = tokens.load() {
             selected = await chooseServerSelection(configuration, token: token)
         } else {
-            homeServerReachable = nil
+            homeServerProbe = nil
             isCheckingHomeServer = false
             selected = ServerConfiguration.select(
                 homeURL: home, awayURL: away, preferHome: preferHome,
@@ -544,13 +559,13 @@ final class AppModel: ObservableObject {
             serverSettingsError = "Sync or discard pending offline work before switching server addresses."
             return false
         }
-        serverSettingsWarning = Self.cleartextWarning(home: home, away: away)
         store.homeServerURL = home
         store.awayServerURL = away
         store.preferHome = preferHome
         store.bumpWatchConfigVersion()
         homeServerText = home
         awayServerText = away
+        updateServerAddressWarning()
         if phase == .pairing {
             serverURLText = selected.url
             activeServerRoute = selected.route
@@ -578,6 +593,7 @@ final class AppModel: ObservableObject {
             return
         }
         serverSettingsError = nil
+        updateServerAddressWarning()
         activeServerRoute = selected.route
         if changed {
             session = IOSSession(

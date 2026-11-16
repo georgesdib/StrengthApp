@@ -192,6 +192,28 @@ extension URLError.Code {
     }
 }
 
+/// Why a Home/Away probe succeeded or failed. Routing only needs `isReachable`, but the Settings
+/// screen explains the reason, so a blocked address is not reported as an offline server.
+public enum ServerProbeResult: Equatable, Sendable {
+    case reachable
+    /// The server answered but refused this device credential. Reachable: switching route
+    /// cannot fix a stale token, so routing still treats it as up.
+    case unauthorized
+    /// iOS refused the address itself (cleartext http to a host App Transport Security does not
+    /// treat as local). Nothing was sent, and no retry will help.
+    case blockedByPolicy
+    case serverError(status: Int)
+    case unreachable
+
+    /// Routing keeps the pre-existing rule: only a 2xx/4xx answer counts as up. A 5xx still
+    /// falls through to the Away Server, which is why `serverError` is reported separately.
+    public var isReachable: Bool {
+        switch self {
+        case .reachable, .unauthorized: return true
+        case .serverError, .blockedByPolicy, .unreachable: return false
+        }
+    }
+}
 private struct TransportFailure: Error {
     let code: URLError.Code
     let message: String
@@ -357,9 +379,13 @@ public final class IOSAPIClient {
         try await get(path: "api/ios/v1/bootstrap", query: [], session: session)
     }
 
-    /// Short, read-only reachability check used for Home/Away selection. A 401 still proves
-    /// the server is reachable; transport errors and 5xx do not.
-    public func isServerReachable(baseURL: URL, token: String) async -> Bool {
+    /// Short, read-only reachability check used for Home/Away selection.
+    ///
+    /// The reason is kept instead of a bare Bool: "the server is off", "iOS refuses this
+    /// address" and "the server answered but rejected this device" are three different problems
+    /// with three different fixes, and collapsing them made a blocked Away address look like an
+    /// ordinary offline state.
+    public func probeServer(baseURL: URL, token: String) async -> ServerProbeResult {
         var request = URLRequest(url: baseURL.appendingPathComponent("api/ios/v1/bootstrap"))
         request.httpMethod = "GET"
         request.timeoutInterval = 2
@@ -368,10 +394,24 @@ public final class IOSAPIClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
             let (_, response) = try await transport.data(for: request)
-            return (200...499).contains(response.statusCode)
+            switch response.statusCode {
+            case 200...299: return .reachable
+            case 401, 403: return .unauthorized
+            case 400...499: return .reachable
+            default: return .serverError(status: response.statusCode)
+            }
+        } catch let error as URLError
+                  where error.code == .appTransportSecurityRequiresSecureConnection {
+            return .blockedByPolicy
         } catch {
-            return false
+            return .unreachable
         }
+    }
+
+    /// Backwards-compatible reading of the probe: a 401 still proves the server is reachable;
+    /// a blocked address and 5xx do not.
+    public func isServerReachable(baseURL: URL, token: String) async -> Bool {
+        await probeServer(baseURL: baseURL, token: token).isReachable
     }
 
     public func today(session: IOSSession) async throws -> TodayResponse {

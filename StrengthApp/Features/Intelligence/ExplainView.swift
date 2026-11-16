@@ -7,6 +7,7 @@ struct ExplainView: View {
     @State private var response: ExplainResponse?
     @State private var errorMessage: String?
     @State private var isSending = false
+    @FocusState private var questionFocused: Bool
 
     private func destination(_ citation: ExplainCitation) -> URL? {
         guard let raw = citation.url else { return nil }
@@ -22,6 +23,9 @@ struct ExplainView: View {
                 Section {
                     TextField("How is readiness calculated?", text: $question, axis: .vertical)
                         .lineLimit(2...5)
+                        .focused($questionFocused)
+                        .submitLabel(.done)
+                        .onSubmit { questionFocused = false }
                     Button {
                         Task { await ask() }
                     } label: {
@@ -79,6 +83,13 @@ struct ExplainView: View {
                 }
             }
             .navigationTitle("Explain")
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { questionFocused = false }
+                }
+            }
         }
     }
 

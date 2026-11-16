@@ -85,7 +85,7 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   or a prescription is no longer usable; an opt-in HealthKit section showing HRV/RHR/bodyweight
   effective values, source, sample age and Import from HealthKit; pull to refresh.
 - **Readiness** — manual sleep/energy/mood/soreness/stress (1–5), optional HRV/RHR/bodyweight/
-  wearable and legacy labels, optional note; HealthKit HRV/RHR/bodyweight values/source/age are
+  wearable, optional note; HealthKit HRV/RHR/bodyweight values/source/age are
   shown on the same form with manual override; missing fields stay missing; errors stay visible.
 - **Workout ready** — once the server finishes building, Today shows a ready card with the
   session type, date, exercise count and warnings. **Review workout** opens the full plan, and

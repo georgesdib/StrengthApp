@@ -13,7 +13,7 @@ public struct ExplainCitation: Codable, Identifiable, Equatable, Sendable {
     public let warning: String?
 
     public var label: String {
-        path + ":" + String(lineStart) + (lineEnd == lineStart ? "" : "-" + String(lineEnd))
+        source + ":" + path + ":" + String(lineStart) + (lineEnd == lineStart ? "" : "-" + String(lineEnd))
     }
 }
 

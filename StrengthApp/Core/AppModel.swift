@@ -139,6 +139,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var homeServerReachable: Bool?
     @Published private(set) var isCheckingHomeServer = false
     @Published private(set) var serverSettingsError: String?
+    /// An address the app accepted but the system will refuse to load. Saving still succeeds: the
+    /// owner may be mid-edit, and a warning must not block an unrelated correction.
+    @Published private(set) var serverSettingsWarning: String?
     @Published var pairingCodeText: String = ""
     @Published var pairingLabelText: String
 
@@ -480,8 +483,25 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Addresses that can be stored but not loaded, named so the owner knows which field to fix.
+    private static func cleartextWarning(home: String, away: String) -> String? {
+        var blocked: [String] = []
+        if !home.isEmpty, ServerAddressPolicy.cleartextIsBlocked(home) {
+            blocked.append("Home Server")
+        }
+        if !away.isEmpty, ServerAddressPolicy.cleartextIsBlocked(away) {
+            blocked.append("Away Server")
+        }
+        guard !blocked.isEmpty else { return nil }
+        let subject = blocked.joined(separator: " and ")
+        return "\(subject) uses http:// with a public host name, which iOS refuses. "
+            + "Use https://, or an IP address, a .local name or a single-word host name on your "
+            + "local network."
+    }
+
     func saveServerSettings() async -> Bool {
         serverSettingsError = nil
+        serverSettingsWarning = nil
         var home = homeServerText.trimmingCharacters(in: .whitespacesAndNewlines)
         var away = awayServerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !home.isEmpty || !away.isEmpty else {
@@ -524,6 +544,7 @@ final class AppModel: ObservableObject {
             serverSettingsError = "Sync or discard pending offline work before switching server addresses."
             return false
         }
+        serverSettingsWarning = Self.cleartextWarning(home: home, away: away)
         store.homeServerURL = home
         store.awayServerURL = away
         store.preferHome = preferHome

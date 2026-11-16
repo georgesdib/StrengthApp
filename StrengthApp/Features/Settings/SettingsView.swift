@@ -118,6 +118,12 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
+                    if let warning = model.serverSettingsWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .accessibilityIdentifier("server-settings-warning")
+                    }
                     if isSavingServerSettings {
                         HStack {
                             ProgressView()

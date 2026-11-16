@@ -175,6 +175,23 @@ public final class SameHostRedirectGuard: NSObject, URLSessionTaskDelegate {
     }
 }
 
+/// User-facing wording for transport failures whose system text names the rule but not the fix.
+///
+/// The cleartext case is the one that misleads: iOS says the resource "could not be loaded
+/// because the App Transport Security policy requires the use of a secure connection", which reads
+/// like a server fault. It is a client policy refusal, and the remedy is in the address.
+extension URLError.Code {
+    var clientFacingMessage: String? {
+        switch self {
+        case .appTransportSecurityRequiresSecureConnection:
+            return "iOS refuses plain http:// to a public address. Use https://, or an IP address, "
+                + "a .local name or a single-word host name on your local network."
+        default:
+            return nil
+        }
+    }
+}
+
 private struct TransportFailure: Error {
     let code: URLError.Code
     let message: String
@@ -1051,7 +1068,9 @@ public final class IOSAPIClient {
         } catch let failure as TransportFailure {
             throw APIError.transport(failure.message)
         } catch let error as URLError {
-            throw APIError.transport(error.localizedDescription)
+            throw APIError.transport(
+                error.code.clientFacingMessage ?? error.localizedDescription
+            )
         } catch let error as APIError {
             throw error
         } catch {
@@ -1066,7 +1085,10 @@ public final class IOSAPIClient {
         do {
             return try await activeTransport.data(for: request)
         } catch let error as URLError {
-            throw TransportFailure(code: error.code, message: error.localizedDescription)
+            throw TransportFailure(
+                code: error.code,
+                message: error.code.clientFacingMessage ?? error.localizedDescription
+            )
         } catch {
             throw APIError.transport("The server could not be reached.")
         }

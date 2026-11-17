@@ -40,7 +40,7 @@ app presents and records that authority.
 - [Training Intelligence contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/TRAINING-INTELLIGENCE-CONTRACT.md)
   — response envelope, MCP tool/resource catalogue and the native iOS adapter rules (five-tool cap,
   no Swift calculation).
-- [Cardio stage plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/CARDIO-STAGE.md)
+- [Cardio stage plan](https://github.com/georgesdib/strength-app/blob/development/docs/plans/CARDIO-STAGE.md)
   — proposed cross-repository plan for HealthKit workout ingestion, canonical backend cardio data and
   cardiovascular monitoring. Nothing is implemented: C0 is a local data audit and C1–C7 are gated on its
   decision record. The wider HealthKit read authorisation, historical backfill, reconciliation queue and

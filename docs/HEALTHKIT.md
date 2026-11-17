@@ -6,7 +6,7 @@ readiness path is owned by the backend and the shared
 [Phase 3A contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-3A-CONTRACT.md).
 
 Read this before changing any HealthKit code. The import work described in the
-[cardio stage plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/CARDIO-STAGE.md) is
+[cardio stage plan](https://github.com/georgesdib/strength-app/blob/development/docs/plans/CARDIO-STAGE.md) is
 **proposed and not implemented**; nothing below is waiting on it.
 
 ## 1. What the app touches today

@@ -73,8 +73,12 @@ final class HealthKitActivityService: HealthKitActivityProviding {
 
     func fetchBatch(now: Date = Date()) async throws -> HealthKitActivityBatch {
         guard isAvailable else { throw HealthKitActivityError.unavailable }
-        let start = lastSyncedAt.addingTimeInterval(-lookback)
-        let workouts = try await fetchWorkouts(since: start)
+        // Workouts never need a lookback: anything before the export cutoff is already in the
+        // database under a content key, and re-uploading it here would create a second row for the
+        // same session (the mistake this filter exists to prevent). The lookback belongs to samples
+        // only, and samples are filtered by the intervals of the workouts fetched in this run.
+        let workoutStart = max(lastSyncedAt, Self.defaultCutoff)
+        let workouts = try await fetchWorkouts(since: workoutStart)
         let formatter = ISO8601DateFormatter()
         let intervals = workouts.compactMap {
             workout -> (key: String, start: Date, workoutEnd: Date, end: Date)? in
@@ -83,7 +87,8 @@ final class HealthKitActivityService: HealthKitActivityProviding {
             else { return nil }
             return (workout.key, begin, end, end.addingTimeInterval(tail))
         }
-        let samples = try await fetchHeartRate(since: start, intervals: intervals)
+        let sampleStart = lastSyncedAt.addingTimeInterval(-lookback)
+        let samples = try await fetchHeartRate(since: sampleStart, intervals: intervals)
         return HealthKitActivityBatch(workouts: workouts, samples: samples)
     }
 

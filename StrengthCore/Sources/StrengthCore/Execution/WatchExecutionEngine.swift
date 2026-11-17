@@ -434,8 +434,20 @@ public final class WatchExecutionEngine {
     @discardableResult
     public func applyRemote(_ payload: RemoteExecutionPayload, deviceID: String?) -> Bool {
         guard let workout, payload.workoutId == workout.workoutId else { return false }
-        if let owner = payload.ownerDeviceId, !owner.isEmpty,
-           let deviceID, !deviceID.isEmpty, owner != deviceID {
+        let phoneOwns = payload.ownerDeviceId.flatMap { owner in
+            guard !owner.isEmpty, let deviceID, !deviceID.isEmpty else { return false }
+            return owner != deviceID
+        } ?? false
+        if phoneOwns {
+            // The phone owns capture, but the watch still mirrors the plan read-only.
+            if payload.planRevision > (sessionRecord?.planRevision ?? 0) {
+                if activeSet == nil {
+                    apply(plan: payload.plan, revision: payload.planRevision)
+                } else {
+                    deferredPlan = (payload.planRevision, payload.plan)
+                    planUpdated = true
+                }
+            }
             phase = .readOnly
             return true
         }
@@ -509,6 +521,8 @@ public final class WatchExecutionEngine {
             return .nothingToSend
         }
         guard owner == device else {
+            // A read-only watch still reflects phone edits; it just cannot write.
+            applyRevisionIfNeeded(envelope)
             phase = .readOnly
             return .nothingToSend
         }

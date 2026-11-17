@@ -721,6 +721,27 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertEqual(try store.load().operations.count, 0)
     }
 
+    func testReadOnlyWatchStillAppliesAPlanRevision() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(
+                    owner: "phone-1", revision: 1
+                ).utf8))
+            }
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+        XCTAssertEqual(
+            engine.workout?.planRevision, 1,
+            "a read-only watch must still mirror phone plan revisions"
+        )
+    }
+
     func testReconciliationEndsWhenTheServerCompletedTheWorkout() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/execution") == true {

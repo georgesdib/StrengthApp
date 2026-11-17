@@ -174,6 +174,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var healthKitEnabled: Bool
     @Published private(set) var healthKitState: HealthKitReadinessState
     @Published private(set) var isImportingHealthKit = false
+    @Published private(set) var isSyncingActivity = false
+    @Published private(set) var activitySyncMessage: String?
     @Published private(set) var healthKitSelection: HealthKitReadinessSelection?
 
     @Published var serverURLText: String
@@ -198,6 +200,7 @@ final class AppModel: ObservableObject {
     private let store: PairedStore
     let watchPairing: WatchPairingCoordinator
     private let healthKit: any HealthKitReadinessProviding
+    private let healthKitActivity: any HealthKitActivityProviding
     private let healthKitDefaults: UserDefaults
     private let offlineStore: OfflineCaptureStore
     private let pageSize = 50
@@ -238,6 +241,7 @@ final class AppModel: ObservableObject {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
         let readiness = healthKit ?? HealthKitReadinessService()
+        let activity = HealthKitActivityService()
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
         let resolvedAutomation = automation ?? WorkoutAutomation.shared
@@ -263,6 +267,7 @@ final class AppModel: ObservableObject {
             connectivity: watchConnectivity
         )
         self.healthKit = readiness
+        self.healthKitActivity = activity
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
         self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
@@ -346,6 +351,55 @@ final class AppModel: ObservableObject {
 
     var canWrite: Bool {
         canWriteReadiness && canPrescribe && canWriteWorkout
+    }
+
+    /// Incremental HealthKit activity (C2). The history was promoted from an export, so this only
+    /// ever carries what happened after the cutoff — the app never backfills.
+    var canSyncActivity: Bool {
+        healthKitActivity.isAvailable && bootstrap?.capabilities.healthkitActivity == true
+    }
+
+    func syncHealthKitActivity() async {
+        guard !isSyncingActivity else { return }
+        guard let session else {
+            activitySyncMessage = "Pair with the server before syncing activity."
+            return
+        }
+        isSyncingActivity = true
+        activitySyncMessage = nil
+        defer { isSyncingActivity = false }
+        do {
+            try await healthKitActivity.requestAuthorization()
+            let now = Date()
+            let batch = try await healthKitActivity.fetchBatch(now: now)
+            if !batch.workouts.isEmpty {
+                _ = try await client.uploadActivity(
+                    HealthKitActivityWorkoutsBody(workouts: batch.workouts),
+                    session: session,
+                    idempotencyKey: UUID().uuidString
+                )
+            }
+            if !batch.samples.isEmpty {
+                _ = try await client.uploadActivity(
+                    HealthKitActivitySamplesBody(samples: batch.samples),
+                    session: session,
+                    idempotencyKey: UUID().uuidString
+                )
+            }
+            healthKitActivity.markSynced(now)
+            activitySyncMessage = batch.isEmpty
+                ? "Nothing new since \(Self.shortDate(now))."
+                : "Synced \(batch.workouts.count) workout(s) and \(batch.samples.count) heart-rate sample(s)."
+        } catch {
+            activitySyncMessage = error.localizedDescription
+        }
+    }
+
+    private static func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     var canUseHealthKit: Bool {
@@ -2036,7 +2090,7 @@ final class AppModel: ObservableObject {
             _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
-            pushExecutionIfMirroring()
+            pushExecutionToWatch()
             return true
         } catch {
             if let api = error as? APIError,
@@ -2314,7 +2368,7 @@ final class AppModel: ObservableObject {
                 case .completeWorkout, .abandonWorkout:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = false
-                case .executionEvents:
+                case .executionEvents, .healthkitActivity:
                     break
                 }
             } catch let api as APIError {
@@ -2874,8 +2928,10 @@ final class AppModel: ObservableObject {
     /// Nudges the watch with the new plan after a phone edit. Best effort and redundant by
     /// design: the watch also refreshes on foreground and after each set (contract §10.2), so a
     /// dropped payload costs one stale view, never a lost edit.
-    private func pushExecutionIfMirroring() {
-        guard isMirroringWatchSession, let workout = activeWorkout else { return }
+    private func pushExecutionToWatch() {
+        // Push after any plan edit, whether the watch owns capture or is read-only; the watch
+        // mirrors the plan in both states and its read-only path now applies revisions.
+        guard let workout = activeWorkout else { return }
         watchPairing.pushExecution(workout)
     }
 

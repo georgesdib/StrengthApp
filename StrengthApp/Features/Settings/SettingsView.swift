@@ -202,6 +202,30 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Recorded activity") {
+                    Button {
+                        Task { await model.syncHealthKitActivity() }
+                    } label: {
+                        if model.isSyncingActivity {
+                            HStack { ProgressView(); Text("Syncing…") }
+                        } else {
+                            Text("Sync workouts and heart rate")
+                        }
+                    }
+                    .disabled(!model.canSyncActivity || model.isSyncingActivity)
+                    .accessibilityIdentifier("activity-sync-button")
+                    if let message = model.activitySyncMessage {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    Text("Sends workouts recorded since the import cutoff, plus heart rate inside them "
+                         + "and for ten minutes after. Nothing is backfilled and nothing is written to Health.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Chat") {
                     Toggle("Chat with your training", isOn: $model.chatEnabled)
                     if model.chatEnabled {

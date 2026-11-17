@@ -482,6 +482,40 @@ public final class IOSAPIClient {
         )
     }
 
+// MARK: - HealthKit activity (C2)
+
+    /// Uploads in two calls by design: a sample cannot be attached before its workout exists on the
+    /// server. Each call is idempotent on the HealthKit UUID, so a retry costs nothing.
+    public func uploadActivity(
+        _ body: HealthKitActivityWorkoutsBody,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> HealthKitActivityUploadResult {
+        try await post(
+            path: "api/ios/v1/healthkit/workouts",
+            body: body,
+            kind: .healthkitActivity,
+            targetId: nil,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    public func uploadActivity(
+        _ body: HealthKitActivitySamplesBody,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> HealthKitActivityUploadResult {
+        try await post(
+            path: "api/ios/v1/healthkit/samples",
+            body: body,
+            kind: .healthkitActivity,
+            targetId: nil,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     /// R7: the request is accepted (202) and the plan is built in the background.
     public func issuePrescription(
         _ body: IssuePrescriptionRequest,

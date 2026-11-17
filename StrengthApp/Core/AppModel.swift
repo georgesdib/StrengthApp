@@ -386,7 +386,7 @@ final class AppModel: ObservableObject {
                     idempotencyKey: UUID().uuidString
                 )
             }
-            healthKitActivity.markSynced(now)
+            healthKitActivity.markSynced(now: now, workouts: batch.workouts)
             activitySyncMessage = batch.isEmpty
                 ? "Nothing new since \(Self.shortDate(now))."
                 : "Synced \(batch.workouts.count) workout(s) and \(batch.samples.count) heart-rate sample(s)."

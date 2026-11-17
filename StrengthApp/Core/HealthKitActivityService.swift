@@ -20,8 +20,9 @@ protocol HealthKitActivityProviding {
     var isAvailable: Bool { get }
     var lastSyncedAt: Date { get }
     func requestAuthorization() async throws
+    var lastWorkoutAt: Date { get }
     func fetchBatch(now: Date) async throws -> HealthKitActivityBatch
-    func markSynced(_ date: Date)
+    func markSynced(now: Date, workouts: [HealthKitActivityWorkout])
 }
 
 /// Reads the incremental slice of HealthKit activity: workouts after the export cutoff, and the
@@ -36,7 +37,8 @@ final class HealthKitActivityService: HealthKitActivityProviding {
 
     private let store = HKHealthStore()
     private let defaults: UserDefaults
-    private let cursorKey = "healthkit.activity.syncedAt"
+    private let sampleCursorKey = "healthkit.activity.samplesSyncedAt.v2"
+    private let workoutCursorKey = "healthkit.activity.workoutsSyncedAt.v2"
     private let lookback: TimeInterval = 7 * 24 * 60 * 60
     private let tail: TimeInterval = 600
 
@@ -47,11 +49,22 @@ final class HealthKitActivityService: HealthKitActivityProviding {
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
     var lastSyncedAt: Date {
-        (defaults.object(forKey: cursorKey) as? Date) ?? Self.defaultCutoff
+        (defaults.object(forKey: sampleCursorKey) as? Date) ?? Self.defaultCutoff
     }
 
-    func markSynced(_ date: Date) {
-        defaults.set(date, forKey: cursorKey)
+    /// The workouts cursor advances only to the latest workout actually uploaded. Advancing it to
+    /// "now" would skip a workout that ended before the sync began, which is exactly how the
+    /// 17 November session was lost.
+    var lastWorkoutAt: Date {
+        (defaults.object(forKey: workoutCursorKey) as? Date) ?? Self.defaultCutoff
+    }
+
+    func markSynced(now: Date, workouts: [HealthKitActivityWorkout]) {
+        defaults.set(now, forKey: sampleCursorKey)
+        let formatter = ISO8601DateFormatter()
+        if let latest = workouts.compactMap({ formatter.date(from: $0.endedAt) }).max() {
+            defaults.set(latest, forKey: workoutCursorKey)
+        }
     }
 
     func requestAuthorization() async throws {
@@ -77,7 +90,12 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         // database under a content key, and re-uploading it here would create a second row for the
         // same session (the mistake this filter exists to prevent). The lookback belongs to samples
         // only, and samples are filtered by the intervals of the workouts fetched in this run.
-        let workoutStart = max(lastSyncedAt, Self.defaultCutoff)
+        // One day of overlap on workouts: cheap because uploads are idempotent, and it covers a
+        // workout that ended just before the previous cursor advanced.
+        let workoutStart = max(
+            lastWorkoutAt.addingTimeInterval(-24 * 60 * 60),
+            Self.defaultCutoff
+        )
         let workouts = try await fetchWorkouts(since: workoutStart)
         let formatter = ISO8601DateFormatter()
         let intervals = workouts.compactMap {

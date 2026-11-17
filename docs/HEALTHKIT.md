@@ -68,13 +68,16 @@ heart-rate time series, no background refresh.
   `com.apple.developer.healthkit.background-delivery` and
   `com.apple.developer.healthkit.access = health-records`.
 - `StrengthWatch.entitlements`: `com.apple.developer.healthkit` only.
-- **Discrepancy to resolve before relying on it:** no code path uses background delivery or clinical
-  records today. The phone's declared capability is broader than its behaviour. Either justify the
-  records access or remove it; verify the background-delivery entitlement still validates at
-  submission before the import work depends on it.
-- `NSHealthShareUsageDescription` on the phone names HRV, resting heart rate and bodyweight only. It
-  must be rewritten in the same change that widens the read scope, and the widened prompt must be
-  re-presented to existing installs (a granted scope is not silently extended).
+- **Owner-confirmed 2026-11-17:** the clinical-records access and the background-delivery entitlement
+  are intentional. No code path uses either today — background delivery is the expected transport for
+  the cardio stage's incremental sync (C2), and records access is retained deliberately. Neither is
+  evidence that a capability exists: keep them declared, and verify both still validate at submission
+  when the import work first depends on them.
+- `NSHealthShareUsageDescription` is written for the stage's full read scope — HRV, resting heart rate,
+  bodyweight, workouts and heart rate — rather than for the readiness fields alone (owner decision
+  2026-11-17). The app still requests the readiness types only; workout and heart-rate authorisation
+  arrives with C2, and a scope that was never granted is never silently extended to an existing
+  install. The wider prompt is re-presented at that point.
 
 ## 6. What is not implemented
 

@@ -12,6 +12,12 @@ app presents and records that authority.
 - [WATCH-ACCEPTANCE.md](../WATCH-ACCEPTANCE.md) — the owner-confirmed 6.7 acceptance record
   (W1–W12 and R, 2026-11-14).
 
+## HealthKit
+
+- [HEALTHKIT.md](HEALTHKIT.md) — what the phone and watch read from and write to HealthKit today, the
+  exactly-once workout save rule and the privacy limits (denied read is indistinguishable from no
+  data) that constrain every future import. Read it before changing any HealthKit code.
+
 ## Client plan and contracts
 
 - [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) — phased iPhone implementation plan, architecture

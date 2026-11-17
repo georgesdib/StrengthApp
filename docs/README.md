@@ -34,6 +34,11 @@ app presents and records that authority.
 - [Training Intelligence contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/TRAINING-INTELLIGENCE-CONTRACT.md)
   — response envelope, MCP tool/resource catalogue and the native iOS adapter rules (five-tool cap,
   no Swift calculation).
+- [Cardio stage plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/CARDIO-STAGE.md)
+  — proposed cross-repository plan for HealthKit workout ingestion, canonical backend cardio data and
+  cardiovascular monitoring. Nothing is implemented: C0 is a local data audit and C1–C7 are gated on its
+  decision record. The wider HealthKit read authorisation, historical backfill, reconciliation queue and
+  cardio dashboards it describes are **not** current client behaviour.
 - [Watch 6.3 execution-lifecycle slice plan](WATCH-6.3-PLAN.md) — client-side slices, files and tests for Phase 6.3; the contract above stays authoritative.
 - [Watch 6.6 active-session plan](WATCH-6.6-PLAN.md) — client-side destinations, refresh/reconnect, ownership corrections and acceptance pointers; the contract above stays authoritative.
 

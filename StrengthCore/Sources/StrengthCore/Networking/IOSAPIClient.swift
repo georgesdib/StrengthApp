@@ -667,6 +667,23 @@ public final class IOSAPIClient {
         )
     }
 
+    public func movePlanExercise(
+        workoutId: String,
+        itemIndex: Int,
+        body: PlanMoveRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/plan/items/\(itemIndex)/move",
+            body: body,
+            kind: .planEdit,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     public func addPlanExercise(
         workoutId: String,
         body: PlanAddRequest,

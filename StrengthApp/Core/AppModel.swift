@@ -1979,6 +1979,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func movePlanExercise(
+        workoutId: String,
+        itemIndex: Int,
+        toIndex: Int,
+        expectedExerciseId: String,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard let session else { return false }
+        return await performPlanEdit(idempotencyKey: idempotencyKey) {
+            try await client.movePlanExercise(
+                workoutId: workoutId,
+                itemIndex: itemIndex,
+                body: PlanMoveRequest(
+                    toIndex: toIndex,
+                    expectedExerciseId: expectedExerciseId
+                ),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+        }
+    }
+
     func addPlanExercise(
         workoutId: String,
         exerciseId: String,

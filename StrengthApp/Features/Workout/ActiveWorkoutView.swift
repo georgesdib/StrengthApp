@@ -177,6 +177,32 @@ struct ActiveWorkoutView: View {
                                             }
                                             .disabled(planItems.count == 1 || exercise.isEmpty)
                                             Divider()
+                                            Button("Move up") {
+                                                Task {
+                                                    await moveExercise(
+                                                        index: index,
+                                                        to: index - 1,
+                                                        exerciseId: exercise
+                                                    )
+                                                }
+                                            }
+                                            .disabled(
+                                                model.isSaving || index == 0 || exercise.isEmpty
+                                            )
+                                            Button("Move down") {
+                                                Task {
+                                                    await moveExercise(
+                                                        index: index,
+                                                        to: index + 1,
+                                                        exerciseId: exercise
+                                                    )
+                                                }
+                                            }
+                                            .disabled(
+                                                model.isSaving || index == planItems.count - 1
+                                                    || exercise.isEmpty
+                                            )
+                                            Divider()
                                             Button("Add one set") {
                                                 Task {
                                                     await changeSets(
@@ -719,6 +745,21 @@ struct ActiveWorkoutView: View {
             workoutId: workout.workoutId,
             itemIndex: removal.index,
             expectedExerciseId: removal.exerciseId,
+            idempotencyKey: key
+        )) {
+            planEditError = model.mutationError
+        }
+    }
+
+    private func moveExercise(index: Int, to: Int, exerciseId: String) async {
+        guard let workout, index != to else { return }
+        planEditError = nil
+        let key = UUID().uuidString.lowercased()
+        if !(await model.movePlanExercise(
+            workoutId: workout.workoutId,
+            itemIndex: index,
+            toIndex: to,
+            expectedExerciseId: exerciseId,
             idempotencyKey: key
         )) {
             planEditError = model.mutationError

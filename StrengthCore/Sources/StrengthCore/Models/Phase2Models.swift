@@ -789,6 +789,16 @@ public struct PlanSetsRequest: Encodable, Equatable {
     }
 }
 
+public struct PlanMoveRequest: Encodable, Equatable {
+    public let toIndex: Int
+    public let expectedExerciseId: String
+
+    public init(toIndex: Int, expectedExerciseId: String) {
+        self.toIndex = toIndex
+        self.expectedExerciseId = expectedExerciseId
+    }
+}
+
 public struct PlanAddRequest: Encodable, Equatable {
     public let exerciseId: String
 

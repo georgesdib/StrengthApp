@@ -112,7 +112,9 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         }
         let sampleStart = lastSyncedAt.addingTimeInterval(-lookback)
         let samples = try await fetchHeartRate(since: sampleStart, intervals: intervals)
-        let metrics = try await fetchMetrics(since: max(lastSyncedAt, Self.defaultCutoff))
+        // Metrics are content-deduplicated on the server, so they are sent without a cutoff: that
+        // lets a sync fill any gap in the exported history instead of only appending forward.
+        let metrics = try await fetchMetrics()
         return HealthKitActivityBatch(workouts: workouts, samples: samples, metrics: metrics)
     }
 
@@ -236,12 +238,11 @@ final class HealthKitActivityService: HealthKitActivityProviding {
 
     /// VO2max arrives as a standalone quantity sample, so it is filtered at the cutoff: anything
     /// earlier already exists in `measurement` from the export, under a different key.
-    private func fetchMetrics(since: Date) async throws -> [HealthKitActivityMetric] {
+    private func fetchMetrics() async throws -> [HealthKitActivityMetric] {
         guard let type = HKQuantityType.quantityType(forIdentifier: .vo2Max) else { return [] }
-        let predicate = HKQuery.predicateForSamples(withStart: since, end: nil, options: [])
         let samples: [HKQuantitySample] = try await withCheckedThrowingContinuation { continuation in
             let query = HKSampleQuery(
-                sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit,
+                sampleType: type, predicate: nil, limit: HKObjectQueryNoLimit,
                 sortDescriptors: nil
             ) { _, results, error in
                 if let error {

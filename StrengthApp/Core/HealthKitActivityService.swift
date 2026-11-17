@@ -72,7 +72,11 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         guard let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate) else {
             throw HealthKitActivityError.unavailable
         }
-        let read: Set<HKObjectType> = [HKObjectType.workoutType(), heartRate]
+        var read: Set<HKObjectType> = [HKObjectType.workoutType(), heartRate]
+        if let vo2max = HKObjectType.quantityType(forIdentifier: .vo2Max) { read.insert(vo2max) }
+        if let effort = HKObjectType.quantityType(forIdentifier: .workoutEffortScore) {
+            read.insert(effort)
+        }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             store.requestAuthorization(toShare: [], read: read) { _, error in
                 if let error {
@@ -96,7 +100,8 @@ final class HealthKitActivityService: HealthKitActivityProviding {
             lastWorkoutAt.addingTimeInterval(-24 * 60 * 60),
             Self.defaultCutoff
         )
-        let workouts = try await fetchWorkouts(since: workoutStart)
+        let efforts = try await fetchEffortScores(since: workoutStart)
+        let workouts = try await fetchWorkouts(since: workoutStart, efforts: efforts)
         let formatter = ISO8601DateFormatter()
         let intervals = workouts.compactMap {
             workout -> (key: String, start: Date, workoutEnd: Date, end: Date)? in
@@ -107,12 +112,43 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         }
         let sampleStart = lastSyncedAt.addingTimeInterval(-lookback)
         let samples = try await fetchHeartRate(since: sampleStart, intervals: intervals)
-        return HealthKitActivityBatch(workouts: workouts, samples: samples)
+        let metrics = try await fetchMetrics(since: max(lastSyncedAt, Self.defaultCutoff))
+        return HealthKitActivityBatch(workouts: workouts, samples: samples, metrics: metrics)
     }
 
     // MARK: - Queries
 
-    private func fetchWorkouts(since: Date) async throws -> [HealthKitActivityWorkout] {
+    /// Apple relates an effort sample to its workout rather than nesting it, so the value is matched
+    /// by falling inside the workout's interval. Only workouts this sync is uploading get one.
+    private func fetchEffortScores(since: Date) async throws -> [(start: Date, end: Date, value: Double)] {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .workoutEffortScore) else {
+            return []
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: since, end: nil, options: [])
+        let samples: [HKQuantitySample] = try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, results, error in
+                if let error {
+                    continuation.resume(throwing: HealthKitActivityError.query(error.localizedDescription))
+                } else {
+                    continuation.resume(returning: results as? [HKQuantitySample] ?? [])
+                }
+            }
+            store.execute(query)
+        }
+        return samples.compactMap { sample in
+            let value = sample.quantity.doubleValue(for: .appleEffortScore())
+            guard value.isFinite, (1...10).contains(value) else { return nil }
+            return (sample.startDate, sample.endDate, value)
+        }
+    }
+
+    private func fetchWorkouts(
+        since: Date,
+        efforts: [(start: Date, end: Date, value: Double)]
+    ) async throws -> [HealthKitActivityWorkout] {
         let predicate = HKQuery.predicateForSamples(withStart: since, end: nil, options: [])
         let samples: [HKWorkout] = try await withCheckedThrowingContinuation { continuation in
             let query = HKSampleQuery(
@@ -148,6 +184,10 @@ final class HealthKitActivityService: HealthKitActivityProviding {
                 activeEnergyKj: energy?.sumQuantity().map { $0.doubleValue(for: .kilocalorie()) * 4.184 },
                 distanceM: workout.totalDistance.map { $0.doubleValue(for: .meter()) },
                 avgMets: mets,
+                srpe: efforts.first {
+                    $0.start >= workout.startDate.addingTimeInterval(-60)
+                        && $0.end <= workout.endDate.addingTimeInterval(60)
+                }?.value,
                 timezone: nil
             )
         }
@@ -194,6 +234,39 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         }
     }
 
+    /// VO2max arrives as a standalone quantity sample, so it is filtered at the cutoff: anything
+    /// earlier already exists in `measurement` from the export, under a different key.
+    private func fetchMetrics(since: Date) async throws -> [HealthKitActivityMetric] {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .vo2Max) else { return [] }
+        let predicate = HKQuery.predicateForSamples(withStart: since, end: nil, options: [])
+        let samples: [HKQuantitySample] = try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, results, error in
+                if let error {
+                    continuation.resume(throwing: HealthKitActivityError.query(error.localizedDescription))
+                } else {
+                    continuation.resume(returning: results as? [HKQuantitySample] ?? [])
+                }
+            }
+            store.execute(query)
+        }
+        return samples.compactMap { sample in
+            let value = sample.quantity.doubleValue(for: Self.vo2maxUnit)
+            guard value.isFinite, (5...90).contains(value) else { return nil }
+            return HealthKitActivityMetric(
+                key: sample.uuid.uuidString.replacingOccurrences(of: "-", with: "").lowercased(),
+                kind: "vo2max",
+                measuredAt: HealthKitActivityFormat.iso(sample.startDate),
+                value: value,
+                method: sample.sourceRevision.source.name
+            )
+        }
+    }
+
+    private static let vo2maxUnit = HKUnit.literUnit(with: .milli)
+        .unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: HKUnit.minute()))
     private static let bpm = HKUnit.count().unitDivided(by: HKUnit.minute())
     private static let metsUnit = HKUnit.kilocalorie().unitDivided(
         by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: HKUnit.hour())

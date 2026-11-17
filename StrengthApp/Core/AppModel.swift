@@ -390,9 +390,9 @@ final class AppModel: ObservableObject {
                     idempotencyKey: UUID().uuidString
                 )
             }
-            if !batch.samples.isEmpty {
+            if !batch.samples.isEmpty || !batch.metrics.isEmpty {
                 _ = try await client.uploadActivity(
-                    HealthKitActivitySamplesBody(samples: batch.samples),
+                    HealthKitActivitySamplesBody(samples: batch.samples, metrics: batch.metrics),
                     session: session,
                     idempotencyKey: UUID().uuidString
                 )

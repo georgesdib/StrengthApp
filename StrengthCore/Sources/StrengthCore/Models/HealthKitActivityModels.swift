@@ -16,13 +16,14 @@ public struct HealthKitActivityWorkout: Encodable, Equatable {
     public let activeEnergyKj: Double?
     public let distanceM: Double?
     public let avgMets: Double?
+    public let srpe: Double?
     public let timezone: String?
 
     public init(
         key: String, activityType: String, startedAt: String, endedAt: String, durationS: Int,
         sourceName: String, avgHeartRate: Int? = nil, maxHeartRate: Int? = nil,
         activeEnergyKj: Double? = nil, distanceM: Double? = nil, avgMets: Double? = nil,
-        timezone: String? = nil
+        srpe: Double? = nil, timezone: String? = nil
     ) {
         self.key = key
         self.activityType = activityType
@@ -35,6 +36,7 @@ public struct HealthKitActivityWorkout: Encodable, Equatable {
         self.activeEnergyKj = activeEnergyKj
         self.distanceM = distanceM
         self.avgMets = avgMets
+        self.srpe = srpe
         self.timezone = timezone
     }
 }
@@ -69,9 +71,29 @@ public struct HealthKitActivityWorkoutsBody: Encodable {
     public init(workouts: [HealthKitActivityWorkout]) { self.workouts = workouts }
 }
 
+public struct HealthKitActivityMetric: Encodable, Equatable {
+    public let key: String            // HealthKit UUID as hex
+    public let kind: String           // vo2max
+    public let measuredAt: String
+    public let value: Double
+    public let method: String
+
+    public init(key: String, kind: String, measuredAt: String, value: Double, method: String) {
+        self.key = key
+        self.kind = kind
+        self.measuredAt = measuredAt
+        self.value = value
+        self.method = method
+    }
+}
+
 public struct HealthKitActivitySamplesBody: Encodable {
     public let samples: [HealthKitActivitySample]
-    public init(samples: [HealthKitActivitySample]) { self.samples = samples }
+    public let metrics: [HealthKitActivityMetric]
+    public init(samples: [HealthKitActivitySample], metrics: [HealthKitActivityMetric] = []) {
+        self.samples = samples
+        self.metrics = metrics
+    }
 }
 
 public struct HealthKitActivityUploadResult: Decodable, Equatable {
@@ -82,11 +104,17 @@ public struct HealthKitActivityUploadResult: Decodable, Equatable {
 public struct HealthKitActivityBatch {
     public let workouts: [HealthKitActivityWorkout]
     public let samples: [HealthKitActivitySample]
-    public init(workouts: [HealthKitActivityWorkout], samples: [HealthKitActivitySample]) {
+    public let metrics: [HealthKitActivityMetric]
+    public init(
+        workouts: [HealthKitActivityWorkout],
+        samples: [HealthKitActivitySample],
+        metrics: [HealthKitActivityMetric] = []
+    ) {
         self.workouts = workouts
         self.samples = samples
+        self.metrics = metrics
     }
-    public var isEmpty: Bool { workouts.isEmpty && samples.isEmpty }
+    public var isEmpty: Bool { workouts.isEmpty && samples.isEmpty && metrics.isEmpty }
 }
 
 /// ISO-8601 with an explicit UTC offset, the only form the server accepts.

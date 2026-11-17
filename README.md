@@ -261,7 +261,8 @@ DRY_RUN=1 ./scripts/install-iphone.sh  # print the resolved device, build nothin
 
 The script picks the paired physical iPhone from `xcrun devicectl list devices` (simulators are
 ignored); set `IPHONE_UDID` to override. It is the phone counterpart of
-`scripts/install-watch.sh`.
+`scripts/install-watch.sh`, which builds the phone app and installs its embedded watch app on the
+paired watch.
 
 Two failure modes that are environmental rather than code:
 

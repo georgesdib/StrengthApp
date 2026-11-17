@@ -132,6 +132,10 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         return samples.map { workout in
             let heartRate = workout.statistics(for: HKQuantityType(.heartRate))
             let energy = workout.statistics(for: HKQuantityType(.activeEnergyBurned))
+            // Apple's own MET value travels in metadata, not in statistics: the export had it for
+            // 80% of strength workouts, and health-rate classification is only the fallback.
+            let mets = (workout.metadata?[HKMetadataKeyAverageMETs] as? HKQuantity)?
+                .doubleValue(for: Self.metsUnit)
             return HealthKitActivityWorkout(
                 key: workout.uuid.uuidString.replacingOccurrences(of: "-", with: "").lowercased(),
                 activityType: Self.activityName(workout.workoutActivityType),
@@ -143,7 +147,7 @@ final class HealthKitActivityService: HealthKitActivityProviding {
                 maxHeartRate: heartRate?.maximumQuantity().map { Int($0.doubleValue(for: Self.bpm).rounded()) },
                 activeEnergyKj: energy?.sumQuantity().map { $0.doubleValue(for: .kilocalorie()) * 4.184 },
                 distanceM: workout.totalDistance.map { $0.doubleValue(for: .meter()) },
-                avgMets: nil,
+                avgMets: mets,
                 timezone: nil
             )
         }
@@ -191,6 +195,9 @@ final class HealthKitActivityService: HealthKitActivityProviding {
     }
 
     private static let bpm = HKUnit.count().unitDivided(by: HKUnit.minute())
+    private static let metsUnit = HKUnit.kilocalorie().unitDivided(
+        by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: HKUnit.hour())
+    )
 
     /// The server matches strength workouts by HealthKit's own activity name, so the raw enum has to
     /// be translated; an unknown case is `Other` rather than a guess.

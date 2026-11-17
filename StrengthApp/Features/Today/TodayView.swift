@@ -29,6 +29,7 @@ struct TodayView: View {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.red)
+                            .textSelection(.enabled)
                         Button("Try again") {
                             Task { await model.refresh() }
                         }
@@ -657,11 +658,13 @@ struct TodayView: View {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
             if let refreshError = model.healthKitRefreshError {
                 Text("Readiness was saved, but the authoritative refresh failed: \(refreshError) Retry refresh; do not import again.")
                     .font(.footnote)
                     .foregroundStyle(.orange)
+                    .textSelection(.enabled)
             }
             if let payload = model.today?.readiness {
                 healthKitValueRow(

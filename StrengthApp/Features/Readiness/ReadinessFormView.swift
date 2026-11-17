@@ -81,6 +81,7 @@ struct ReadinessFormView: View {
                                 Text(error)
                                     .font(.footnote)
                                     .foregroundStyle(.orange)
+                                    .textSelection(.enabled)
                             }
                         }
                     } header: {

@@ -195,6 +195,7 @@ struct SettingsView: View {
                         Text(message)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                     Text("Reads only HRV, resting heart rate and bodyweight. No sleep, workouts or write access.")
                         .font(.footnote)

@@ -38,7 +38,11 @@ struct ExplainView: View {
                 }
 
                 if let errorMessage {
-                    Section { Text(errorMessage).foregroundStyle(.red) }
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
                 }
 
                 if let response {

@@ -85,12 +85,23 @@ struct ExplainView: View {
             .navigationTitle("Explain")
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Clear") { clear() }
+                        .disabled(question.isEmpty && response == nil && errorMessage == nil)
+                }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("Done") { questionFocused = false }
                 }
             }
         }
+    }
+
+    private func clear() {
+        question = ""
+        response = nil
+        errorMessage = nil
+        questionFocused = false
     }
 
     private func ask() async {

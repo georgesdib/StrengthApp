@@ -162,9 +162,9 @@ struct PrescriptionPreviewView: View {
             : String(format: "%.1fkg", value)
     }
 
-    nonisolated private static func readinessLabel(_ readiness: ReadinessScore) -> String {
+    nonisolated static func readinessLabel(_ readiness: ReadinessScore) -> String {
         if let score = readiness.score {
-            return String(format: "%.1f", score) + " / 100 · " + readiness.status.capitalized
+            return "\(Int((score * 100).rounded()))% · " + readiness.status.capitalized
         }
         return readiness.status.capitalized
     }

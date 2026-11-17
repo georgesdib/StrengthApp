@@ -10,6 +10,7 @@ struct ExerciseWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingLog = false
     @State private var logSetIndex: Int?
+    @State private var logWarmupLabel: String?
     @State private var addOperation = OperationKey<AddSetRequest>()
     @State private var addError: String?
     @State private var pendingRemoval: WorkoutSet?
@@ -95,15 +96,34 @@ struct ExerciseWorkoutView: View {
             if let warmups = item?.warmup, !warmups.isEmpty {
                 Section("Warm-ups") {
                     ForEach(Array(warmups.enumerated()), id: \.offset) { index, warmup in
-                        HStack {
+                        HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(warmupTitle(index: index, warmup: warmup))
-                                    .font(.subheadline)
-                                Text("\(warmup.reps) reps @ \(warmup.loadLabel)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(.headline)
+                                if let set = warmupSet(at: index) {
+                                    Text(set.summary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("\(warmup.reps) reps @ \(warmup.loadLabel) · RIR 6")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             Spacer()
+                            if warmupSet(at: index) != nil {
+                                Label("Done", systemImage: "checkmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.green)
+                            } else {
+                                Button("Start set") {
+                                    beginWarmup(index: index, warmup: warmup)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .accessibilityIdentifier("log-warmup-\(index)")
+                                .disabled(model.isMirroringWatchSession)
+                            }
                         }
                         .accessibilityIdentifier("warmup-\(index)")
                     }
@@ -265,7 +285,7 @@ struct ExerciseWorkoutView: View {
             LogSetSheet(
                 draft: draft,
                 exerciseLabel: Self.label(exerciseId),
-                target: logSetIndex.map { "Planned set \($0)" },
+                target: logWarmupLabel ?? logSetIndex.map { "Planned set \($0)" },
                 velocityTarget: item?.velocityTargetLabel,
                 isTimeBased: item?.isTimeBased == true,
                 velocityApplicable: item?.loadBasis != "bodyweight"
@@ -294,8 +314,48 @@ struct ExerciseWorkoutView: View {
         }
     }
 
+    private func warmupSet(at index: Int) -> WorkoutSet? {
+        performedSet(at: warmupSetIndex(index))
+    }
+
+    private func warmupSetIndex(_ index: Int) -> Int {
+        1000 + index
+    }
+
+    private func beginWarmup(index: Int, warmup: WarmupSet) {
+        addError = nil
+        if model.restTimer.startedAt != nil {
+            model.interruptRest()
+        }
+        let localSetID = UUID().uuidString.lowercased()
+        activeLocalSetID = localSetID
+        let setIndex = warmupSetIndex(index)
+        activeSetIndex = setIndex
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .setStarted,
+            planItemIndex: planIdentity,
+            localSetId: localSetID,
+            payload: [
+                "set_index": .number(Double(setIndex)),
+                "exercise_id": .string(exerciseId),
+            ]
+        ))
+        logSetIndex = nil
+        logWarmupLabel = "Warm-up \(index + 1)"
+        drafts.drafts[draftKey] = WorkoutDraftStore.Draft(
+            loadText: String(format: "%.1f", warmup.loadKg),
+            repsText: String(warmup.reps),
+            rirText: "6",
+            velocityText: "",
+            repVelocityText: "",
+            showingRepVelocity: false
+        )
+        showingLog = true
+    }
+
     private func beginLog(planSetIndex: Int?) {
         addError = nil
+        logWarmupLabel = nil
         if model.restTimer.startedAt != nil {
             model.interruptRest()
         }
@@ -404,6 +464,7 @@ struct ExerciseWorkoutView: View {
             ))
             activeLocalSetID = nil
             activeSetIndex = nil
+            logWarmupLabel = nil
             if rir != 6 {
                 let prescribed = item?.restS ?? 120
                 model.startRest(

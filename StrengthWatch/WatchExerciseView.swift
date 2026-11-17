@@ -19,13 +19,24 @@ struct WatchExerciseView: View {
     @State private var showingForm = false
     @State private var velocityText = ""
     @State private var repVelocityText = ""
+    @State private var activeWarmup: ActiveWarmup?
+    @State private var loggedWarmups: Set<Int> = []
+
+    private struct ActiveWarmup: Equatable {
+        let index: Int
+        let loadKg: Double
+        let reps: Int
+        let startedAt: Date
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 if let item = execution.selectedItem {
                     header(item)
-                    if execution.activeSet != nil {
+                    if let activeWarmup {
+                        warmupRunning(activeWarmup)
+                    } else if execution.activeSet != nil {
                         runningSet(item)
                     } else {
                         idle(item)
@@ -68,7 +79,11 @@ struct WatchExerciseView: View {
             }
         }
         .onAppear { prepare() }
-        .onChange(of: execution.selectedItem?.orderIndex) { _, _ in prepare() }
+        .onChange(of: execution.selectedItem?.orderIndex) { _, _ in
+            activeWarmup = nil
+            loggedWarmups = []
+            prepare()
+        }
         .onChange(of: loadKg) { _, value in execution.draftChanged(loadKg: value, reps: reps) }
         .onChange(of: reps) { _, value in execution.draftChanged(loadKg: loadKg, reps: value) }
         .sheet(isPresented: $showingRIR) { completionSheet }
@@ -176,6 +191,38 @@ struct WatchExerciseView: View {
         }
     }
 
+    private func warmupRunning(_ warmup: ActiveWarmup) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text("Set time \(formattedDuration(context.date.timeIntervalSince(warmup.startedAt)))")
+                    .font(.subheadline)
+                    .monospacedDigit()
+            }
+            Text("\(formatted(warmup.loadKg)) kg × \(warmup.reps) · RIR 6")
+                .font(.body)
+                .monospacedDigit()
+            Button {
+                activeWarmup = nil
+                loggedWarmups.insert(warmup.index)
+                Task {
+                    await execution.logWarmup(
+                        loadKg: warmup.loadKg,
+                        reps: warmup.reps,
+                        index: warmup.index
+                    )
+                }
+            } label: {
+                Text("End set").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(logging || execution.isWorking)
+            .accessibilityIdentifier("watch-end-warmup")
+            Button("Cancel") { activeWarmup = nil }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func runningSet(_ item: PrescriptionItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -210,18 +257,24 @@ struct WatchExerciseView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Log") {
-                            Task {
-                                await execution.logWarmup(
+                        if loggedWarmups.contains(index) {
+                            Label("Done", systemImage: "checkmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                        } else {
+                            Button("Start set") {
+                                activeWarmup = ActiveWarmup(
+                                    index: index,
                                     loadKg: warmup.loadKg,
                                     reps: warmup.reps,
-                                    index: index
+                                    startedAt: Date()
                                 )
                             }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(execution.isWorking)
+                            .accessibilityIdentifier("watch-log-warmup-\(index)")
                         }
-                        .font(.caption2)
-                        .disabled(execution.isWorking)
-                        .accessibilityIdentifier("watch-log-warmup-\(index)")
                     }
                 }
             }

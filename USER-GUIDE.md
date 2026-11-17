@@ -280,8 +280,8 @@ version. When the watch has no active session, it updates its Home address witho
 token.
 
 The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR.
-Warm-up rows have their own **Log** action; they are recorded with RIR 6 and stay out of
-working-set volume. When the plan supplies a velocity target it appears beside RIR and in the
+Warm-up rows use the same **Start set** / **End set** flow as working sets; they are recorded
+with RIR 6 and stay out of working-set volume. When the plan supplies a velocity target it appears beside RIR and in the
 RIR sheet. Mean velocity is available for external-load work even when the plan has no target; the
 watch records the measurement and the server owns calibration. Time-based exercises
 show seconds (“30s”), not repetitions. The rest starts when you tap **End set**, so the RIR and
@@ -362,8 +362,8 @@ missing rather than being estimated.
 - No workout heart-rate observations.
 - The session report is only available after the server has acknowledged completion. A queued
   offline finish shows no report until it syncs; open the session from History after that.
-- Warm-up rows are a guide; only working sets count toward the plan's set completion. Logging a
-  warm-up uses **Start another set** with RIR 6.
+- Warm-up rows are a guide; only working sets count toward the plan's set completion. Use the
+  warm-up row's **Start set** / **End set** action; it records RIR 6.
 - The notification/vibration path and all timing behaviour require physical-iPhone acceptance;
   simulator builds are not proof of those behaviours.
 

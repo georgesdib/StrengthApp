@@ -56,6 +56,24 @@ final class RestTimerModel: ObservableObject {
     var onExtend: ((Int) -> Void)?
 
     private var ticker: Task<Void, Never>?
+    private var workoutId: String?
+    private let defaults: UserDefaults
+    private static let stateKey = "restTimer.state"
+
+    /// The interval is persisted so a relaunch, or a termination the countdown outlived, still
+    /// records the rest it actually took rather than losing it.
+    private struct Persisted: Codable {
+        let workoutId: String?
+        let startedAt: Date
+        let prescribedSeconds: Int
+        let addedSeconds: Int
+        let planItemIndex: Int?
+        let exerciseId: String?
+    }
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     var isRunning: Bool { endDate != nil && !isComplete }
 
@@ -63,7 +81,8 @@ final class RestTimerModel: ObservableObject {
         seconds: Int,
         planItemIndex: Int? = nil,
         exerciseId: String? = nil,
-        startedAt anchor: Date? = nil
+        startedAt anchor: Date? = nil,
+        workoutId: String? = nil
     ) {
         guard seconds > 0 else { return }
         ticker?.cancel()
@@ -79,7 +98,55 @@ final class RestTimerModel: ObservableObject {
         isComplete = remainingSeconds == 0
         self.planItemIndex = planItemIndex
         self.exerciseId = exerciseId
+        self.workoutId = workoutId
+        persist()
         RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
+        startTicker()
+    }
+
+    /// Restores the interval after a relaunch. A live interval resumes counting; one that ended
+    /// while the app was gone is returned so the caller can record it at its real end time.
+    func restore(workoutId: String?, now: Date = Date()) -> RestTimerResult? {
+        guard let data = defaults.data(forKey: Self.stateKey),
+              let state = try? JSONDecoder().decode(Persisted.self, from: data) else {
+            return nil
+        }
+        guard let workoutId, state.workoutId == workoutId else {
+            defaults.removeObject(forKey: Self.stateKey)
+            return nil
+        }
+        let end = state.startedAt.addingTimeInterval(
+            TimeInterval(state.prescribedSeconds + state.addedSeconds)
+        )
+        guard end > now else {
+            defaults.removeObject(forKey: Self.stateKey)
+            return RestTimerResult(
+                startedAt: state.startedAt,
+                endedAt: end,
+                prescribedSeconds: state.prescribedSeconds,
+                actualSeconds: max(0, state.prescribedSeconds + state.addedSeconds),
+                addedSeconds: state.addedSeconds,
+                outcome: "completed",
+                planItemIndex: state.planItemIndex,
+                exerciseId: state.exerciseId
+            )
+        }
+        startedAt = state.startedAt
+        prescribedSeconds = state.prescribedSeconds
+        addedSeconds = state.addedSeconds
+        planItemIndex = state.planItemIndex
+        exerciseId = state.exerciseId
+        self.workoutId = state.workoutId
+        endDate = end
+        isComplete = false
+        remainingSeconds = max(0, Int(end.timeIntervalSince(now).rounded(.up)))
+        RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
+        startTicker()
+        return nil
+    }
+
+    private func startTicker() {
+        ticker?.cancel()
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -89,24 +156,46 @@ final class RestTimerModel: ObservableObject {
         }
     }
 
+    private func persist() {
+        guard let startedAt, let prescribedSeconds else { return }
+        let state = Persisted(
+            workoutId: workoutId,
+            startedAt: startedAt,
+            prescribedSeconds: prescribedSeconds,
+            addedSeconds: addedSeconds,
+            planItemIndex: planItemIndex,
+            exerciseId: exerciseId
+        )
+        if let data = try? JSONEncoder().encode(state) {
+            defaults.set(data, forKey: Self.stateKey)
+        }
+    }
+
     func extend(by seconds: Int) {
         guard let endDate, seconds > 0 else { return }
         self.endDate = endDate.addingTimeInterval(TimeInterval(seconds))
         remainingSeconds = max(0, remainingSeconds + seconds)
         addedSeconds += seconds
         isComplete = false
+        persist()
         RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
         onExtend?(seconds)
     }
 
     /// Ends the current rest and returns the observed interval. nil means no rest was running.
-    func finish(outcome: String = "completed", reason: String? = nil) -> RestTimerResult? {
+    /// `endedAt` defaults to now; the ticker passes the scheduled end so a rest that elapsed while
+    /// the app was suspended is recorded with the duration it actually took.
+    func finish(
+        outcome: String = "completed",
+        reason: String? = nil,
+        endedAt: Date = Date()
+    ) -> RestTimerResult? {
         guard let startedAt, let prescribedSeconds else { return nil }
         let result = RestTimerResult(
             startedAt: startedAt,
-            endedAt: Date(),
+            endedAt: endedAt,
             prescribedSeconds: prescribedSeconds,
-            actualSeconds: max(0, Int(Date().timeIntervalSince(startedAt))),
+            actualSeconds: max(0, Int(endedAt.timeIntervalSince(startedAt))),
             addedSeconds: addedSeconds,
             outcome: outcome,
             planItemIndex: planItemIndex,
@@ -120,6 +209,7 @@ final class RestTimerModel: ObservableObject {
 
     func dismiss() {
         RestNotificationManager.shared.cancel()
+        defaults.removeObject(forKey: Self.stateKey)
         ticker?.cancel()
         ticker = nil
         endDate = nil
@@ -148,7 +238,7 @@ final class RestTimerModel: ObservableObject {
             ticker = nil
             RestNotificationManager.shared.completeInApp()
             // Finish centrally so a rest that ends on Today is recorded and dismissed too.
-            _ = finish(outcome: "completed")
+            _ = finish(outcome: "completed", endedAt: endDate)
         } else {
             remainingSeconds = remaining
         }

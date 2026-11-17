@@ -64,7 +64,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var pairedServerURL: String?
     @Published private(set) var errorMessage: String?
     @Published private(set) var pairingError: String?
-    @Published private(set) var activeWorkout: WorkoutDetail?
+    @Published private(set) var activeWorkout: WorkoutDetail? {
+        didSet {
+            // A different workout starts with no open exercises; the same workout keeps them.
+            guard activeWorkout?.workoutId != oldValue?.workoutId else { return }
+            activeExercises = []
+            persistActiveExercises()
+        }
+    }
+    /// Exercises the lifter started and has not ended. Supersets keep more than one open, and a
+    /// set — not a screen — is what starts one.
+    @Published private(set) var activeExercises: [ActiveExercise] = []
     @Published var narrativeEnabled: Bool = UserDefaults.standard.bool(
         forKey: "intelligence.narrative.enabled"
     ) {
@@ -307,6 +317,7 @@ final class AppModel: ObservableObject {
                     self?.handlePendingNudgeTap()
                 }
             }
+        restoreExerciseSession()
     }
 
     var hasMoreHistory: Bool {
@@ -1265,6 +1276,109 @@ final class AppModel: ObservableObject {
         recordExecutionEvents([event])
     }
 
+    // MARK: Active exercises
+
+    private static let activeExerciseKey = "workout.activeExercises"
+
+    /// The first set starts the exercise; a warm-up counts, because RIR 6 classifies the set, it
+    /// does not decide whether an exercise is under way.
+    func startExercise(planItemIndex: Int?, exerciseId: String, at date: Date = Date()) {
+        guard activeWorkout != nil, !isMirroringWatchSession else { return }
+        let key = ActiveExercise.key(planItemIndex: planItemIndex, exerciseId: exerciseId)
+        guard !activeExercises.contains(where: { $0.key == key }) else { return }
+        activeExercises.append(
+            ActiveExercise(
+                key: key,
+                planItemIndex: planItemIndex,
+                exerciseId: exerciseId,
+                startedAt: date
+            )
+        )
+        persistActiveExercises()
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .exerciseStarted,
+            occurredAt: ServerClock.encodedISO(date),
+            planItemIndex: planItemIndex,
+            payload: ["exercise_id": .string(exerciseId)]
+        ))
+    }
+
+    @discardableResult
+    func endExercise(planItemIndex: Int?, exerciseId: String, at date: Date = Date()) -> Bool {
+        let key = ActiveExercise.key(planItemIndex: planItemIndex, exerciseId: exerciseId)
+        guard let position = activeExercises.firstIndex(where: { $0.key == key }) else {
+            return false
+        }
+        let exercise = activeExercises.remove(at: position)
+        persistActiveExercises()
+        closeRest(for: exercise)
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .exerciseCompleted,
+            occurredAt: ServerClock.encodedISO(date),
+            planItemIndex: exercise.planItemIndex,
+            payload: ["exercise_id": .string(exercise.exerciseId)]
+        ))
+        return true
+    }
+
+    func isExerciseActive(planItemIndex: Int?, exerciseId: String) -> Bool {
+        let key = ActiveExercise.key(planItemIndex: planItemIndex, exerciseId: exerciseId)
+        return activeExercises.contains { $0.key == key }
+    }
+
+    /// Finishing the workout closes whatever is still open, so a session never ends with an
+    /// exercise started and never completed.
+    func endAllExercises(at date: Date = Date()) {
+        guard !activeExercises.isEmpty else { return }
+        for exercise in activeExercises {
+            recordExecutionEvent(ExecutionEvent(
+                eventType: .exerciseCompleted,
+                occurredAt: ServerClock.encodedISO(date),
+                planItemIndex: exercise.planItemIndex,
+                payload: ["exercise_id": .string(exercise.exerciseId)]
+            ))
+        }
+        activeExercises = []
+        persistActiveExercises()
+    }
+
+    private func closeRest(for exercise: ActiveExercise) {
+        guard restTimer.startedAt != nil else { return }
+        let sameExercise = restTimer.exerciseId.map { $0 == exercise.exerciseId } ?? false
+        let sameItem = restTimer.planItemIndex.map { $0 == exercise.planItemIndex } ?? false
+        guard sameExercise || sameItem else { return }
+        _ = restTimer.finish(outcome: "completed")
+    }
+
+    private func persistActiveExercises() {
+        guard let workoutId = activeWorkout?.workoutId, !activeExercises.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: Self.activeExerciseKey)
+            return
+        }
+        let session = ActiveExerciseSession(workoutId: workoutId, exercises: activeExercises)
+        if let data = try? JSONEncoder().encode(session) {
+            UserDefaults.standard.set(data, forKey: Self.activeExerciseKey)
+        }
+    }
+
+    /// A relaunch keeps the open exercises and a rest that outlived the app, so neither the
+    /// completion event nor the rest interval is lost.
+    private func restoreExerciseSession() {
+        guard let data = UserDefaults.standard.data(forKey: Self.activeExerciseKey),
+              let saved = try? JSONDecoder().decode(ActiveExerciseSession.self, from: data),
+              let workout = activeWorkout,
+              saved.workoutId == workout.workoutId else {
+            UserDefaults.standard.removeObject(forKey: Self.activeExerciseKey)
+            activeExercises = []
+            _ = restTimer.restore(workoutId: nil)
+            return
+        }
+        activeExercises = saved.exercises
+        if let result = restTimer.restore(workoutId: workout.workoutId) {
+            recordRestResult(result)
+        }
+    }
+
     // MARK: Rest timer
 
     /// Starts the single app-level rest interval and records its telemetry in one place, so a
@@ -1280,7 +1394,8 @@ final class AppModel: ObservableObject {
             seconds: seconds,
             planItemIndex: planItemIndex,
             exerciseId: exerciseId,
-            startedAt: startedAt
+            startedAt: startedAt,
+            workoutId: activeWorkout?.workoutId
         )
         recordExecutionEvent(ExecutionEvent(
             eventType: .restStarted,
@@ -2117,6 +2232,8 @@ final class AppModel: ObservableObject {
             mutationError = "This workout is already queued for finish."
             return false
         }
+        // An open exercise would otherwise be recorded as started and never completed.
+        endAllExercises()
         // Execution events queued before finish must reach the server first; the API accepts
         // late events but the local replay path needs an active workout to flush them.
         if hasPendingOfflineCapture {
@@ -2192,6 +2309,8 @@ final class AppModel: ObservableObject {
             recoveryIssue = nil
             workoutRefreshGrace = false
             restTimer.dismiss()
+            activeExercises = []
+            persistActiveExercises()
             await refresh()
             return true
         } catch {
@@ -2411,10 +2530,12 @@ final class AppModel: ObservableObject {
     func clearWorkoutRecovery() {
         // Clear stale local state; the server remains the authority on the next refresh.
         activeWorkout = nil
+        activeExercises = []
         recoveryIssue = nil
         workoutRefreshGrace = false
         mutationError = nil
         persistActiveWorkout()
+        persistActiveExercises()
     }
 
     func abandonRecoveredWorkout() async {

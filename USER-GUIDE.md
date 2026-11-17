@@ -84,7 +84,9 @@ raw 100.x address.
 3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
    load, RIR, any velocity target, rest and any warnings. **Start workout** is on that screen, so the plan is always
    visible before it is consumed. The server issues the plan; the phone never invents plan content.
-4. Open an exercise and tap **Start set** before the set.
+4. Open an exercise and tap **Start set** before the set. The first set starts the exercise;
+   the exercise stays open until you end it, and starting a set in another exercise leaves the
+   first one open, which is how a superset is recorded.
 5. Enter load, reps and RIR. When the plan gives the lift a velocity target, it is shown beside
    RIR on the phone and the watch; optional mean and per-rep velocity are offered, and bodyweight
    work is not asked for them. The rest
@@ -94,7 +96,9 @@ raw 100.x address.
    at 20 kg, or the first warm-up when that is lighter). Warm-up rows are optional: skipping them
    and logging the working sets is valid. To record one, use **Start another set** with RIR 6.
    A working set starts the rest timer automatically; logged warm-ups (RIR 6) do not.
-7. Repeat for the remaining sets and exercises.
+7. Repeat for the remaining sets and exercises. When an exercise is done, tap **End exercise**:
+   it closes any running rest, records the exercise's completion and offers the optional 1–5 form
+   rating. Leaving the screen does not end the exercise.
 8. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
 9. Review the **Session report** that opens after completion: prescription adherence, velocity,
    session feedback, quality flags and evidence. It is read-only. **Done** returns to Today.
@@ -119,6 +123,8 @@ The timer uses the prescription's rest seconds when available.
 - **+15 s** extends the timer.
 - Starting the next set also ends the current rest.
 - When rest finishes, the timer dismisses itself and the app records the actual interval.
+- The interval survives a relaunch: a rest that ended while the app was closed is recorded at the
+  time it actually ended, not when the app next opened.
 
 The timer is descriptive. It does not change the next prescription or declare the session
 compliant.
@@ -280,8 +286,9 @@ version. When the watch has no active session, it updates its Home address witho
 token.
 
 The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR.
-Warm-up rows use the same **Start set** / **End set** flow as working sets; they are recorded
-with RIR 6 and stay out of working-set volume. When the plan supplies a velocity target it appears beside RIR and in the
+A warm-up is an ordinary set: tap **Use** on a warm-up row to fill its load and reps, then log it
+with RIR 6. RIR 6 is what records it as warm-up work, so it stays out of working-set volume and
+does not open a rest. When the plan supplies a velocity target it appears beside RIR and in the
 RIR sheet. Mean velocity is available for external-load work even when the plan has no target; the
 watch records the measurement and the server owns calibration. Time-based exercises
 show seconds (“30s”), not repetitions. The rest starts when you tap **End set**, so the RIR and
@@ -357,13 +364,13 @@ missing rather than being estimated.
 - Notification taps open the app but do not deep-link directly to the active workout.
 - Offline set events use a local identity until replayed; the server set ID is attached when
   available online.
-- Exercise completion is based on leaving the exercise screen, so its boundary can be
-  approximate.
+- Exercise completion is explicit on the phone (**End exercise**); on the watch it is the
+  **End exercise** button or a switch to another exercise.
 - No workout heart-rate observations.
 - The session report is only available after the server has acknowledged completion. A queued
   offline finish shows no report until it syncs; open the session from History after that.
-- Warm-up rows are a guide; only working sets count toward the plan's set completion. Use the
-  warm-up row's **Start set** / **End set** action; it records RIR 6.
+- Warm-up rows are a guide; only working sets count toward the plan's set completion. Tap
+  **Use** on a row to fill the ordinary set controls, then record RIR 6 at End set.
 - The notification/vibration path and all timing behaviour require physical-iPhone acceptance;
   simulator builds are not proof of those behaviours.
 

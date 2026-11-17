@@ -238,6 +238,9 @@ struct ActiveWorkoutView: View {
                                         Text(item.repsLabel)
                                         Text(item.loadLabel)
                                         Text(item.effortLabel)
+                                        if let velocity = item.velocityTargetLabel {
+                                            Text("target \(velocity)")
+                                        }
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)

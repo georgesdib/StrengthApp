@@ -128,6 +128,12 @@ struct WatchExerciseView: View {
             Text(item.effortLabel)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            if let target = item.velocityTargetLabel {
+                Text("target \(target)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("watch-target-velocity")
+            }
         }
     }
 
@@ -262,6 +268,12 @@ struct WatchExerciseView: View {
                 Text("\(formatted(loadKg)) kg × \(reps)\(isTimeBased ? "s" : "")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if let target = execution.selectedItem?.velocityTargetLabel {
+                    Text("Target \(target)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("watch-velocity-target")
+                }
                 // The watch records the measurement; the server supplies any target. Allow
                 // it for external-load work even when the plan has no target, but not for
                 // bodyweight work.

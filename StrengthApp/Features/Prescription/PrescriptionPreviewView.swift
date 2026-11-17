@@ -74,6 +74,9 @@ struct PrescriptionPreviewView: View {
                             Text(item.repsLabel)
                             Text(item.loadLabel)
                             Text(item.effortLabel)
+                            if let velocity = item.velocityTargetLabel {
+                                Text("target \(velocity)")
+                            }
                             Text("rest \(item.restS ?? 120)s")
                         }
                         .font(.caption)

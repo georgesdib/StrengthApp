@@ -95,8 +95,8 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   **iPhone** or **Apple Watch** as the execution target. A watch-targeted plan shows a notice on
   the phone and is started on the watch; it never exposes the phone Start button.
 - **Workout** — exercise-first list with an exercise detail screen, prepopulated planned sets,
-  performed-set logging with load/reps/RIR, optional mean velocity when the plan supplies a
-  velocity target, optional per-rep velocity with
+  performed-set logging with load/reps/RIR, the plan's velocity target beside RIR when one is
+  supplied, optional mean velocity for external-load work, optional per-rep velocity with
   comma/space-separated input, explicit Start set and set-completion timestamps, performed-set
   add/remove, outside-plan exercise logging through the authenticated catalogue, a working-set
   rest timer using the plan’s `rest_s` with prescribed/actual comparison, observable skip and

@@ -201,6 +201,13 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         guard let rirTarget else { return "—" }
         return "RIR \(rirTarget)"
     }
+
+    /// Display form of the server's prescribed bar-speed target. Nil when the plan asks for
+    /// no target; the client never derives or adjusts one.
+    public var velocityTargetLabel: String? {
+        guard let velocityTarget, velocityTarget > 0 else { return nil }
+        return String(format: "%.2f m/s", velocityTarget)
+    }
 }
 
 // MARK: - Plan request (R7)

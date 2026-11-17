@@ -82,11 +82,12 @@ raw 100.x address.
 2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
    is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
 3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
-   load, RIR, rest and any warnings. **Start workout** is on that screen, so the plan is always
+   load, RIR, any velocity target, rest and any warnings. **Start workout** is on that screen, so the plan is always
    visible before it is consumed. The server issues the plan; the phone never invents plan content.
 4. Open an exercise and tap **Start set** before the set.
-5. Enter load, reps and RIR. When the plan gives the lift a velocity target, optional mean and
-   per-rep velocity are offered; bodyweight work without a target does not ask for them. The rest
+5. Enter load, reps and RIR. When the plan gives the lift a velocity target, it is shown beside
+   RIR on the phone and the watch; optional mean and per-rep velocity are offered, and bodyweight
+   work is not asked for them. The rest
    is anchored at your **first edit** of the sheet, so the time you spend entering numbers is rest,
    not part of the set; the set keeps the time you started it.
 6. Each main lift lists its warm-up ramp, starting with the empty bar (the first rung is capped
@@ -280,8 +281,9 @@ token.
 
 The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR.
 Warm-up rows have their own **Log** action; they are recorded with RIR 6 and stay out of
-working-set volume. Mean velocity is available for external-load work even when the plan has no
-target; the watch records the measurement and the server owns calibration. Time-based exercises
+working-set volume. When the plan supplies a velocity target it appears beside RIR and in the
+RIR sheet. Mean velocity is available for external-load work even when the plan has no target; the
+watch records the measurement and the server owns calibration. Time-based exercises
 show seconds (“30s”), not repetitions. The rest starts when you tap **End set**, so the RIR and
 velocity entry happens during the rest, not inside the set. Rest — **+15s** extends it, **−15s**
 shortens it, and a local notification fires when it ends if you allowed notifications — rate form

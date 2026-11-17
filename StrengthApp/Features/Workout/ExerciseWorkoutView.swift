@@ -79,7 +79,8 @@ struct ExerciseWorkoutView: View {
             Section("Exercise") {
                 LabeledContent("Exercise", value: Self.label(exerciseId))
                 if let item {
-                    LabeledContent("Target", value: "\(item.sets ?? 0) × \(item.repsLabel) · \(item.loadLabel) · \(item.effortLabel)")
+                    LabeledContent("Target", value: "\(item.sets ?? 0) × \(item.repsLabel) · \(item.loadLabel) · \(item.effortLabel)\(item.velocityTargetLabel.map { " · target \($0)" } ?? "")")
+                        .accessibilityIdentifier("exercise-target")
                     LabeledContent("Rest", value: "\(item.restS ?? 120)s")
                 } else {
                     Text("Not in the prescription. Sets are still recorded as performed work.")
@@ -169,7 +170,7 @@ struct ExerciseWorkoutView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 } else {
-                                    Text("Target \(item?.repsLabel ?? "—") · \(item?.loadLabel ?? "—") · \(item?.effortLabel ?? "—")")
+                                    Text("Target \(item?.repsLabel ?? "—") · \(item?.loadLabel ?? "—") · \(item?.effortLabel ?? "—")\(item?.velocityTargetLabel.map { " · target \($0)" } ?? "")")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -265,6 +266,7 @@ struct ExerciseWorkoutView: View {
                 draft: draft,
                 exerciseLabel: Self.label(exerciseId),
                 target: logSetIndex.map { "Planned set \($0)" },
+                velocityTarget: item?.velocityTargetLabel,
                 isTimeBased: item?.isTimeBased == true,
                 velocityApplicable: item?.loadBasis != "bodyweight"
                     && item?.loadBasis != "bodyweight_total",
@@ -497,6 +499,8 @@ private struct LogSetSheet: View {
     @Binding var draft: WorkoutDraftStore.Draft
     let exerciseLabel: String
     let target: String?
+    /// The server's prescribed bar speed, shown beside RIR; nil when no target was issued.
+    let velocityTarget: String?
     let isTimeBased: Bool
     let velocityApplicable: Bool
     let isSaving: Bool
@@ -538,6 +542,10 @@ private struct LogSetSheet: View {
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .accessibilityIdentifier("set-rir")
+                    }
+                    if let velocityTarget {
+                        LabeledContent("Velocity target", value: velocityTarget)
+                            .accessibilityIdentifier("set-velocity-target")
                     }
                     if velocityApplicable {
                         LabeledContent("Mean velocity (m/s)") {

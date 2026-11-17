@@ -192,12 +192,23 @@ record of what was exercised.
       offers the active workout instead.
 - [ ] The exercise screen shows the warm-up ramp including the empty-bar first set; a working set
       can be logged without logging any warm-up.
-- [ ] Rate form on the exercise screen; the current rating and correction label behave as on the
-      workout screen.
+- [ ] Opening an exercise records nothing. The first **Start set** starts it, and leaving the screen
+      without **End exercise** keeps it in progress.
+- [ ] **End exercise** closes any running rest, records the completion, offers the optional 1–5 form
+      rating with a skip, and returns to the plan list.
+- [ ] Start a set on exercise A, go back and start a set on exercise B: both show **In progress**,
+      starting B interrupts A's rest, and ending A leaves B open.
+- [ ] Skip a warm-up's set and log a planned set: the swap and set-count controls stay available
+      (a warm-up never counts as a planned set).
 - [ ] Start a rest, return to Today: the countdown stays visible above the tab bar, then dismisses
       itself at zero.
 - [ ] Lock the phone during a rest: the rest-end notification appears; **Done** clears it and
       returns to the app.
+- [ ] Lock the phone during a rest: the Lock Screen shows a countdown (and the Dynamic Island on a
+      supported iPhone) with the app closed; tapping it opens Strength.
+- [ ] Add the **Strength** control to Control Center and to the Action button; both open the app.
+- [ ] Force-quit during a rest, wait past its end, relaunch: the interval is recorded as completed
+      at the time it actually ended.
 - [ ] With Wi-Fi off, open Exercise Library and an exercise picker: the cached catalogue still lists
       and selects exercises; plan editing still reports that it needs the server.
 

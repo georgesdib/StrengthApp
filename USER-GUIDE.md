@@ -94,7 +94,8 @@ raw 100.x address.
    not part of the set; the set keeps the time you started it.
 6. Each main lift lists its warm-up ramp, starting with the empty bar (the first rung is capped
    at 20 kg, or the first warm-up when that is lighter). Warm-up rows are optional: skipping them
-   and logging the working sets is valid. To record one, use **Start another set** with RIR 6.
+   and logging the working sets is valid. To record one, tap **Start set** on its warm-up row: it
+   fills that row's load and reps, and RIR 6 is what records the set as a warm-up.
    A working set starts the rest timer automatically; logged warm-ups (RIR 6) do not.
 7. Repeat for the remaining sets and exercises. When an exercise is done, tap **End exercise**:
    it closes any running rest, records the exercise's completion and offers the optional 1–5 form

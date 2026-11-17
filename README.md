@@ -103,8 +103,10 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   extension, one app-level timer that stays visible above the tab bar on Today and every tab, a
   local notification at rest end with a **Done** action (and an in-app haptic/sound while active),
   warm-up rows including an empty-bar first set, an explicit prescription-item picker when the
-  exercise appears more than once, and form ratings on the exercise screen that show the current
-  value and label a later save as a correction, additive plan
+  exercise appears more than once, a first-set-starts / **End exercise** lifecycle that offers the
+  optional form rating and lets two exercises overlap as a superset, and a rest interval that
+  survives relaunch with a Lock Screen/Dynamic Island countdown and a Control Center control,
+  additive plan
   editing (add/swap/remove and set count), finish with one sRPE picker (Not recorded or 1–10),
   optional productivity (Not recorded or 1–5), abandon with confirmation.
 - **Session report** — after an acknowledged completion, the iPhone shows the AFC-2 completed-workout
@@ -125,7 +127,8 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   else, including a tailnet or VPN address, needs `https://`. Saving an address that cannot
   load shows a warning instead of failing later.
 - **Apple Watch** — credential status plus the Home server's watch-targeted work. A watch-targeted
-  plan is started, logged and finished on the watch (working sets and loggable warm-up sets,
+  plan is started, logged and finished on the watch (working sets and warm-ups logged as ordinary
+  RIR-6 sets,
   form rating, mean velocity for external-load work even without a target, rest with +15s/−15s
   and a local end-of-rest notification, total elapsed time beside heart rate, one HealthKit
   workout, editable sRPE and optional productivity at finish, local-first outbox);

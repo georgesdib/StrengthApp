@@ -68,8 +68,21 @@ public enum WatchTodayState: Equatable, Sendable {
     case unsupportedTarget
     case generating(elapsedSeconds: Int?)
     case ready(WatchPlanSummary)
-    case offline(WatchPlanSummary?)
+    /// The request failed. The detail is the reason and the host that was tried, so a stale
+    /// home-server address, a refused scheme and a genuinely offline watch do not all read as
+    /// "connect to Wi-Fi".
+    case offline(WatchPlanSummary?, detail: String?)
     case unavailable(String)
+}
+
+/// Names the server the watch tried before the reason, so "cannot reach it" is not confused
+/// with a stale address or a scheme the system refuses.
+public enum WatchOfflineDetail {
+    public static func make(baseURL: String, reason: String?) -> String {
+        let host = URL(string: baseURL)?.host ?? baseURL
+        guard let reason, !reason.isEmpty else { return host }
+        return "\(host) — \(reason)"
+    }
 }
 
 public enum WatchTodayMapper {

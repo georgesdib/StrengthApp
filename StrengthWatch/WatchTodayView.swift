@@ -45,20 +45,29 @@ struct WatchTodayView: View {
                     }
                 case .ready(let plan):
                     planView(plan)
-                case .offline(let plan):
+                case .offline(let plan, let detail):
                     if let plan {
                         Text("Offline · showing last plan")
                             .font(.caption2)
                             .foregroundStyle(.orange)
                         planView(plan)
+                        if let detail { offlineReason(detail) }
                     } else {
-                        message("Connect to home Wi-Fi to load your plan.")
+                        message("Could not load your plan.")
+                        if let detail { offlineReason(detail) }
                     }
                 case .unavailable(let text):
                     message(text)
                 }
             }
         }
+    }
+
+    private func offlineReason(_ detail: String) -> some View {
+        Text(detail)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("watch-today-offline-reason")
     }
 
     private func message(_ text: String) -> some View {

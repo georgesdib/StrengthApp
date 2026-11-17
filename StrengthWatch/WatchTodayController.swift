@@ -26,6 +26,12 @@ final class WatchTodayController: ObservableObject {
         Task { await refresh() }
     }
 
+    /// Names the server the watch tried before the reason, because "cannot reach it" is a very
+    /// different problem when the address itself is stale or refused by the system.
+    private func offlineDetail(_ baseURL: String, _ error: APIError?) -> String {
+        WatchOfflineDetail.make(baseURL: baseURL, reason: error?.errorDescription)
+    }
+
     func credentialsUnavailable() {
         lastPlan = nil
         state = .missingCredentials
@@ -65,12 +71,12 @@ final class WatchTodayController: ObservableObject {
             onCredentialsMissing()
         } catch let api as APIError {
             if case .transport = api {
-                state = .offline(lastPlan)
+                state = .offline(lastPlan, detail: offlineDetail(stored.homeBaseURL, api))
             } else {
                 state = .unavailable(api.errorDescription ?? "The plan could not be loaded.")
             }
         } catch {
-            state = .offline(lastPlan)
+            state = .offline(lastPlan, detail: offlineDetail(stored.homeBaseURL, nil))
         }
     }
 }

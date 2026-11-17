@@ -24,6 +24,7 @@
       "children": [
         { "path": "<PRODUCTS>/StrengthApp.app", "id": "000000000000000000000120", "type": "wrapper.application", "index": false },
         { "path": "<PRODUCTS>/StrengthWatch.app", "id": "000000000000000000000121", "type": "wrapper.application", "index": false, "target-membership": [ { "build-phase": "StrengthApp/copy/Embed Watch Content", "code-sign-on-copy": true } ] },
+        { "path": "<PRODUCTS>/StrengthWidgets.appex", "id": "000000000000000000000122", "type": "wrapper.app-extension", "index": false, "target-membership": [ { "build-phase": "StrengthApp/copy/Embed Foundation Extensions", "code-sign-on-copy": true } ] },
         { "path": "<PRODUCTS>/StrengthAppTests.xctest", "id": "EAE4FAEC309F8DD500B7CC15", "type": "wrapper.cfbundle", "index": false },
         { "path": "<PRODUCTS>/StrengthAppUITests.xctest", "id": "EACD40A5309F8F500088B032", "type": "wrapper.cfbundle", "index": false },
         { "path": "<PRODUCTS>/StrengthWatchUITests.xctest", "id": "000000000000000300000000", "type": "wrapper.cfbundle", "index": false },
@@ -40,6 +41,7 @@
     { "kind": "folder", "path": "StrengthAppUITests", "target-membership": [ "StrengthAppUITests" ] },
     { "kind": "folder", "path": "StrengthWatch", "target-membership": [ "StrengthWatch" ] },
     { "kind": "folder", "path": "StrengthWatchUITests", "target-membership": [ "StrengthWatchUITests" ] },
+    { "kind": "folder", "path": "StrengthWidgets", "target-membership": [ "StrengthWidgets" ] },
   ],
   "targets": [
     {
@@ -51,6 +53,7 @@
         { "kind": "package", "package": "StrengthCore", "product-name": "StrengthCore" },
         { "kind": "package", "package": "StrengthCore", "product-name": "StrengthIntents" },
         "StrengthWatch",
+        "StrengthWidgets",
       ],
       "build-phases": [
         "compile-sources",
@@ -61,6 +64,12 @@
           "name": "Embed Watch Content",
           "bundle-base-path": "root",
           "relative-path": "Watch",
+        },
+        {
+          "kind": "copy",
+          "name": "Embed Foundation Extensions",
+          "bundle-base-path": "root",
+          "relative-path": "PlugIns",
         },
       ],
       "package-product-members": [
@@ -236,6 +245,45 @@
         "SWIFT_VERSION": "5.0",
         "TARGETED_DEVICE_FAMILY": "4",
         "WATCHOS_DEPLOYMENT_TARGET": "27.0",
+      },
+    },
+    {
+      "name": "StrengthWidgets",
+      "id": "000000000000000400000000",
+      "product": "Products/StrengthWidgets.appex",
+      "product-type": "app-extension",
+      "dependencies": [
+        { "kind": "package", "package": "StrengthCore", "product-name": "StrengthCore" },
+      ],
+      "build-phases": [
+        "compile-sources",
+        "frameworks",
+        "resources",
+      ],
+      "package-product-members": [
+        {
+          "package": "StrengthCore",
+          "product-name": "StrengthCore",
+          "build-phase": { "build-phase": "frameworks" },
+        },
+      ],
+      "build-settings": {
+        "CODE_SIGN_STYLE": "Automatic",
+        "CURRENT_PROJECT_VERSION": "1",
+        "ENABLE_PREVIEWS": "YES",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "INFOPLIST_FILE": "Support/WidgetsInfo.plist",
+        "INFOPLIST_KEY_CFBundleDisplayName": "Strength",
+        "IPHONEOS_DEPLOYMENT_TARGET": "27.0",
+        "LD_RUNPATH_SEARCH_PATHS": "@executable_path/Frameworks @executable_path/../../Frameworks",
+        "MARKETING_VERSION": "1.0",
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.georgesdibpersonalteam.StrengthApp.widgets",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SDKROOT": "iphoneos",
+        "SKIP_INSTALL": "YES",
+        "SUPPORTED_PLATFORMS": "iphonesimulator iphoneos",
+        "SWIFT_VERSION": "5.0",
+        "TARGETED_DEVICE_FAMILY": "1",
       },
     },
   ],

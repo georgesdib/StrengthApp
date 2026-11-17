@@ -126,6 +126,15 @@ The timer uses the prescription's rest seconds when available.
 - The interval survives a relaunch: a rest that ended while the app was closed is recorded at the
   time it actually ended, not when the app next opened.
 
+### Lock Screen and Control Center
+
+While a rest is running, the phone shows a Live Activity countdown on the Lock Screen and in the
+Dynamic Island. The countdown is drawn by the system from the rest's end time, so it stays correct
+with the app closed. Tapping it opens Strength, where **+15 s** and **Skip** live.
+
+Settings → Control Center (or the Action button) can host the **Strength** control. It opens the
+running workout; it does not record a set or change a rest on its own.
+
 The timer is descriptive. It does not change the next prescription or declare the session
 compliant.
 

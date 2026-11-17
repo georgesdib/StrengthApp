@@ -101,6 +101,11 @@ final class RestTimerModel: ObservableObject {
         self.workoutId = workoutId
         persist()
         RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
+        RestLiveActivityController.shared.start(
+            endDate: end,
+            exerciseId: exerciseId,
+            workoutId: workoutId
+        )
         startTicker()
     }
 
@@ -141,6 +146,11 @@ final class RestTimerModel: ObservableObject {
         isComplete = false
         remainingSeconds = max(0, Int(end.timeIntervalSince(now).rounded(.up)))
         RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
+        RestLiveActivityController.shared.start(
+            endDate: end,
+            exerciseId: exerciseId,
+            workoutId: workoutId
+        )
         startTicker()
         return nil
     }
@@ -179,6 +189,7 @@ final class RestTimerModel: ObservableObject {
         isComplete = false
         persist()
         RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
+        RestLiveActivityController.shared.update(endDate: self.endDate!, exerciseId: exerciseId)
         onExtend?(seconds)
     }
 
@@ -209,6 +220,7 @@ final class RestTimerModel: ObservableObject {
 
     func dismiss() {
         RestNotificationManager.shared.cancel()
+        RestLiveActivityController.shared.end()
         defaults.removeObject(forKey: Self.stateKey)
         ticker?.cancel()
         ticker = nil

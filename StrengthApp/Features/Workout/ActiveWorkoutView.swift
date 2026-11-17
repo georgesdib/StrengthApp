@@ -641,7 +641,10 @@ struct ActiveWorkoutView: View {
     private func planSetState(identity: Int, exerciseId: String) -> PlanSetState {
         var attributed = 0
         var ambiguous = 0
-        for set in workout?.sets ?? [] where set.exerciseId == exerciseId {
+        for set in workout?.sets ?? []
+        where set.exerciseId == exerciseId && set.rir != 6 {
+            // A warm-up is attributed to the plan item but is not a planned set: it must not
+            // block a swap or a set-count change.
             if let itemIdentity = set.planItemIndex {
                 if itemIdentity == identity { attributed += 1 }
             } else {

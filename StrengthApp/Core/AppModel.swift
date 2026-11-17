@@ -1309,15 +1309,18 @@ final class AppModel: ObservableObject {
         guard let position = activeExercises.firstIndex(where: { $0.key == key }) else {
             return false
         }
-        let exercise = activeExercises.remove(at: position)
-        persistActiveExercises()
-        closeRest(for: exercise)
+        let exercise = activeExercises[position]
+        // Record before clearing the state: if the telemetry write fails the exercise is still
+        // open and can be ended again.
         recordExecutionEvent(ExecutionEvent(
             eventType: .exerciseCompleted,
             occurredAt: ServerClock.encodedISO(date),
             planItemIndex: exercise.planItemIndex,
             payload: ["exercise_id": .string(exercise.exerciseId)]
         ))
+        activeExercises.remove(at: position)
+        persistActiveExercises()
+        closeRest(for: exercise)
         return true
     }
 

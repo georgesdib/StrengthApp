@@ -86,6 +86,11 @@ final class ExecutionTelemetryTests: XCTestCase {
             ExerciseWorkoutView.nextUnplannedSetIndex(planned: 2, existing: [2]),
             3
         )
+        XCTAssertEqual(
+            ExerciseWorkoutView.nextUnplannedSetIndex(planned: 2, existing: [2, 1000, 1001]),
+            3,
+            "a warm-up index is never reused by a working set"
+        )
     }
 
     @MainActor

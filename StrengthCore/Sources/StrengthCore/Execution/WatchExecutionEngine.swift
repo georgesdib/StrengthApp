@@ -359,24 +359,21 @@ public final class WatchExecutionEngine {
         return acknowledged + queued
     }
 
-    /// Warm-up sets sit above the planned range so they never take a planned slot. The server
-    /// classifies them by RIR 6, not by index; the offset only keeps the two ranges distinct.
-    public func warmupSetsDone(planItemIndex: Int) -> Int {
-        let acknowledged = workout?.sets?.filter {
-            ($0.planItemIndex ?? -1) == planItemIndex && $0.rir == 6
-        }.count ?? 0
-        let queued = pending.filter { operation in
-            guard case .addSet(let body) = operation.body else { return false }
-            return body.planItemIndex == planItemIndex && body.rir == 6
-        }.count
-        return acknowledged + queued
-    }
-
     /// The index is decided when the set is logged, because RIR is what classifies it: a set
-    /// started as a warm-up can be logged as a working set and vice versa.
+    /// started as a warm-up can be logged as a working set and vice versa. Warm-ups sit above
+    /// the planned range so they never take a planned slot; the server classifies them by RIR 6.
     public func nextSetIndex(planItemIndex: Int, rir: Int?) -> Int {
         if rir == 6 {
-            return 1000 + warmupSetsDone(planItemIndex: planItemIndex)
+            // Above every warm-up already logged, so undoing one cannot hand out a live index.
+            let acknowledged = (workout?.sets ?? []).filter {
+                ($0.planItemIndex ?? -1) == planItemIndex && $0.rir == 6
+            }.compactMap(\.setIndex)
+            let queued = pending.compactMap { operation -> Int? in
+                guard case .addSet(let body) = operation.body,
+                      body.planItemIndex == planItemIndex, body.rir == 6 else { return nil }
+                return body.setIndex
+            }
+            return max(1000, ((acknowledged + queued).max() ?? 999) + 1)
         }
         return setsDone(planItemIndex: planItemIndex) + 1
     }

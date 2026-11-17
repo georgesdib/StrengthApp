@@ -446,7 +446,10 @@ struct ExerciseWorkoutView: View {
     /// than at Start set is what makes RIR 6 the only warm-up marker.
     private func resolvedSetIndex(rir: Int?) -> Int {
         if rir == 6 {
-            return 1000 + performed.filter { $0.rir == 6 }.count
+            // Above the working range, and above every warm-up already logged, so a removed
+            // warm-up cannot hand out an index that is still in use.
+            let used = performed.filter { $0.rir == 6 }.compactMap(\.setIndex)
+            return max(1000, (used.max() ?? 999) + 1)
         }
         if let planned = logSetIndex { return planned }
         return Self.nextUnplannedSetIndex(
@@ -523,7 +526,8 @@ struct ExerciseWorkoutView: View {
     /// with a later planned set (or a warm-up logged first), and the server treats a repeated
     /// index as a retry, so the working set would never be recorded.
     nonisolated static func nextUnplannedSetIndex(planned: Int, existing: [Int]) -> Int {
-        max(planned, existing.max() ?? 0) + 1
+        // Warm-up indices start at 1000 and must never be reused by a working set.
+        max(planned, existing.filter { $0 < 1000 }.max() ?? 0) + 1
     }
 
     private static func label(_ value: String) -> String {
@@ -654,13 +658,17 @@ private struct EndExerciseSheet: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                         ForEach(1...5, id: \.self) { value in
-                            Button("\(value) / 5") { onFinish(value) }
-                                .accessibilityIdentifier("end-exercise-form-\(value)")
+                            Button("\(value) / 5") {
+                                dismiss()
+                                onFinish(value)
+                            }
+                            .accessibilityIdentifier("end-exercise-form-\(value)")
                         }
                     }
                 }
                 Section {
                     Button(canRateForm ? "Skip rating and end" : "End exercise") {
+                        dismiss()
                         onFinish(nil)
                     }
                     .accessibilityIdentifier("end-exercise-confirm")

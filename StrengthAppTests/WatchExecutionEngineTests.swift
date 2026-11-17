@@ -364,6 +364,22 @@ final class WatchExecutionEngineTests: XCTestCase {
             return body.setIndex
         }
         XCTAssertEqual(queuedIndex, [1000])
+
+        // A second warm-up climbs above the first, and undoing it frees only its own index.
+        _ = await engine.logSet(
+            WatchExecutionEngine.SetEntry(
+                exerciseId: "competition_squat",
+                planItemIndex: 0,
+                setIndex: engine.nextSetIndex(planItemIndex: 0, rir: 6),
+                loadKg: 60,
+                reps: 3,
+                rir: 6
+            ),
+            session: session()
+        )
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 6), 1002)
+        XCTAssertTrue(engine.undoLastPendingSet())
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 6), 1001)
     }
 
     func testSetCompletionCarriesTheAcknowledgedServerSetId() async throws {

@@ -282,7 +282,7 @@ final class WatchExecutionController: ObservableObject {
         let entry = WatchExecutionEngine.SetEntry(
             exerciseId: item.exerciseId ?? "",
             planItemIndex: itemIndex,
-            setIndex: engine.setsDone(planItemIndex: itemIndex) + 1,
+            setIndex: engine.nextSetIndex(planItemIndex: itemIndex, rir: rir),
             loadKg: loadKg,
             reps: reps,
             rir: rir,
@@ -293,9 +293,10 @@ final class WatchExecutionController: ObservableObject {
         isWorking = true
         defer { isWorking = false }
         let result = await engine.logSet(entry, session: session)
-        // Rest belongs to a set that actually happened: a local storage failure must not start
-        // one, while a network failure still does.
-        if result.persisted, engine.phase == .active, let seconds = item.restS, seconds > 0 {
+        // Rest belongs to a working set that actually happened: a local storage failure must not
+        // start one, while a network failure still does. RIR 6 is a warm-up and rests nothing.
+        if rir != 6, result.persisted, engine.phase == .active,
+           let seconds = item.restS, seconds > 0 {
             try? engine.startRest(
                 seconds: seconds,
                 planItemIndex: item.orderIndex,
@@ -307,29 +308,6 @@ final class WatchExecutionController: ObservableObject {
         // Contract §10.2: refresh after each set, so a plan edit whose nudge was dropped while
         // the watch was unreachable is picked up at this idle point rather than at the next
         // foreground. Only when the flush finished cleanly; offline work stays local.
-        if result.persisted, result.stop == .allSent {
-            await reconcileNow()
-        }
-    }
-
-    /// Warm-up sets are ordinary logged sets with RIR 6 and no plan-item attribution, so they
-    /// stay out of working-set adherence and do not open a working-set rest timer.
-    func logWarmup(loadKg: Double?, reps: Int, index: Int) async {
-        guard let session = currentSession(), let item = engine.selectedItem else { return }
-        let entry = WatchExecutionEngine.SetEntry(
-            exerciseId: item.exerciseId ?? "",
-            planItemIndex: nil,
-            setIndex: 1000 + max(0, index),
-            loadKg: loadKg,
-            reps: reps,
-            rir: 6,
-            completedAt: Date()
-        )
-        isWorking = true
-        defer { isWorking = false }
-        let result = await engine.logSet(entry, session: session)
-        await handle(result.stop)
-        sync()
         if result.persisted, result.stop == .allSent {
             await reconcileNow()
         }

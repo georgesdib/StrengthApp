@@ -321,6 +321,51 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertNotNil(capture.session?.rest?.endedAt, "the rest is closed, not left open")
     }
 
+    func testWarmupIsAnOrdinarySetWithAReservedIndexAndNoRest() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/sets") == true {
+                throw APIError.transport("offline")
+            }
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet()
+
+        // RIR 6 is the only warm-up marker; the index keeps the two ranges apart.
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 6), 1000)
+        let index = engine.nextSetIndex(planItemIndex: 0, rir: 6)
+        _ = await engine.logSet(
+            WatchExecutionEngine.SetEntry(
+                exerciseId: "competition_squat",
+                planItemIndex: 0,
+                setIndex: index,
+                loadKg: 40,
+                reps: 5,
+                rir: 6
+            ),
+            session: session()
+        )
+
+        XCTAssertEqual(engine.setsDone(planItemIndex: 0), 0, "a warm-up is not a working set")
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 6), 1001)
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 2), 1)
+
+        let capture = try store.load()
+        let types = capture.operations.flatMap { operation -> [ExecutionEventType] in
+            guard case .executionEvents(let events) = operation.body else { return [] }
+            return events.map(\.eventType)
+        }
+        XCTAssertEqual(types, [.exerciseStarted, .setStarted, .setCompleted])
+        XCTAssertNil(capture.session?.rest, "a warm-up does not open a rest")
+        let queuedIndex = capture.operations.compactMap { operation -> Int? in
+            guard case .addSet(let body) = operation.body else { return nil }
+            return body.setIndex
+        }
+        XCTAssertEqual(queuedIndex, [1000])
+    }
+
     func testSetCompletionCarriesTheAcknowledgedServerSetId() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/sets") == true {

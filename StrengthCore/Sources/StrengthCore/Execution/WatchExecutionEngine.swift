@@ -359,6 +359,28 @@ public final class WatchExecutionEngine {
         return acknowledged + queued
     }
 
+    /// Warm-up sets sit above the planned range so they never take a planned slot. The server
+    /// classifies them by RIR 6, not by index; the offset only keeps the two ranges distinct.
+    public func warmupSetsDone(planItemIndex: Int) -> Int {
+        let acknowledged = workout?.sets?.filter {
+            ($0.planItemIndex ?? -1) == planItemIndex && $0.rir == 6
+        }.count ?? 0
+        let queued = pending.filter { operation in
+            guard case .addSet(let body) = operation.body else { return false }
+            return body.planItemIndex == planItemIndex && body.rir == 6
+        }.count
+        return acknowledged + queued
+    }
+
+    /// The index is decided when the set is logged, because RIR is what classifies it: a set
+    /// started as a warm-up can be logged as a working set and vice versa.
+    public func nextSetIndex(planItemIndex: Int, rir: Int?) -> Int {
+        if rir == 6 {
+            return 1000 + warmupSetsDone(planItemIndex: planItemIndex)
+        }
+        return setsDone(planItemIndex: planItemIndex) + 1
+    }
+
     /// Now in the session's clock domain (server-adjusted when the offset is known).
     public func serverNow(_ local: Date = Date()) -> Date {
         sessionRecord?.serverNow(at: local) ?? local
@@ -706,7 +728,7 @@ public final class WatchExecutionEngine {
                 occurredAt: ServerClock.encodedISO(stamp),
                 planItemIndex: itemIndex,
                 localSetId: token,
-                payload: ["set_index": .number(Double(setIndex))]
+                payload: nil
             )], to: &capture, workout: workout)
         }
     }

@@ -19,24 +19,13 @@ struct WatchExerciseView: View {
     @State private var showingForm = false
     @State private var velocityText = ""
     @State private var repVelocityText = ""
-    @State private var activeWarmup: ActiveWarmup?
-    @State private var loggedWarmups: Set<Int> = []
-
-    private struct ActiveWarmup: Equatable {
-        let index: Int
-        let loadKg: Double
-        let reps: Int
-        let startedAt: Date
-    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 if let item = execution.selectedItem {
                     header(item)
-                    if let activeWarmup {
-                        warmupRunning(activeWarmup)
-                    } else if execution.activeSet != nil {
+                    if execution.activeSet != nil {
                         runningSet(item)
                     } else {
                         idle(item)
@@ -80,8 +69,6 @@ struct WatchExerciseView: View {
         }
         .onAppear { prepare() }
         .onChange(of: execution.selectedItem?.orderIndex) { _, _ in
-            activeWarmup = nil
-            loggedWarmups = []
             prepare()
         }
         .onChange(of: loadKg) { _, value in execution.draftChanged(loadKg: value, reps: reps) }
@@ -180,46 +167,10 @@ struct WatchExerciseView: View {
                 .accessibilityIdentifier("watch-start-set")
             }
             Button("End exercise") {
-                if execution.completedSetCount(for: item) > 0 {
-                    showingForm = true
-                } else {
-                    execution.doneWithExercise()
-                }
+                showingForm = true
             }
             .font(.footnote)
             .accessibilityIdentifier("watch-end-exercise")
-        }
-    }
-
-    private func warmupRunning(_ warmup: ActiveWarmup) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text("Set time \(formattedDuration(context.date.timeIntervalSince(warmup.startedAt)))")
-                    .font(.subheadline)
-                    .monospacedDigit()
-            }
-            Text("\(formatted(warmup.loadKg)) kg × \(warmup.reps) · RIR 6")
-                .font(.body)
-                .monospacedDigit()
-            Button {
-                activeWarmup = nil
-                loggedWarmups.insert(warmup.index)
-                Task {
-                    await execution.logWarmup(
-                        loadKg: warmup.loadKg,
-                        reps: warmup.reps,
-                        index: warmup.index
-                    )
-                }
-            } label: {
-                Text("End set").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(logging || execution.isWorking)
-            .accessibilityIdentifier("watch-end-warmup")
-            Button("Cancel") { activeWarmup = nil }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -252,31 +203,28 @@ struct WatchExerciseView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                 ForEach(Array(warmups.enumerated()), id: \.offset) { index, warmup in
-                    HStack {
-                        Text("Warm-up \(index + 1): \(warmup.loadLabel) × \(warmup.reps)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        if loggedWarmups.contains(index) {
-                            Label("Done", systemImage: "checkmark.circle.fill")
+                    Button {
+                        loadKg = warmup.loadKg
+                        loadText = formatted(warmup.loadKg)
+                        reps = warmup.reps
+                    } label: {
+                        HStack {
+                            Text("Warm-up \(index + 1): \(warmup.loadLabel) × \(warmup.reps)")
                                 .font(.caption2)
-                                .foregroundStyle(.green)
-                        } else {
-                            Button("Start set") {
-                                activeWarmup = ActiveWarmup(
-                                    index: index,
-                                    loadKg: warmup.loadKg,
-                                    reps: warmup.reps,
-                                    startedAt: Date()
-                                )
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .disabled(execution.isWorking)
-                            .accessibilityIdentifier("watch-log-warmup-\(index)")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("Use")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
                         }
                     }
+                    .buttonStyle(.plain)
+                    .disabled(execution.isWorking)
+                    .accessibilityIdentifier("watch-log-warmup-\(index)")
                 }
+                Text("Log a warm-up as a normal set and record RIR 6.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             .accessibilityIdentifier("watch-warmups")
         }

@@ -2897,6 +2897,9 @@ final class AppModel: ObservableObject {
             _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
+            // Tell an open watch immediately; otherwise it keeps writing until its next
+            // foreground/refresh, even though the server now assigns ownership to the phone.
+            watchPairing.pushExecution(updated)
             mutationError = nil
             return true
         } catch {

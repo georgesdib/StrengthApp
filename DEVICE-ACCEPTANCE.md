@@ -582,9 +582,10 @@ Owner confirmation: pending.
 
 ---
 
-# INT-13 Today summary acceptance — outstanding
+# INT-13 Today summary acceptance — closed by owner decision (2026-11-17)
 
-**Status 2026-11-16:** implemented on the iOS client; automated tests pass. No physical-device run yet.
+**Status 2026-11-17:** implemented on the iOS client; automated tests pass. The owner closed the phase
+without a physical-device run, so the device checks below remain unverified on hardware.
 
 ## Automated
 
@@ -595,7 +596,7 @@ Owner confirmation: pending.
 - [x] The DeepSeek reply is rejected unless it carries both passages.
 - [x] The full `scripts/ci.sh` gate: 437 tests, 1 skipped, 0 failures.
 
-## Physical device — outstanding
+## Physical device — not run (waived)
 
 - [ ] With Apple Intelligence on, the card shows two passages and the footer says **On this iPhone**.
 - [ ] With DeepSeek selected and a key saved, the footer says **DeepSeek** and the text arrives.
@@ -604,4 +605,16 @@ Owner confirmation: pending.
 - [ ] Changing readiness or requesting a session regenerates the card once; idle tab switches do not.
 - [ ] The toggle in Settings hides the block on Today.
 
-Owner confirmation: pending.
+Owner confirmation: closed by owner decision 2026-11-17; no device run.
+
+---
+
+# INT-11 Explain acceptance — closed by owner decision (2026-11-17)
+
+**Status 2026-11-17:** implemented on the server and in the iOS Explain tab; the automated index,
+retrieval, citation, endpoint and build checks pass. The owner closed the phase without a separate
+physical-device run and without a dedicated release tag; Explain ships with the next tagged release.
+Device behaviour therefore remains unverified on hardware: paired-server answers, Safari citation
+links, copyable private-doc citations, and the offline and index-not-ready states.
+
+Owner confirmation: closed by owner decision 2026-11-17; no device run.

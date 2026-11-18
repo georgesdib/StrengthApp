@@ -1600,7 +1600,8 @@ final class AppModel: ObservableObject {
             let key = healthKitOperation.use(request)
             guard permitsMutation(kind: .healthkitReadiness, operationId: key) else {
                 healthKitState = .importError(
-                    mutationError ?? "Another operation is awaiting confirmation."
+                    mutationError
+                        ?? "A previous write was not confirmed. Retry or discard it on Today."
                 )
                 return
             }
@@ -3125,7 +3126,7 @@ final class AppModel: ObservableObject {
         }) {
             return true
         }
-        mutationError = "A previous operation is still awaiting confirmation. Retry or discard it before starting another."
+        mutationError = "A previous write was not confirmed. Retry or discard it on Today before starting another."
         return false
     }
 

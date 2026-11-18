@@ -54,10 +54,7 @@ public struct CardioTimeInZone: Decodable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case eligibleWorkouts = "eligible_workouts"
-        case coverageShare = "coverage_share"
-        case equivalentMinutes = "equivalent_minutes"
-        case minutes, window
+        case eligibleWorkouts, coverageShare, equivalentMinutes, minutes, window
     }
 
     public init(from decoder: Decoder) throws {
@@ -73,11 +70,10 @@ public struct CardioTimeInZone: Decodable, Equatable {
 }
 
 public struct CardioAssessment: Decodable, Equatable {
+    // No CodingKeys: the client decodes with .convertFromSnakeCase, so an explicit
+    // "time_in_zone" key would never match the converted "timeInZone" and the optional would
+    // silently decode as nil (the bug this fixes).
     public let timeInZone: CardioTimeInZone?
-
-    enum CodingKeys: String, CodingKey {
-        case timeInZone = "time_in_zone"
-    }
 }
 
 public struct CardioActivityPayload: Decodable, Equatable {

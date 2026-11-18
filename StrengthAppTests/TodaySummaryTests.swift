@@ -263,3 +263,39 @@ final class LongevityChatToolTests: XCTestCase {
         XCTAssertFalse(planOnly.contains("longevity"))
     }
 }
+
+// MARK: - Activity payload decoding (assessment block)
+
+final class CardioAssessmentDecodeTests: XCTestCase {
+    /// The client decodes with .convertFromSnakeCase. This fixture is the real server shape; it
+    /// failed silently before because the CodingKeys were written in snake_case.
+    func testActivityPayloadDecodesTimeInZone() throws {
+        let json = """
+        {"summary":{"weeks":[],"rolling":{},"latest_workout_at":null},
+         "assessment":{"time_in_zone":{"eligible_workouts":25,"coverage_share":0.421,
+           "equivalent_minutes":300.0,"minutes":{"moderate":180.0,"vigorous":60.0},
+           "window":{"start":"2026-10-22","end":"2026-11-18","days":28},
+           "source":"heart-rate samples"}},
+         "recent":[]}
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let payload = try decoder.decode(CardioActivityPayload.self, from: Data(json.utf8))
+        let tiz = try XCTUnwrap(payload.assessment?.timeInZone)
+        XCTAssertEqual(tiz.eligibleWorkouts, 25)
+        XCTAssertEqual(tiz.windowDays, 28)
+        XCTAssertEqual(tiz.moderateMinutes, 180, accuracy: 0.001)
+        XCTAssertEqual(tiz.vigorousMinutes, 60, accuracy: 0.001)
+        XCTAssertEqual(tiz.coverageShare, 0.421, accuracy: 0.001)
+    }
+
+    func testPayloadWithoutTheAssessmentStillDecodes() throws {
+        let json = """
+        {"summary":{"weeks":[],"rolling":{},"latest_workout_at":null},"recent":[]}
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let payload = try decoder.decode(CardioActivityPayload.self, from: Data(json.utf8))
+        XCTAssertNil(payload.assessment)
+    }
+}

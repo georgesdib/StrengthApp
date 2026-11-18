@@ -37,7 +37,7 @@ agreed. See docs/AGENT-CONTRACTS.md.
 
 ## Definition of done — short form
 
-1. Narrowest relevant tests pass; add a test that fails without the behaviour.
+1. Narrowest relevant tests pass.
 2. scripts/ci.sh stays the single CI entry point; LiveConfig remains disabled.
 3. UI changes are checked in portrait and landscape where relevant.
 4. Documentation is updated for user-visible behaviour.

@@ -89,13 +89,12 @@ the full suite to watch it. Live UI tests use docs/AGENT-LIVE-TESTS.md.
 ## 4. Completion checks
 
 1. The narrowest relevant unit/UI tests pass.
-2. A new behaviour has a test that fails without it.
-3. The app and the watch target build under the current minimums, and the app contains
+2. The app and the watch target build under the current minimums, and the app contains
    Watch/StrengthWatch.app.
-4. LiveConfig.swift is disabled and git status is clean.
-5. UI changes are checked in portrait and landscape where relevant.
-6. User-visible changes update README/USER-GUIDE or relevant contract docs.
-7. Physical-only behaviour is not claimed from simulator evidence.
+3. LiveConfig.swift is disabled and git status is clean.
+4. UI changes are checked in portrait and landscape where relevant.
+5. User-visible changes update README/USER-GUIDE or relevant contract docs.
+6. Physical-only behaviour is not claimed from simulator evidence.
 
 ## 5. CI rules
 

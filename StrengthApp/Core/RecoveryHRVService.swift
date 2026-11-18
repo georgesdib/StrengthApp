@@ -44,9 +44,12 @@ final class RecoveryHRVService {
     func syncRecent(session: IOSSession, now: Date = Date()) async {
         let calendar = Calendar.current
         let end = now.addingTimeInterval(5 * 60)
-        guard let start = calendar.date(byAdding: .day, value: -Self.recentDays, to: end) else {
+        guard let earliest = calendar.date(byAdding: .day, value: -Self.recentDays, to: end) else {
             return
         }
+        // Whole calendar days: a mid-day start would cut the oldest night in half and compute a
+        // valid-looking median from a subset of its samples.
+        let start = calendar.startOfDay(for: earliest)
         guard let nights = try? await healthKit.recoveryNights(from: start, to: end),
               !nights.isEmpty else { return }
         _ = await upload(nights, session: session)
@@ -58,17 +61,19 @@ final class RecoveryHRVService {
         isBackfilling = true
         defer { isBackfilling = false }
         let calendar = Calendar.current
-        guard let floor = calendar.date(byAdding: .year, value: -Self.horizonYears, to: now) else {
-            return
-        }
+        guard let horizon = calendar.date(byAdding: .year, value: -Self.horizonYears, to: now)
+        else { return }
+        let floor = calendar.startOfDay(for: horizon)
+        // Day-aligned boundaries: a timestamp boundary cuts the night on either edge in half.
         var cursor = defaults.object(forKey: Self.backfillOldestKey)
             .flatMap { $0 as? Double }
-            .map(Date.init(timeIntervalSince1970:)) ?? now
+            .map { calendar.startOfDay(for: Date(timeIntervalSince1970: $0)) }
+            ?? calendar.startOfDay(for: now)
         while cursor > floor {
             guard let pageStart = calendar.date(
                 byAdding: .day, value: -Self.pageDays, to: cursor
             ) else { return }
-            let from = max(pageStart, floor)
+            let from = max(calendar.startOfDay(for: pageStart), floor)
             guard let nights = try? await healthKit.recoveryNights(from: from, to: cursor) else {
                 return
             }

@@ -197,7 +197,17 @@ if [[ "$LAUNCH" == "1" ]]; then
     exit 1
   fi
   echo "launching $bundle_id..."
-  xcrun devicectl device process launch --device "$IPHONE_UDID" "$bundle_id"
+  # A locked phone refuses the launch (SBMainWorkspace "Locked"). The install already succeeded,
+  # so that is a warning, not a failed install.
+  if ! launch_output=$(xcrun devicectl device process launch --device "$IPHONE_UDID" "$bundle_id" 2>&1); then
+    printf '%s\n' "$launch_output" >&2
+    if grep -qi 'locked\|unlock' <<<"$launch_output"; then
+      echo "warning: installed, but the phone was locked so the app could not be launched." >&2
+      echo "         unlock the phone and open StrengthApp." >&2
+    else
+      echo "warning: installed, but the app could not be launched; open it manually." >&2
+    fi
+  fi
 fi
 
 if [[ -n "$CLEAN_WORKTREE" && "$KEEP_WORKTREE" != "1" ]]; then

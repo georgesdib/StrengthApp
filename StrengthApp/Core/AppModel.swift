@@ -370,6 +370,17 @@ final class AppModel: ObservableObject {
         healthKitActivity.isAvailable && bootstrap?.capabilities.healthkitActivity == true
     }
 
+    /// Authenticated cardio summary for the overview screen.
+    func loadCardioActivity(weeks: Int = 12) async throws -> CardioActivityPayload {
+        guard let session else { throw CardioOverviewError.notPaired }
+        return try await client.cardioActivity(session: session, weeks: weeks)
+    }
+
+    enum CardioOverviewError: LocalizedError {
+        case notPaired
+        var errorDescription: String? { "Pair with the server to see cardio activity." }
+    }
+
     func syncHealthKitActivity() async {
         guard !isSyncingActivity else { return }
         guard let session else {

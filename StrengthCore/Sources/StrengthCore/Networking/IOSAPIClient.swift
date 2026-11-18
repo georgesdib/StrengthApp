@@ -379,6 +379,20 @@ public final class IOSAPIClient {
         try await get(path: "api/ios/v1/bootstrap", query: [], session: session)
     }
 
+// MARK: - Cardio overview (C6b)
+
+    /// The phone reads the authenticated route, never the browser one.
+    public func cardioActivity(
+        session: IOSSession,
+        weeks: Int = 12
+    ) async throws -> CardioActivityPayload {
+        try await get(
+            path: "api/ios/v1/healthkit/activity/summary",
+            query: [URLQueryItem(name: "weeks", value: String(weeks))],
+            session: session
+        )
+    }
+
     /// Short, read-only reachability check used for Home/Away selection.
     ///
     /// The reason is kept instead of a bare Bool: "the server is off", "iOS refuses this

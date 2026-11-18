@@ -106,6 +106,8 @@ final class AppModel: ObservableObject {
     }
     /// The deterministic longevity facts behind the Today section; nil until loaded.
     @Published private(set) var longevity: LongevitySummary?
+    /// Why the facts are missing. Nil once they load; never silently empty.
+    @Published private(set) var longevityError: String?
     @Published private(set) var deepSeekKeyPresent = false
     private let deepSeekKeyStore: any DeepSeekKeyStoring = KeychainDeepSeekKeyStore()
     @Published var narrativeDetail: NarrativeDetail = NarrativeDetail(
@@ -384,6 +386,30 @@ final class AppModel: ObservableObject {
     }
 
     /// Authenticated cardio summary for the overview screen.
+    /// Loads the longevity facts on their own, without a model.
+    ///
+    /// They used to load inside the summary generator's facts closure, which does not run when the
+    /// on-device model is unavailable — the card then showed nothing at all.
+    func loadLongevity(force: Bool = false) async {
+        if !force, longevity != nil { return }
+        guard let session else {
+            longevityError = "pair with the server to see aerobic activity."
+            return
+        }
+        do {
+            let envelope = try await client.longevity(session: session)
+            if let summary = LongevitySummary(envelope: envelope) {
+                longevity = summary
+                longevityError = nil
+            } else {
+                longevityError = "the server returned no longevity assessment."
+            }
+        } catch {
+            longevityError = (error as? LocalizedError)?.errorDescription
+                ?? "the longevity assessment could not be loaded."
+        }
+    }
+
     func loadCardioActivity(weeks: Int = 12, tiz: Bool = false) async throws -> CardioActivityPayload {
         guard let session else { throw CardioOverviewError.notPaired }
         return try await client.cardioActivity(session: session, weeks: weeks, includeTimeInZone: tiz)
@@ -890,18 +916,15 @@ final class AppModel: ObservableObject {
         let planned = includePlan ? currentNudgeFacts().planned : nil
         var overview: String?
         var longevityFacts: String?
+        await loadLongevity()
         if let session {
             let toolbox = ChatToolbox(client: client, session: session)
             overview = try? await toolbox.trainingOverview(asOf: nil, windowWeeks: 4)
-            if let envelope = try? await client.longevity(session: session),
-               let summary = LongevitySummary(envelope: envelope) {
-                longevity = summary
-                // The numbers are fetched from the athlete's own server; the consent governs only
-                // what is handed to an off-device model.
-                if chatModelChoice == .onDevice || chatHealthEnabled {
-                    longevityFacts = summary.detail
-                }
-            }
+        }
+        // The numbers come from the athlete's own server; the consent governs only what is handed
+        // to an off-device model.
+        if let longevity, chatModelChoice == .onDevice || chatHealthEnabled {
+            longevityFacts = longevity.detail
         }
         return TodaySummaryFacts(
             date: today?.date ?? Self.isoDate(),

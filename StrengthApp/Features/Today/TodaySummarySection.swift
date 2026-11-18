@@ -21,6 +21,8 @@ struct TodaySummarySection: View {
             Label("Today at a glance", systemImage: "sparkles")
         }
         .task(id: model.todaySummaryFingerprint) {
+            // Facts first: they need no model, so they must not wait on one.
+            await model.loadLongevity()
             await summary.loadIfNeeded(fingerprint: model.todaySummaryFingerprint)
         }
     }
@@ -38,6 +40,11 @@ struct TodaySummarySection: View {
                     .foregroundStyle(.secondary)
             }
             .accessibilityIdentifier("today-longevity-card")
+        } else if let error = model.longevityError {
+            Text("Cardio and fitness: \(error)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("today-longevity-error")
         }
     }
 

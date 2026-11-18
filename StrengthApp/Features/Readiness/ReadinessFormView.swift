@@ -168,9 +168,13 @@ struct ReadinessFormView: View {
                 .font(.caption)
                 .foregroundStyle(.orange)
         } else {
-            Text("\(label): no sample")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(
+                field == "hrv_ms"
+                    ? "\(label): no recovery reading"
+                    : "\(label): no sample"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 

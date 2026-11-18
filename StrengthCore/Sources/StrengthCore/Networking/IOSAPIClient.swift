@@ -496,6 +496,24 @@ public final class IOSAPIClient {
         )
     }
 
+    /// Uploads dated recovery-HRV nights. Not journaled: the server deduplicates by sample id,
+    /// so a failed page is simply sent again on the next pass.
+    public func importRecoveryHRV(
+        _ body: RecoveryHRVRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> RecoveryHRVUploadResult {
+        try await post(
+            path: "api/ios/v1/healthkit/hrv-recovery",
+            body: body,
+            kind: .healthkitReadiness,
+            targetId: nil,
+            session: session,
+            idempotencyKey: idempotencyKey,
+            journaling: false
+        )
+    }
+
 // MARK: - HealthKit activity (C2)
 
     /// Uploads in two calls by design: a sample cannot be attached before its workout exists on the

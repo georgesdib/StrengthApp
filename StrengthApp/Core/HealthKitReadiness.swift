@@ -273,5 +273,14 @@ protocol HealthKitReadinessProviding {
     var isAvailable: Bool { get }
     func requestAuthorization() async throws
     func selectSamples(serverDate: String, now: Date) async throws -> HealthKitReadinessSelection
+    /// One recovery value per night from the raw SDNN samples in the window.
+    func recoveryNights(from start: Date, to end: Date) async throws -> [RecoveryHRVSample]
+}
+
+extension HealthKitReadinessProviding {
+    /// Doubles that do not model recovery return nothing; only the live service queries HealthKit.
+    func recoveryNights(from start: Date, to end: Date) async throws -> [RecoveryHRVSample] {
+        []
+    }
 }
 

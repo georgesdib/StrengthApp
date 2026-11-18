@@ -35,6 +35,23 @@ heart-rate time series, no background refresh.
 - Gated twice: HealthKit is off by default in Settings, and the server must report the
   `healthkit_readiness` capability before the app offers the import.
 
+### Recovery HRV series (added 2026-11-18)
+
+- Readiness no longer reads the newest SDNN sample. It reads a **recovery value per night**: the
+  upper median of that local calendar day's HRV samples taken before 10:00
+  (`RecoveryHRV` in `StrengthCore`). A day with no sample in that window has no recovery value,
+  and the server then omits HRV from readiness rather than falling back to a daytime reading.
+  Sleep data is not read, so the window is fixed rather than sleep-derived.
+- The raw newest-sample HRV is still imported through the readiness route and stays in the audit
+  table; it no longer feeds the score.
+- The series is uploaded to `POST api/ios/v1/healthkit/hrv-recovery` with a deterministic
+  `sample_id` (`recovery-<date>-<tenths>`) and local-offset `sample_at`, so a retry is a
+  duplicate and a corrected value is a new append-only observation.
+- `RecoveryHRVService` sends the last three nights before each readiness import and runs a
+  bounded backfill (180-day pages, five-year horizon, 200 samples per request). Progress is a
+  watermark in `UserDefaults` (`recoveryHRV.backfillOldest` / `backfillComplete`) that resets
+  when the server URL changes, so an interrupted backfill resumes rather than restarts.
+
 ## 3. Watch — workout recording
 
 - `HKWorkoutSession(.traditionalStrengthTraining, .indoor)` with `HKLiveWorkoutBuilder` and
@@ -82,13 +99,15 @@ heart-rate time series, no background refresh.
 ## 6. What is not implemented
 
 Workout import of any kind; heart-rate series; VO₂max, exercise minutes, distance, active energy or
-power; historical backfill; anchored incremental sync; workout deletion handling; reconciliation
-against strength sessions; cardio dashboards. The cardio stage plan scopes these across C0–C7 and none
+power; anchored incremental sync; workout deletion handling; reconciliation against strength
+sessions; cardio dashboards. Historical backfill exists only for the recovery-HRV series. The cardio stage plan scopes these across C0–C7 and none
 of it is delivered.
 
 ## 7. Behaviour authority and tests
 
 - `StrengthAppTests/HealthKitReadinessTests.swift` — selection, staleness and the empty-never-denied
   rule.
+- `StrengthAppTests/RecoveryHRVTests.swift` — the night window, median, source choice and
+  deterministic sample id.
 - `StrengthAppTests/WatchHealthKitFinalizerTests.swift` — the exactly-once save rule.
 - Both encode behaviour that this document describes; a change to one without the other is a bug.

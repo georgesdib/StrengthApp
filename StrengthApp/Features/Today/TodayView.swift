@@ -729,9 +729,13 @@ struct TodayView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             default:
-                Text("\(label): no sample")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    field == "hrv_ms"
+                        ? "\(label): no recovery reading"
+                        : "\(label): no sample"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
     }

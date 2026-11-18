@@ -210,6 +210,7 @@ final class AppModel: ObservableObject {
     private let store: PairedStore
     let watchPairing: WatchPairingCoordinator
     private let healthKit: any HealthKitReadinessProviding
+    private let recovery: RecoveryHRVService
     private let healthKitActivity: any HealthKitActivityProviding
     private let healthKitDefaults: UserDefaults
     private let offlineStore: OfflineCaptureStore
@@ -277,6 +278,9 @@ final class AppModel: ObservableObject {
             connectivity: watchConnectivity
         )
         self.healthKit = readiness
+        self.recovery = RecoveryHRVService(
+            healthKit: readiness, client: apiClient, defaults: healthKitDefaults
+        )
         self.healthKitActivity = activity
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
@@ -1573,6 +1577,12 @@ final class AppModel: ObservableObject {
         await acquireReadinessLock()
         lockHeld = true
         do {
+            // The recovery series is what readiness reads, so the last few nights go up before
+            // the readiness import and its response can show them. The backfill is bounded and
+            // resumable, and runs beside the import rather than delaying it.
+            recovery.prepare(for: session.baseURL.absoluteString)
+            await recovery.syncRecent(session: session)
+            Task { await recovery.backfill(session: session) }
             let selection = try await healthKit.selectSamples(
                 serverDate: date,
                 now: Date()

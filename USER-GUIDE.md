@@ -218,12 +218,16 @@ Exercise information is read-only. The training rules and prescription engine ar
 
 HealthKit readiness is optional and off by default. When enabled, the app reads only:
 
-- heart-rate variability (SDNN);
+- heart-rate variability (SDNN) — readiness uses a **recovery value per night**: the median of
+  that day's readings taken before 10:00. A morning with no reading has no HRV for that day; a
+  daytime reading is kept for the record but does not drive readiness;
 - resting heart rate;
 - bodyweight.
 
 Manual readiness takes precedence over HealthKit, which takes precedence over imported
-readiness. The app never writes to HealthKit and does not import sleep or workouts.
+readiness. The app never writes to HealthKit and does not import sleep or workouts. The recovery
+series is backfilled once from Health (up to five years) and then updated nightly; the import runs
+on an app refresh and after enabling HealthKit.
 
 **Workout heart rate is read only on Apple Watch**, for the live session display and the one
 saved HealthKit workout. It is not used for readiness, fatigue, progression or prescriptions.

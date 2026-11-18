@@ -50,6 +50,17 @@ struct StrengthShortcuts: AppShortcutsProvider {
             shortTitle: "Average (12 weeks)",
             systemImageName: "timer"
         )
+        // The start/finish intents already exist; one spoken phrase makes start reachable from
+        // Siri and the iPhone Action button. The provider is at the ten-phrase cap, so finish
+        // stays a Shortcuts action rather than a second phrase.
+        AppShortcut(
+            intent: StartWorkoutShortcutIntent(),
+            phrases: [
+                "Start my workout in \(.applicationName)",
+            ],
+            shortTitle: "Start workout",
+            systemImageName: "figure.strengthtraining.traditional"
+        )
         AppShortcut(
             intent: ExerciseProgressionIntent(),
             phrases: [

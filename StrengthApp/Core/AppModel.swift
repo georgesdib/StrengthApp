@@ -8,6 +8,14 @@ struct OfflineRecoveryConflict: Equatable {
     let pendingOperationCount: Int
 }
 
+enum AppTab: Hashable {
+    case today
+    case history
+    case progress
+    case explain
+    case settings
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     enum Phase: Equatable {
@@ -56,7 +64,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var pairedServerURL: String?
     @Published private(set) var errorMessage: String?
     @Published private(set) var pairingError: String?
-    @Published private(set) var activeWorkout: WorkoutDetail?
+    @Published private(set) var activeWorkout: WorkoutDetail? {
+        didSet {
+            // A different workout starts with no open exercises; the same workout keeps them.
+            guard activeWorkout?.workoutId != oldValue?.workoutId else { return }
+            activeExercises = []
+            persistActiveExercises()
+        }
+    }
+    /// Exercises the lifter started and has not ended. Supersets keep more than one open, and a
+    /// set — not a screen — is what starts one.
+    @Published private(set) var activeExercises: [ActiveExercise] = []
     @Published var narrativeEnabled: Bool = UserDefaults.standard.bool(
         forKey: "intelligence.narrative.enabled"
     ) {
@@ -79,6 +97,17 @@ final class AppModel: ObservableObject {
     ) {
         didSet { UserDefaults.standard.set(chatPlanEnabled, forKey: "intelligence.chat.plan") }
     }
+    /// Separate consent for health measurements (cardio minutes, time-in-zone, VO2max) leaving the
+    /// device. Plan data has its own toggle; health is a different class (DEC-LONGEVITY-02).
+    @Published var chatHealthEnabled: Bool = UserDefaults.standard.bool(
+        forKey: "intelligence.chat.health"
+    ) {
+        didSet { UserDefaults.standard.set(chatHealthEnabled, forKey: "intelligence.chat.health") }
+    }
+    /// The deterministic longevity facts behind the Today section; nil until loaded.
+    @Published private(set) var longevity: LongevitySummary?
+    /// Why the facts are missing. Nil once they load; never silently empty.
+    @Published private(set) var longevityError: String?
     @Published private(set) var deepSeekKeyPresent = false
     private let deepSeekKeyStore: any DeepSeekKeyStoring = KeychainDeepSeekKeyStore()
     @Published var narrativeDetail: NarrativeDetail = NarrativeDetail(
@@ -119,6 +148,43 @@ final class AppModel: ObservableObject {
     @Published private(set) var isSaving = false
     /// One rest interval for the whole app; the tab shell renders it on every screen.
     let restTimer = RestTimerModel()
+    @Published var selectedTab: AppTab = .today
+    @Published var showReadinessSheet = false
+    /// Daily reminder. The time is stored as hour and minute so a DST change follows the device clock.
+    @Published var reminderEnabled: Bool = UserDefaults.standard.bool(forKey: "nudge.enabled") {
+        didSet {
+            UserDefaults.standard.set(reminderEnabled, forKey: "nudge.enabled")
+            Task { @MainActor in
+                if reminderEnabled { _ = await self.nudges.requestAuthorization() }
+                await self.refreshNudges()
+            }
+        }
+    }
+    @Published var reminderHour: Int = UserDefaults.standard.object(
+        forKey: "nudge.hour"
+    ) as? Int ?? 18 {
+        didSet {
+            UserDefaults.standard.set(reminderHour, forKey: "nudge.hour")
+            scheduleNudgeRefresh()
+        }
+    }
+    @Published var reminderMinute: Int = UserDefaults.standard.object(
+        forKey: "nudge.minute"
+    ) as? Int ?? 0 {
+        didSet {
+            UserDefaults.standard.set(reminderMinute, forKey: "nudge.minute")
+            scheduleNudgeRefresh()
+        }
+    }
+    @Published private(set) var notificationsAuthorized = true
+    @Published private(set) var lastReminderOutcome: String?
+    @Published var todaySummaryEnabled: Bool = (UserDefaults.standard.object(
+        forKey: "todaySummary.enabled"
+    ) as? Bool) ?? true {
+        didSet {
+            UserDefaults.standard.set(todaySummaryEnabled, forKey: "todaySummary.enabled")
+        }
+    }
     @Published private(set) var isLoadingProgress = false
     @Published private(set) var mutationError: String?
     @Published private(set) var mutationFailureAmbiguous = false
@@ -129,6 +195,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var healthKitEnabled: Bool
     @Published private(set) var healthKitState: HealthKitReadinessState
     @Published private(set) var isImportingHealthKit = false
+    @Published private(set) var isSyncingActivity = false
+    @Published private(set) var activitySyncMessage: String?
     @Published private(set) var healthKitSelection: HealthKitReadinessSelection?
 
     @Published var serverURLText: String
@@ -136,9 +204,14 @@ final class AppModel: ObservableObject {
     @Published var awayServerText: String
     @Published var preferHome: Bool
     @Published private(set) var activeServerRoute: ServerRoute?
-    @Published private(set) var homeServerReachable: Bool?
+    @Published private(set) var homeServerProbe: ServerProbeResult?
+    /// Kept for routing and existing readers; the reason lives in homeServerProbe.
+    var homeServerReachable: Bool? { homeServerProbe.map(\.isReachable) }
     @Published private(set) var isCheckingHomeServer = false
     @Published private(set) var serverSettingsError: String?
+    /// An address the app accepted but the system will refuse to load. Saving still succeeds: the
+    /// owner may be mid-edit, and a warning must not block an unrelated correction.
+    @Published private(set) var serverSettingsWarning: String?
     @Published var pairingCodeText: String = ""
     @Published var pairingLabelText: String
 
@@ -148,6 +221,8 @@ final class AppModel: ObservableObject {
     private let store: PairedStore
     let watchPairing: WatchPairingCoordinator
     private let healthKit: any HealthKitReadinessProviding
+    private let recovery: RecoveryHRVService
+    private let healthKitActivity: any HealthKitActivityProviding
     private let healthKitDefaults: UserDefaults
     private let offlineStore: OfflineCaptureStore
     private let pageSize = 50
@@ -158,6 +233,9 @@ final class AppModel: ObservableObject {
     private var healthKitFollowUp = false
     private var networkMonitor: NetworkMonitor?
     private var restDoneCancellable: AnyCancellable?
+    private var nudgeTapCancellable: AnyCancellable?
+    private var nudgeRefreshTask: Task<Void, Never>?
+    private let nudges = NudgeScheduler.shared
     private var offlineRetryTask: Task<Void, Never>?
     private var offlineRetryAttempt = 0
     private let exerciseCatalogueCache: ExerciseCatalogueCache
@@ -185,6 +263,7 @@ final class AppModel: ObservableObject {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
         let readiness = healthKit ?? HealthKitReadinessService()
+        let activity = HealthKitActivityService()
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
         let resolvedAutomation = automation ?? WorkoutAutomation.shared
@@ -210,6 +289,10 @@ final class AppModel: ObservableObject {
             connectivity: watchConnectivity
         )
         self.healthKit = readiness
+        self.recovery = RecoveryHRVService(
+            healthKit: readiness, client: apiClient, defaults: healthKitDefaults
+        )
+        self.healthKitActivity = activity
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
         self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
@@ -241,6 +324,15 @@ final class AppModel: ObservableObject {
                     self?.handleRestNotificationDone()
                 }
             }
+        nudgeTapCancellable = NotificationCenter.default
+            .publisher(for: NudgeRouter.tapped)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.handlePendingNudgeTap()
+                }
+            }
+        restoreExerciseSession()
     }
 
     var hasMoreHistory: Bool {
@@ -287,6 +379,96 @@ final class AppModel: ObservableObject {
         canWriteReadiness && canPrescribe && canWriteWorkout
     }
 
+    /// Incremental HealthKit activity (C2). The history was promoted from an export, so this only
+    /// ever carries what happened after the cutoff — the app never backfills.
+    var canSyncActivity: Bool {
+        healthKitActivity.isAvailable && bootstrap?.capabilities.healthkitActivity == true
+    }
+
+    /// Authenticated cardio summary for the overview screen.
+    /// Loads the longevity facts on their own, without a model.
+    ///
+    /// They used to load inside the summary generator's facts closure, which does not run when the
+    /// on-device model is unavailable — the card then showed nothing at all.
+    func loadLongevity(force: Bool = false) async {
+        if !force, longevity != nil { return }
+        guard let session else {
+            longevityError = "pair with the server to see aerobic activity."
+            return
+        }
+        do {
+            let envelope = try await client.longevity(session: session)
+            if let summary = LongevitySummary(envelope: envelope) {
+                longevity = summary
+                longevityError = nil
+            } else {
+                longevityError = "the server returned no longevity assessment."
+            }
+        } catch is CancellationError {
+            // The view went away mid-request. Cancellation is not a finding; the next appearance
+            // asks again rather than displaying "cancelled".
+            return
+        } catch let error as URLError where error.code == .cancelled {
+            return
+        } catch {
+            longevityError = (error as? LocalizedError)?.errorDescription
+                ?? "the longevity assessment could not be loaded."
+        }
+    }
+
+    func loadCardioActivity(weeks: Int = 12, tiz: Bool = false) async throws -> CardioActivityPayload {
+        guard let session else { throw CardioOverviewError.notPaired }
+        return try await client.cardioActivity(session: session, weeks: weeks, includeTimeInZone: tiz)
+    }
+
+    enum CardioOverviewError: LocalizedError {
+        case notPaired
+        var errorDescription: String? { "Pair with the server to see cardio activity." }
+    }
+
+    func syncHealthKitActivity() async {
+        guard !isSyncingActivity else { return }
+        guard let session else {
+            activitySyncMessage = "Pair with the server before syncing activity."
+            return
+        }
+        isSyncingActivity = true
+        activitySyncMessage = nil
+        defer { isSyncingActivity = false }
+        do {
+            try await healthKitActivity.requestAuthorization()
+            let now = Date()
+            let batch = try await healthKitActivity.fetchBatch(now: now)
+            if !batch.workouts.isEmpty {
+                _ = try await client.uploadActivity(
+                    HealthKitActivityWorkoutsBody(workouts: batch.workouts),
+                    session: session,
+                    idempotencyKey: UUID().uuidString
+                )
+            }
+            if !batch.samples.isEmpty || !batch.metrics.isEmpty {
+                _ = try await client.uploadActivity(
+                    HealthKitActivitySamplesBody(samples: batch.samples, metrics: batch.metrics),
+                    session: session,
+                    idempotencyKey: UUID().uuidString
+                )
+            }
+            healthKitActivity.markSynced(now: now, workouts: batch.workouts)
+            activitySyncMessage = batch.isEmpty
+                ? "Nothing new since \(Self.shortDate(now))."
+                : "Synced \(batch.workouts.count) workout(s) and \(batch.samples.count) heart-rate sample(s)."
+        } catch {
+            activitySyncMessage = error.localizedDescription
+        }
+    }
+
+    private static func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
     var canUseHealthKit: Bool {
         healthKit.isAvailable && bootstrap?.capabilities.healthkitReadiness == true
     }
@@ -307,6 +489,7 @@ final class AppModel: ObservableObject {
         homeServerText = store.homeServerURL ?? ""
         awayServerText = store.awayServerURL ?? ""
         preferHome = store.preferHome
+        updateServerAddressWarning()
         let configuration = store.serverConfiguration
         let token = tokens.load()
         let pairedDevice = store.device
@@ -349,23 +532,21 @@ final class AppModel: ObservableObject {
         _ configuration: ServerConfiguration,
         token: String?
     ) async -> (route: ServerRoute, url: String)? {
-        var homeReachable: Bool?
+        var probe: ServerProbeResult?
         let home = configuration.homeURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let away = configuration.awayURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if configuration.preferHome, !home.isEmpty, !away.isEmpty, home != away,
            let token, let homeURL = try? IOSAPIClient.validatedBaseURL(home) {
             isCheckingHomeServer = true
-            homeReachable = await client.isServerReachable(
-                baseURL: homeURL, token: token
-            )
+            probe = await client.probeServer(baseURL: homeURL, token: token)
             isCheckingHomeServer = false
         }
-        homeServerReachable = homeReachable
+        homeServerProbe = probe
         return ServerConfiguration.select(
             homeURL: configuration.homeURL,
             awayURL: configuration.awayURL,
             preferHome: configuration.preferHome,
-            homeReachable: homeReachable
+            homeReachable: probe.map(\.isReachable)
         )
     }
 
@@ -470,14 +651,45 @@ final class AppModel: ObservableObject {
         if isCheckingHomeServer {
             return "Checking whether Home Server is reachable…"
         }
-        switch homeServerReachable {
-        case true:
+        switch homeServerProbe {
+        case .reachable:
             return "Home Server is reachable."
-        case false:
+        case .unauthorized:
+            return "Home Server answered but refused this device credential. Re-pair if it persists."
+        case .blockedByPolicy:
+            return "iOS refuses the Home Server address, so it is not merely unreachable. Use https:// or a local address."
+        case .serverError(let status):
+            return "Home Server answered HTTP \(status); Away Server is the fallback."
+        case .unreachable:
             return "Home Server is unreachable; Away Server is the fallback."
         case nil:
             return "Home Server is preferred; reachability is checked on launch, foreground and network changes."
         }
+    }
+
+    /// Re-check whatever is stored, not just what was typed: an address saved before this check
+    /// existed (or on another device) is exactly the case that failed without a warning.
+    private func updateServerAddressWarning() {
+        serverSettingsWarning = Self.cleartextWarning(
+            home: store.homeServerURL ?? "",
+            away: store.awayServerURL ?? ""
+        )
+    }
+
+    /// Addresses that can be stored but not loaded, named so the owner knows which field to fix.
+    private static func cleartextWarning(home: String, away: String) -> String? {
+        var blocked: [String] = []
+        if !home.isEmpty, ServerAddressPolicy.cleartextIsBlocked(home) {
+            blocked.append("Home Server")
+        }
+        if !away.isEmpty, ServerAddressPolicy.cleartextIsBlocked(away) {
+            blocked.append("Away Server")
+        }
+        guard !blocked.isEmpty else { return nil }
+        let subject = blocked.joined(separator: " and ")
+        return "\(subject) uses http:// with an address iOS refuses. Use https://, or a "
+            + "private-network address (192.168.x.x, 10.x.x.x), a .local name or a single-word "
+            + "host name. A tailnet or VPN address needs https://."
     }
 
     func saveServerSettings() async -> Bool {
@@ -507,7 +719,7 @@ final class AppModel: ObservableObject {
         if phase == .paired, let token = tokens.load() {
             selected = await chooseServerSelection(configuration, token: token)
         } else {
-            homeServerReachable = nil
+            homeServerProbe = nil
             isCheckingHomeServer = false
             selected = ServerConfiguration.select(
                 homeURL: home, awayURL: away, preferHome: preferHome,
@@ -530,6 +742,7 @@ final class AppModel: ObservableObject {
         store.bumpWatchConfigVersion()
         homeServerText = home
         awayServerText = away
+        updateServerAddressWarning()
         if phase == .pairing {
             serverURLText = selected.url
             activeServerRoute = selected.route
@@ -557,6 +770,7 @@ final class AppModel: ObservableObject {
             return
         }
         serverSettingsError = nil
+        updateServerAddressWarning()
         activeServerRoute = selected.route
         if changed {
             session = IOSSession(
@@ -583,6 +797,180 @@ final class AppModel: ObservableObject {
         if phase == .paired, let session {
             await watchPairing.foreground(session: session, homeBaseURL: store.homeServerURL)
         }
+        handlePendingNudgeTap()
+        scheduleNudgeRefresh()
+    }
+
+    // MARK: - Daily reminder
+
+    var reminderTime: Date {
+        get {
+            var components = DateComponents()
+            components.hour = reminderHour
+            components.minute = reminderMinute
+            return Calendar.current.date(from: components) ?? Date()
+        }
+        set {
+            let components = Calendar.current.dateComponents([.hour, .minute], from: newValue)
+            if let hour = components.hour { reminderHour = hour }
+            if let minute = components.minute { reminderMinute = minute }
+        }
+    }
+
+    func handlePendingNudgeTap() {
+        guard NudgeRouter.shared.consume() else { return }
+        handleNudgeTap()
+    }
+
+    /// A tap lands on Today, and opens readiness when that is the thing actually missing.
+    func handleNudgeTap() {
+        guard phase == .paired else { return }
+        selectedTab = .today
+        if canWriteReadiness, today?.readiness?.isLogged != true {
+            showReadinessSheet = true
+        }
+    }
+
+    func refreshNudges() async {
+        notificationsAuthorized = await nudges.isAuthorized
+        guard phase == .paired else {
+            await nudges.clear()
+            return
+        }
+        await nudges.refresh(
+            enabled: reminderEnabled,
+            hour: reminderHour,
+            minute: reminderMinute,
+            facts: reminderEnabled ? currentNudgeFacts() : nil
+        )
+        lastReminderOutcome = nudges.lastOutcomeSummary
+    }
+
+    private func scheduleNudgeRefresh() {
+        nudgeRefreshTask?.cancel()
+        nudgeRefreshTask = Task { @MainActor [weak self] in
+            // Collapse the burst of refreshes a foreground or a mutation produces.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, !Task.isCancelled else { return }
+            await self.refreshNudges()
+        }
+    }
+
+    private func currentNudgeFacts() -> NudgeFacts {
+        let readiness: NudgeFacts.Readiness = today?.readiness?.isLogged == true
+            ? .logged(score: today?.readinessScore?.score)
+            : .missing
+        var planned: NudgeFacts.PlannedSession?
+        if case .issued(let issued) = prescriptionState {
+            let items = issued.plan.items
+            let focus = items.first { ($0.loadKg ?? 0) > 0 } ?? items.first
+            planned = NudgeFacts.PlannedSession(
+                label: issued.plan.sessionLabel ?? Self.sessionLabel(issued.sessionType),
+                exerciseCount: items.count,
+                focusName: focus.flatMap { item in
+                    exerciseCatalogue.first { $0.id == item.exerciseId }?.display
+                },
+                focusSets: focus?.sets,
+                focusReps: focus?.repsLabel,
+                focusLoadKg: focus?.loadKg
+            )
+        }
+        return NudgeFacts(
+            readiness: readiness,
+            planned: planned,
+            sessionInProgress: activeWorkout != nil
+        )
+    }
+
+    private static func sessionLabel(_ value: String) -> String {
+        value.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    // MARK: - Today summary
+
+    func makeTodaySummaryModel() -> TodaySummaryModel {
+        let facts: @MainActor () async -> TodaySummaryFacts = { [weak self] in
+            await self?.todaySummaryFacts()
+                ?? TodaySummaryFacts(date: Self.isoDate(), readinessLogged: false)
+        }
+        // The configured chat model is the configured agent. There is no silent fallback: a
+        // DeepSeek selection with no key shows the reason instead of using the on-device model.
+        if chatModelChoice == .deepSeek {
+            let key = (try? deepSeekKeyStore.load()) ?? nil
+            return TodaySummaryModel(
+                generator: DeepSeekTodaySummaryGenerator(
+                    api: DeepSeekClient(apiKey: key),
+                    keyPresent: key?.isEmpty == false
+                ),
+                modelLabel: "DeepSeek",
+                sendsFactsOffDevice: true,
+                facts: facts
+            )
+        }
+        return TodaySummaryModel(
+            generator: FoundationTodaySummaryGenerator(),
+            modelLabel: "On this iPhone",
+            sendsFactsOffDevice: false,
+            facts: facts
+        )
+    }
+
+    func todaySummaryFacts() async -> TodaySummaryFacts {
+        // The chat plan toggle is the athlete's consent for plan and prescription data leaving the
+        // device. With DeepSeek selected and that toggle off, the summary is written without it.
+        let includePlan = chatModelChoice == .onDevice || chatPlanEnabled
+        let planned = includePlan ? currentNudgeFacts().planned : nil
+        var overview: String?
+        var longevityFacts: String?
+        await loadLongevity()
+        if let session {
+            let toolbox = ChatToolbox(client: client, session: session)
+            overview = try? await toolbox.trainingOverview(asOf: nil, windowWeeks: 4)
+        }
+        // The numbers come from the athlete's own server; the consent governs only what is handed
+        // to an off-device model.
+        if let longevity, chatModelChoice == .onDevice || chatHealthEnabled {
+            longevityFacts = longevity.detail
+        }
+        return TodaySummaryFacts(
+            date: today?.date ?? Self.isoDate(),
+            readinessLogged: today?.readiness?.isLogged ?? false,
+            readinessScore: today?.readinessScore?.score,
+            sessionLabel: planned?.label,
+            exerciseCount: planned?.exerciseCount,
+            leadLift: planned?.focusName,
+            leadLoadKg: planned?.focusLoadKg,
+            overviewFacts: overview,
+            longevity: longevityFacts
+        )
+    }
+
+    /// The day, the readiness answer, the issued plan and the model choice. A change in any of them
+    /// is a different summary, so the card reloads; nothing else does.
+    var todaySummaryFingerprint: String {
+        let score = today?.readinessScore?.score.map { String($0) } ?? "-"
+        let planId: String
+        if case .issued(let issued) = prescriptionState {
+            planId = issued.issuedPlanId
+        } else {
+            planId = "-"
+        }
+        return [
+            today?.date ?? "",
+            String(today?.readiness?.isLogged ?? false),
+            score,
+            planId,
+            chatModelChoice.rawValue,
+            String(chatHealthEnabled),
+            longevity?.headline ?? "-",
+        ].joined(separator: "|")
+    }
+
+    private static func isoDate() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
     }
 
     // MARK: Reads
@@ -685,6 +1073,7 @@ final class AppModel: ObservableObject {
             }
             _ = apply(.activeWorkoutChanged(reconciled))
             isOffline = false
+            scheduleNudgeRefresh()
             if !healthKitEnabled {
                 healthKitState = .featureDisabled
             } else if !canUseHealthKit {
@@ -953,6 +1342,112 @@ final class AppModel: ObservableObject {
         recordExecutionEvents([event])
     }
 
+    // MARK: Active exercises
+
+    private static let activeExerciseKey = "workout.activeExercises"
+
+    /// The first set starts the exercise; a warm-up counts, because RIR 6 classifies the set, it
+    /// does not decide whether an exercise is under way.
+    func startExercise(planItemIndex: Int?, exerciseId: String, at date: Date = Date()) {
+        guard activeWorkout != nil, !isMirroringWatchSession else { return }
+        let key = ActiveExercise.key(planItemIndex: planItemIndex, exerciseId: exerciseId)
+        guard !activeExercises.contains(where: { $0.key == key }) else { return }
+        activeExercises.append(
+            ActiveExercise(
+                key: key,
+                planItemIndex: planItemIndex,
+                exerciseId: exerciseId,
+                startedAt: date
+            )
+        )
+        persistActiveExercises()
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .exerciseStarted,
+            occurredAt: ServerClock.encodedISO(date),
+            planItemIndex: planItemIndex,
+            payload: ["exercise_id": .string(exerciseId)]
+        ))
+    }
+
+    @discardableResult
+    func endExercise(planItemIndex: Int?, exerciseId: String, at date: Date = Date()) -> Bool {
+        let key = ActiveExercise.key(planItemIndex: planItemIndex, exerciseId: exerciseId)
+        guard let position = activeExercises.firstIndex(where: { $0.key == key }) else {
+            return false
+        }
+        let exercise = activeExercises[position]
+        // Record before clearing the state: if the telemetry write fails the exercise is still
+        // open and can be ended again.
+        recordExecutionEvent(ExecutionEvent(
+            eventType: .exerciseCompleted,
+            occurredAt: ServerClock.encodedISO(date),
+            planItemIndex: exercise.planItemIndex,
+            payload: ["exercise_id": .string(exercise.exerciseId)]
+        ))
+        activeExercises.remove(at: position)
+        persistActiveExercises()
+        closeRest(for: exercise)
+        return true
+    }
+
+    func isExerciseActive(planItemIndex: Int?, exerciseId: String) -> Bool {
+        let key = ActiveExercise.key(planItemIndex: planItemIndex, exerciseId: exerciseId)
+        return activeExercises.contains { $0.key == key }
+    }
+
+    /// Finishing the workout closes whatever is still open, so a session never ends with an
+    /// exercise started and never completed.
+    func endAllExercises(at date: Date = Date()) {
+        guard !activeExercises.isEmpty else { return }
+        for exercise in activeExercises {
+            recordExecutionEvent(ExecutionEvent(
+                eventType: .exerciseCompleted,
+                occurredAt: ServerClock.encodedISO(date),
+                planItemIndex: exercise.planItemIndex,
+                payload: ["exercise_id": .string(exercise.exerciseId)]
+            ))
+        }
+        activeExercises = []
+        persistActiveExercises()
+    }
+
+    private func closeRest(for exercise: ActiveExercise) {
+        guard restTimer.startedAt != nil else { return }
+        let sameExercise = restTimer.exerciseId.map { $0 == exercise.exerciseId } ?? false
+        let sameItem = restTimer.planItemIndex.map { $0 == exercise.planItemIndex } ?? false
+        guard sameExercise || sameItem else { return }
+        _ = restTimer.finish(outcome: "completed")
+    }
+
+    private func persistActiveExercises() {
+        guard let workoutId = activeWorkout?.workoutId, !activeExercises.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: Self.activeExerciseKey)
+            return
+        }
+        let session = ActiveExerciseSession(workoutId: workoutId, exercises: activeExercises)
+        if let data = try? JSONEncoder().encode(session) {
+            UserDefaults.standard.set(data, forKey: Self.activeExerciseKey)
+        }
+    }
+
+    /// A relaunch keeps the open exercises and a rest that outlived the app, so neither the
+    /// completion event nor the rest interval is lost.
+    private func restoreExerciseSession() {
+        guard let data = UserDefaults.standard.data(forKey: Self.activeExerciseKey),
+              let saved = try? JSONDecoder().decode(ActiveExerciseSession.self, from: data),
+              let workout = activeWorkout,
+              saved.workoutId == workout.workoutId else {
+            UserDefaults.standard.removeObject(forKey: Self.activeExerciseKey)
+            activeExercises = []
+            _ = restTimer.restore(workoutId: nil)
+            return
+        }
+        activeExercises = saved.exercises
+        if let result = restTimer.restore(workoutId: workout.workoutId) {
+            recordRestResult(result)
+        }
+    }
+
     // MARK: Rest timer
 
     /// Starts the single app-level rest interval and records its telemetry in one place, so a
@@ -968,7 +1463,8 @@ final class AppModel: ObservableObject {
             seconds: seconds,
             planItemIndex: planItemIndex,
             exerciseId: exerciseId,
-            startedAt: startedAt
+            startedAt: startedAt,
+            workoutId: activeWorkout?.workoutId
         )
         recordExecutionEvent(ExecutionEvent(
             eventType: .restStarted,
@@ -1120,6 +1616,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A queued HealthKit import is always superseded by the next one: its body may carry a date
+    /// the server no longer accepts, so it can never replay, and leaving it in place blocks every
+    /// later import behind a write that cannot succeed. The new import is idempotent and carries
+    /// today's values, so dropping the old one loses nothing.
+    private func discardSupersededHealthKitWrites(session: IOSSession) {
+        let pending = client.pendingMutations(for: session)
+        guard pending.contains(where: { $0.kind == .healthkitReadiness }) else { return }
+        for entry in pending where entry.kind == .healthkitReadiness {
+            client.discard(entry)
+        }
+        refreshPendingMutations()
+        if pendingMutations.isEmpty {
+            recoveryMessage = nil
+        }
+    }
+
     private func runHealthKitImport(session: IOSSession, date: String) async {
         isImportingHealthKit = true
         healthKitRefreshError = nil
@@ -1131,7 +1643,14 @@ final class AppModel: ObservableObject {
         }
         await acquireReadinessLock()
         lockHeld = true
+        discardSupersededHealthKitWrites(session: session)
         do {
+            // The recovery series is what readiness reads, so the last few nights go up before
+            // the readiness import and its response can show them. The backfill is bounded and
+            // resumable, and runs beside the import rather than delaying it.
+            recovery.prepare(for: session.baseURL.absoluteString)
+            await recovery.syncRecent(session: session)
+            Task { await recovery.backfill(session: session) }
             let selection = try await healthKit.selectSamples(
                 serverDate: date,
                 now: Date()
@@ -1149,7 +1668,8 @@ final class AppModel: ObservableObject {
             let key = healthKitOperation.use(request)
             guard permitsMutation(kind: .healthkitReadiness, operationId: key) else {
                 healthKitState = .importError(
-                    mutationError ?? "Another operation is awaiting confirmation."
+                    mutationError
+                        ?? "A previous write was not confirmed. Retry or discard it on Today."
                 )
                 return
             }
@@ -1721,6 +2241,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func movePlanExercise(
+        workoutId: String,
+        itemIndex: Int,
+        toIndex: Int,
+        expectedExerciseId: String,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard let session else { return false }
+        return await performPlanEdit(idempotencyKey: idempotencyKey) {
+            try await client.movePlanExercise(
+                workoutId: workoutId,
+                itemIndex: itemIndex,
+                body: PlanMoveRequest(
+                    toIndex: toIndex,
+                    expectedExerciseId: expectedExerciseId
+                ),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+        }
+    }
+
     func addPlanExercise(
         workoutId: String,
         exerciseId: String,
@@ -1756,7 +2298,7 @@ final class AppModel: ObservableObject {
             _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
-            pushExecutionIfMirroring()
+            pushExecutionToWatch()
             return true
         } catch {
             if let api = error as? APIError,
@@ -1783,6 +2325,8 @@ final class AppModel: ObservableObject {
             mutationError = "This workout is already queued for finish."
             return false
         }
+        // An open exercise would otherwise be recorded as started and never completed.
+        endAllExercises()
         // Execution events queued before finish must reach the server first; the API accepts
         // late events but the local replay path needs an active workout to flush them.
         if hasPendingOfflineCapture {
@@ -1814,6 +2358,7 @@ final class AppModel: ObservableObject {
             workoutRefreshGrace = false
             restTimer.dismiss()
             clearOfflineCaptureAfterServerCompletion()
+            nudges.recordSessionCompleted()
             await refresh()
             await loadHistory(reset: true)
             return true
@@ -1857,6 +2402,8 @@ final class AppModel: ObservableObject {
             recoveryIssue = nil
             workoutRefreshGrace = false
             restTimer.dismiss()
+            activeExercises = []
+            persistActiveExercises()
             await refresh()
             return true
         } catch {
@@ -1904,6 +2451,13 @@ final class AppModel: ObservableObject {
         FoundationNarrativeGenerator()
     }
 
+    func explain(_ question: String) async throws -> ExplainResponse {
+        guard let session else {
+            throw APIError.transport("Pair this iPhone with the server first.")
+        }
+        return try await client.explain(question: question, session: session)
+    }
+
     func makeChatModel() -> TrainingChatModel {
         guard let session else {
             return TrainingChatModel(
@@ -1917,7 +2471,8 @@ final class AppModel: ObservableObject {
                     api: DeepSeekClient(apiKey: key),
                     keyPresent: key?.isEmpty == false,
                     facts: ChatToolbox(client: client, session: session),
-                    includePlan: chatPlanEnabled
+                    includePlan: chatPlanEnabled,
+                    includeHealth: chatHealthEnabled
                 ),
                 modelLabel: "DeepSeek",
                 planEnabled: chatPlanEnabled
@@ -1985,6 +2540,9 @@ final class AppModel: ObservableObject {
 
     // MARK: Durable pending operations
 
+    /// Accepts any JSON object; the replayed upload's payload is not needed here.
+    private struct JournalReplayAck: Decodable {}
+
     func recoverPendingMutations() async {
         guard let session, !isRecovering, !isSaving else { return }
         let entries = client.pendingMutations(for: session)
@@ -2000,6 +2558,13 @@ final class AppModel: ObservableObject {
         }
         var message: String?
         for entry in entries {
+            // A queued HealthKit import is always superseded: the next import carries today's
+            // values, while the queued body may carry a date the server no longer accepts. Left
+            // in place it can never replay and blocks every later write.
+            if entry.kind == .healthkitReadiness {
+                client.discard(entry)
+                continue
+            }
             guard entry.state == .pending else {
                 message = "\(entry.kind.label) has an unresolved conflict."
                 continue
@@ -2026,8 +2591,11 @@ final class AppModel: ObservableObject {
                 case .completeWorkout, .abandonWorkout:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = false
-                case .executionEvents:
-                    break
+                case .executionEvents, .healthkitActivity:
+                    // Both are idempotent batch uploads. Leaving them unreplayed stranded the
+                    // entry forever and blocked every later write; replay resolves it, and a
+                    // rejected batch is removed by the journal failure rules.
+                    let _: JournalReplayAck = try await client.replay(entry, session: session)
                 }
             } catch let api as APIError {
                 if api.code == "idempotency_conflict" {
@@ -2069,10 +2637,12 @@ final class AppModel: ObservableObject {
     func clearWorkoutRecovery() {
         // Clear stale local state; the server remains the authority on the next refresh.
         activeWorkout = nil
+        activeExercises = []
         recoveryIssue = nil
         workoutRefreshGrace = false
         mutationError = nil
         persistActiveWorkout()
+        persistActiveExercises()
     }
 
     func abandonRecoveredWorkout() async {
@@ -2586,8 +3156,10 @@ final class AppModel: ObservableObject {
     /// Nudges the watch with the new plan after a phone edit. Best effort and redundant by
     /// design: the watch also refreshes on foreground and after each set (contract §10.2), so a
     /// dropped payload costs one stale view, never a lost edit.
-    private func pushExecutionIfMirroring() {
-        guard isMirroringWatchSession, let workout = activeWorkout else { return }
+    private func pushExecutionToWatch() {
+        // Push after any plan edit, whether the watch owns capture or is read-only; the watch
+        // mirrors the plan in both states and its read-only path now applies revisions.
+        guard let workout = activeWorkout else { return }
         watchPairing.pushExecution(workout)
     }
 
@@ -2609,6 +3181,9 @@ final class AppModel: ObservableObject {
             _ = apply(.operationSucceeded(updated))
             workoutRefreshGrace = true
             persistActiveWorkout()
+            // Tell an open watch immediately; otherwise it keeps writing until its next
+            // foreground/refresh, even though the server now assigns ownership to the phone.
+            watchPairing.pushExecution(updated)
             mutationError = nil
             return true
         } catch {
@@ -2626,6 +3201,11 @@ final class AppModel: ObservableObject {
             mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
             return false
         }
+        // A HealthKit import is read-derived, idempotent and independent of queued writes. Blocking
+        // it behind an unrelated pending operation would strand the owner with nothing to retry.
+        if kind == .healthkitReadiness {
+            return true
+        }
         let unresolved = pendingMutations
         guard !unresolved.isEmpty else { return true }
         if unresolved.contains(where: {
@@ -2633,7 +3213,7 @@ final class AppModel: ObservableObject {
         }) {
             return true
         }
-        mutationError = "A previous operation is still awaiting confirmation. Retry or discard it before starting another."
+        mutationError = "A previous write was not confirmed. Retry or discard it on Today before starting another."
         return false
     }
 

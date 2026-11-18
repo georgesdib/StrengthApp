@@ -1,0 +1,59 @@
+{
+  "as_of": "2026-11-18",
+  "reference": {
+    "min_minutes": 150.0,
+    "max_minutes": 300.0,
+    "equivalence": "moderate + 2 * vigorous",
+    "role": "context, not a target",
+    "source": "WHO 2020 aerobic activity guideline"
+  },
+  "last_week": {
+    "iso_week": "2026-W46",
+    "start": "2026-11-09",
+    "end": "2026-11-15",
+    "workouts": 2,
+    "total_minutes": 100.0,
+    "moderate_minutes": 60.0,
+    "vigorous_minutes": 40.0,
+    "equivalent_minutes": 140.0,
+    "unclassified_minutes": 0.0,
+    "resistance_minutes": 0.0,
+    "resistance_classified_minutes": 0.0,
+    "classified_share": 1.0,
+    "gate": "signal",
+    "relation": "below",
+    "above_upper": false,
+    "remaining_minutes": 10.0,
+    "tier_minutes": {
+      "met": 100.0,
+      "hr": 0,
+      "none": 0
+    }
+  },
+  "current_week": {
+    "iso_week": "2026-W47",
+    "start": "2026-11-16",
+    "end": "2026-11-22",
+    "days_elapsed": 3,
+    "days_remaining": 4,
+    "workouts": 1,
+    "total_minutes": 30.0,
+    "moderate_minutes": 30.0,
+    "vigorous_minutes": 0.0,
+    "equivalent_minutes": 30.0,
+    "unclassified_minutes": 0.0
+  },
+  "sessions_remaining": null,
+  "vo2max": {
+    "status": "current",
+    "value": 48.0,
+    "unit": "ml/kg/min",
+    "measured_on": "2026-11-12",
+    "source": "device",
+    "method": "Apple Watch",
+    "age_days": 6
+  },
+  "time_in_zone": null,
+  "patterns": null,
+  "missing": []
+}

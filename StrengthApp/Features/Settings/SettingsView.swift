@@ -78,6 +78,13 @@ struct SettingsView: View {
         }
     }
 
+    private var reminderMessageSource: String {
+        let availability = FoundationNudgeGenerator().availability()
+        return availability.isAvailable
+            ? "The message is written on this iPhone from your own facts."
+            : "The message uses the built-in wording. " + availability.reasonText
+    }
+
     private func availabilityText(_ availability: NarrativeAvailability) -> String {
         switch availability {
         case .available: return "The on-device model is ready."
@@ -117,6 +124,12 @@ struct SettingsView: View {
                         Text(error)
                             .font(.footnote)
                             .foregroundStyle(.red)
+                    }
+                    if let warning = model.serverSettingsWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .accessibilityIdentifier("server-settings-warning")
                     }
                     if isSavingServerSettings {
                         HStack {
@@ -182,8 +195,33 @@ struct SettingsView: View {
                         Text(message)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                     Text("Reads only HRV, resting heart rate and bodyweight. No sleep, workouts or write access.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Recorded activity") {
+                    Button {
+                        Task { await model.syncHealthKitActivity() }
+                    } label: {
+                        if model.isSyncingActivity {
+                            HStack { ProgressView(); Text("Syncing…") }
+                        } else {
+                            Text("Sync workouts and heart rate")
+                        }
+                    }
+                    .disabled(!model.canSyncActivity || model.isSyncingActivity)
+                    .accessibilityIdentifier("activity-sync-button")
+                    if let message = model.activitySyncMessage {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    Text("Sends workouts recorded since the import cutoff, plus heart rate inside them "
+                         + "and for ten minutes after. Nothing is backfilled and nothing is written to Health.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -202,6 +240,14 @@ struct SettingsView: View {
                             .accessibilityIdentifier("chat-plan-toggle")
                         Text("Adds the current prescription, programme summary and adherence to chat. "
                              + "The model may suggest changes; suggestions are never applied.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Toggle("Include cardio and VO₂max data", isOn: $model.chatHealthEnabled)
+                            .disabled(model.chatModelChoice == .onDevice)
+                            .accessibilityIdentifier("chat-health-toggle")
+                        Text("Shares aerobic minutes, time-in-zone and your latest VO₂max with the "
+                             + "model. On this iPhone nothing leaves the device, so no consent is needed.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
@@ -278,6 +324,56 @@ struct SettingsView: View {
                     }
                     Text("Uses Apple Intelligence on this iPhone. The facts stay on the device, "
                          + "nothing is sent to a server, and explanations are not saved.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Today summary") {
+                    Toggle("Summary at the top of Today", isOn: $model.todaySummaryEnabled)
+                        .accessibilityIdentifier("today-summary-toggle")
+                    if model.todaySummaryEnabled {
+                        Text(model.chatModelChoice == .deepSeek
+                             ? "Uses DeepSeek, the model selected for Chat. When the card loads, "
+                                + "your readiness and four-week facts are sent to DeepSeek; plan "
+                                + "details are included only while \"Include plan and prescription "
+                                + "data\" is on."
+                             : "Uses Apple Intelligence on this iPhone. The facts stay on the device.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Daily reminder") {
+                    Toggle("Remind me to train", isOn: $model.reminderEnabled)
+                        .accessibilityIdentifier("reminder-toggle")
+                    if model.reminderEnabled {
+                        DatePicker(
+                            "Time",
+                            selection: Binding(
+                                get: { model.reminderTime },
+                                set: { model.reminderTime = $0 }
+                            ),
+                            displayedComponents: .hourAndMinute
+                        )
+                        .accessibilityIdentifier("reminder-time")
+                        if !model.notificationsAuthorized {
+                            Text("Notifications are off for this app. Turn them on in iOS Settings "
+                                 + "to receive the reminder.")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                        }
+                        Text(reminderMessageSource)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        if let outcome = model.lastReminderOutcome {
+                            Text("Last reminder: \(outcome).")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("reminder-last-outcome")
+                        }
+                    }
+                    Text("One reminder a day. It is skipped when you have already trained, and "
+                         + "nothing leaves this iPhone.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

@@ -85,8 +85,9 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   or a prescription is no longer usable; an opt-in HealthKit section showing HRV/RHR/bodyweight
   effective values, source, sample age and Import from HealthKit; pull to refresh.
 - **Readiness** — manual sleep/energy/mood/soreness/stress (1–5), optional HRV/RHR/bodyweight/
-  wearable and legacy labels, optional note; HealthKit HRV/RHR/bodyweight values/source/age are
-  shown on the same form with manual override; missing fields stay missing; errors stay visible.
+  wearable, optional note; HealthKit HRV (a nightly recovery value), RHR and bodyweight
+  values/source/age are shown on the same form with manual override; missing fields stay missing;
+  errors stay visible.
 - **Workout ready** — once the server finishes building, Today shows a ready card with the
   session type, date, exercise count and warnings. **Review workout** opens the full plan, and
   **Start workout** on that screen starts by issued-plan id and opens the active workout directly;
@@ -95,16 +96,18 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   **iPhone** or **Apple Watch** as the execution target. A watch-targeted plan shows a notice on
   the phone and is started on the watch; it never exposes the phone Start button.
 - **Workout** — exercise-first list with an exercise detail screen, prepopulated planned sets,
-  performed-set logging with load/reps/RIR, optional mean velocity when the plan supplies a
-  velocity target, optional per-rep velocity with
+  performed-set logging with load/reps/RIR, the plan's velocity target beside RIR when one is
+  supplied, optional mean velocity for external-load work, optional per-rep velocity with
   comma/space-separated input, explicit Start set and set-completion timestamps, performed-set
   add/remove, outside-plan exercise logging through the authenticated catalogue, a working-set
   rest timer using the plan’s `rest_s` with prescribed/actual comparison, observable skip and
   extension, one app-level timer that stays visible above the tab bar on Today and every tab, a
   local notification at rest end with a **Done** action (and an in-app haptic/sound while active),
   warm-up rows including an empty-bar first set, an explicit prescription-item picker when the
-  exercise appears more than once, and form ratings on the exercise screen that show the current
-  value and label a later save as a correction, additive plan
+  exercise appears more than once, a first-set-starts / **End exercise** lifecycle that offers the
+  optional form rating and lets two exercises overlap as a superset, and a rest interval that
+  survives relaunch with a Lock Screen/Dynamic Island countdown and a Control Center control,
+  additive plan
   editing (add/swap/remove and set count), finish with one sRPE picker (Not recorded or 1–10),
   optional productivity (Not recorded or 1–5), abandon with confirmation.
 - **Session report** — after an acknowledged completion, the iPhone shows the AFC-2 completed-workout
@@ -120,9 +123,13 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   and back-symptom summary over a 4/8/12/26/52-week window.
 - **Settings** — Home Server, Away Server, Prefer Home Server, active route, Exercise Library,
   Apple Watch Pair/Status/Revoke, device id/label, app version, opt-in HealthKit readiness, Forget
-  this device (local token only), re-pair instructions.
+  this device (local token only), re-pair instructions. An `http://` address only loads on the
+  local network (a private-network address, a `.local` name or a single-word host); anything
+  else, including a tailnet or VPN address, needs `https://`. Saving an address that cannot
+  load shows a warning instead of failing later.
 - **Apple Watch** — credential status plus the Home server's watch-targeted work. A watch-targeted
-  plan is started, logged and finished on the watch (working sets and loggable warm-up sets,
+  plan is started, logged and finished on the watch (working sets and warm-ups logged as ordinary
+  RIR-6 sets,
   form rating, mean velocity for external-load work even without a target, rest with +15s/−15s
   and a local end-of-rest notification, total elapsed time beside heart rate, one HealthKit
   workout, editable sRPE and optional productivity at finish, local-first outbox);
@@ -258,7 +265,8 @@ DRY_RUN=1 ./scripts/install-iphone.sh  # print the resolved device, build nothin
 
 The script picks the paired physical iPhone from `xcrun devicectl list devices` (simulators are
 ignored); set `IPHONE_UDID` to override. It is the phone counterpart of
-`scripts/install-watch.sh`.
+`scripts/install-watch.sh`, which builds the phone app and installs its embedded watch app on the
+paired watch.
 
 Two failure modes that are environmental rather than code:
 

@@ -321,6 +321,67 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertNotNil(capture.session?.rest?.endedAt, "the rest is closed, not left open")
     }
 
+    func testWarmupIsAnOrdinarySetWithAReservedIndexAndNoRest() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/sets") == true {
+                throw APIError.transport("offline")
+            }
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+        try engine.beginSet()
+
+        // RIR 6 is the only warm-up marker; the index keeps the two ranges apart.
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 6), 1000)
+        let index = engine.nextSetIndex(planItemIndex: 0, rir: 6)
+        _ = await engine.logSet(
+            WatchExecutionEngine.SetEntry(
+                exerciseId: "competition_squat",
+                planItemIndex: 0,
+                setIndex: index,
+                loadKg: 40,
+                reps: 5,
+                rir: 6
+            ),
+            session: session()
+        )
+
+        XCTAssertEqual(engine.setsDone(planItemIndex: 0), 0, "a warm-up is not a working set")
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 6), 1001)
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 2), 1)
+
+        let capture = try store.load()
+        let types = capture.operations.flatMap { operation -> [ExecutionEventType] in
+            guard case .executionEvents(let events) = operation.body else { return [] }
+            return events.map(\.eventType)
+        }
+        XCTAssertEqual(types, [.exerciseStarted, .setStarted, .setCompleted])
+        XCTAssertNil(capture.session?.rest, "a warm-up does not open a rest")
+        let queuedIndex = capture.operations.compactMap { operation -> Int? in
+            guard case .addSet(let body) = operation.body else { return nil }
+            return body.setIndex
+        }
+        XCTAssertEqual(queuedIndex, [1000])
+
+        // A second warm-up climbs above the first, and undoing it frees only its own index.
+        _ = await engine.logSet(
+            WatchExecutionEngine.SetEntry(
+                exerciseId: "competition_squat",
+                planItemIndex: 0,
+                setIndex: engine.nextSetIndex(planItemIndex: 0, rir: 6),
+                loadKg: 60,
+                reps: 3,
+                rir: 6
+            ),
+            session: session()
+        )
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 6), 1002)
+        XCTAssertTrue(engine.undoLastPendingSet())
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 6), 1001)
+    }
+
     func testSetCompletionCarriesTheAcknowledgedServerSetId() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/sets") == true {
@@ -719,6 +780,27 @@ final class WatchExecutionEngineTests: XCTestCase {
         let result = await engine.logSet(entry(setIndex: 1), session: session())
         XCTAssertFalse(result.persisted, "a read-only watch cannot capture")
         XCTAssertEqual(try store.load().operations.count, 0)
+    }
+
+    func testReadOnlyWatchStillAppliesAPlanRevision() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/execution") == true {
+                return (200, Data(Self.executionPayload(
+                    owner: "phone-1", revision: 1
+                ).utf8))
+            }
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        _ = await engine.reconcile(session: session())
+
+        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+        XCTAssertEqual(
+            engine.workout?.planRevision, 1,
+            "a read-only watch must still mirror phone plan revisions"
+        )
     }
 
     func testReconciliationEndsWhenTheServerCompletedTheWorkout() async throws {

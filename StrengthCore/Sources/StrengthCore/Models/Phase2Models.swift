@@ -201,6 +201,13 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         guard let rirTarget else { return "—" }
         return "RIR \(rirTarget)"
     }
+
+    /// Display form of the server's prescribed bar-speed target. Nil when the plan asks for
+    /// no target; the client never derives or adjusts one.
+    public var velocityTargetLabel: String? {
+        guard let velocityTarget, velocityTarget > 0 else { return nil }
+        return String(format: "%.2f m/s", velocityTarget)
+    }
 }
 
 // MARK: - Plan request (R7)
@@ -785,6 +792,16 @@ public struct PlanSetsRequest: Encodable, Equatable {
 
     public init(delta: Int, expectedExerciseId: String) {
         self.delta = delta
+        self.expectedExerciseId = expectedExerciseId
+    }
+}
+
+public struct PlanMoveRequest: Encodable, Equatable {
+    public let toIndex: Int
+    public let expectedExerciseId: String
+
+    public init(toIndex: Int, expectedExerciseId: String) {
+        self.toIndex = toIndex
         self.expectedExerciseId = expectedExerciseId
     }
 }

@@ -68,7 +68,9 @@ struct WatchExerciseView: View {
             }
         }
         .onAppear { prepare() }
-        .onChange(of: execution.selectedItem?.orderIndex) { _, _ in prepare() }
+        .onChange(of: execution.selectedItem?.orderIndex) { _, _ in
+            prepare()
+        }
         .onChange(of: loadKg) { _, value in execution.draftChanged(loadKg: value, reps: reps) }
         .onChange(of: reps) { _, value in execution.draftChanged(loadKg: loadKg, reps: value) }
         .sheet(isPresented: $showingRIR) { completionSheet }
@@ -128,6 +130,12 @@ struct WatchExerciseView: View {
             Text(item.effortLabel)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            if let target = item.velocityTargetLabel {
+                Text("target \(target)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("watch-target-velocity")
+            }
         }
     }
 
@@ -159,11 +167,7 @@ struct WatchExerciseView: View {
                 .accessibilityIdentifier("watch-start-set")
             }
             Button("End exercise") {
-                if execution.completedSetCount(for: item) > 0 {
-                    showingForm = true
-                } else {
-                    execution.doneWithExercise()
-                }
+                showingForm = true
             }
             .font(.footnote)
             .accessibilityIdentifier("watch-end-exercise")
@@ -199,25 +203,28 @@ struct WatchExerciseView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                 ForEach(Array(warmups.enumerated()), id: \.offset) { index, warmup in
-                    HStack {
-                        Text("Warm-up \(index + 1): \(warmup.loadLabel) × \(warmup.reps)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Log") {
-                            Task {
-                                await execution.logWarmup(
-                                    loadKg: warmup.loadKg,
-                                    reps: warmup.reps,
-                                    index: index
-                                )
-                            }
+                    Button {
+                        loadKg = warmup.loadKg
+                        loadText = formatted(warmup.loadKg)
+                        reps = warmup.reps
+                    } label: {
+                        HStack {
+                            Text("Warm-up \(index + 1): \(warmup.loadLabel) × \(warmup.reps)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("Use")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
                         }
-                        .font(.caption2)
-                        .disabled(execution.isWorking)
-                        .accessibilityIdentifier("watch-log-warmup-\(index)")
                     }
+                    .buttonStyle(.plain)
+                    .disabled(execution.isWorking)
+                    .accessibilityIdentifier("watch-log-warmup-\(index)")
                 }
+                Text("Log a warm-up as a normal set and record RIR 6.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             .accessibilityIdentifier("watch-warmups")
         }
@@ -262,6 +269,12 @@ struct WatchExerciseView: View {
                 Text("\(formatted(loadKg)) kg × \(reps)\(isTimeBased ? "s" : "")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if let target = execution.selectedItem?.velocityTargetLabel {
+                    Text("Target \(target)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("watch-velocity-target")
+                }
                 // The watch records the measurement; the server supplies any target. Allow
                 // it for external-load work even when the plan has no target, but not for
                 // bodyweight work.

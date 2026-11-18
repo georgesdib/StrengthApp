@@ -21,8 +21,15 @@ public enum ChatGrounding {
 }
 
 public enum DeepSeekTools {
-    public static func specs(includePlan: Bool = false) -> [DeepSeekTool] {
+    public static func specs(includePlan: Bool = false, includeHealth: Bool = false) -> [DeepSeekTool] {
         var tools = baseSpecs
+        if includeHealth {
+            tools.append(tool(
+                name: "longevity",
+                description: "Read-only aerobic and fitness facts: last completed week against the WHO 150-300 minute reference as context (never a pass/fail), this week's progress, the latest VO2max with its date and status, and per-pattern volume headroom. Use it when the athlete asks about aerobic activity, cardio fitness, VO2max or what to add this week.",
+                query: "Optional hint; pass an empty string."
+            ))
+        }
         if includePlan {
             tools += [
                 tool(name: "prescription", description: "Read-only training prescription. Pass a date (YYYY-MM-DD) or prescription id; an empty string asks for the current prescription.", query: "Date, prescription id, or empty string."),
@@ -92,8 +99,14 @@ public enum DeepSeekTools {
         name: String,
         query: String,
         provider: any IntelligenceCapabilityProviding,
-        failureLog: ToolFailureLog?
+        failureLog: ToolFailureLog?,
+        allowedNames: Set<String>
     ) async -> String {
+        // Defence in depth: the dispatcher validates before calling here, and this guard keeps a
+        // future caller from bypassing the request's allowlist.
+        guard allowedNames.contains(name) else {
+            return "No such training tool is available."
+        }
         do {
             switch name {
             case "training_overview":
@@ -109,6 +122,8 @@ public enum DeepSeekTools {
                 return try await provider.sessionDetails(workoutID: query)
             case "readiness_status":
                 return try await provider.readinessStatus(from: "", to: "")
+            case "longevity":
+                return try await provider.longevityAssessment(includeTimeInZone: false)
             case "prescription":
                 guard let plan = provider as? any PlanFactsProviding else {
                     return "Plan data is not available in this build."
@@ -155,16 +170,19 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
     private let keyPresent: Bool
     private let facts: any ChatFactsProviding
     private let includePlan: Bool
+    private let includeHealth: Bool
     private let failureLog = ToolFailureLog()
 
     public init(
         api: any DeepSeekCompleting,
         keyPresent: Bool,
         facts: any ChatFactsProviding,
-        includePlan: Bool = false
+        includePlan: Bool = false,
+        includeHealth: Bool = false
     ) {
         self.api = api
         self.keyPresent = keyPresent
+        self.includeHealth = includeHealth
         self.facts = facts
         self.includePlan = includePlan
     }
@@ -206,12 +224,20 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
         }
         messages.append(DeepSeekMessage(role: "user", content: question))
 
+        // The model may return any tool name. Execution is limited to what this request actually
+        // advertised: base tools, plus longevity only with health consent, plus plan tools only
+        // with plan consent. Injected plan facts mean no tools were advertised at all.
+        let advertisedTools: [DeepSeekTool] = injectPlan ? [] : DeepSeekTools.specs(
+            includePlan: includePlan, includeHealth: includeHealth
+        )
+        let allowedNames = Set(advertisedTools.map(\.function.name))
+
         var toolRounds = 0
         for attempt in 0..<2 {
             while toolRounds < 4 {
                 let result = try await api.complete(
                     messages: messages,
-                    tools: injectPlan ? [] : DeepSeekTools.specs(includePlan: includePlan)
+                    tools: advertisedTools
                 )
                 if !result.toolCalls.isEmpty {
                     messages.append(
@@ -222,11 +248,25 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
                         )
                     )
                     for call in result.toolCalls {
+                        let name = call.function.name
+                        guard allowedNames.contains(name) else {
+                            // Reject without touching the provider: an unadvertised tool is not a
+                            // capability this request consented to expose.
+                            messages.append(
+                                DeepSeekMessage(
+                                    role: "tool",
+                                    content: "No such training tool is available.",
+                                    toolCallID: call.id
+                                )
+                            )
+                            continue
+                        }
                         let output = await DeepSeekTools.execute(
-                            name: call.function.name,
+                            name: name,
                             query: DeepSeekTools.query(from: call.function.arguments),
                             provider: facts,
-                            failureLog: failureLog
+                            failureLog: failureLog,
+                            allowedNames: allowedNames
                         )
                         messages.append(
                             DeepSeekMessage(

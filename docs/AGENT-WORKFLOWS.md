@@ -56,12 +56,17 @@ Watch-only build:
 
 Install the watch app on a paired physical watch:
 
-    ./scripts/install-watch.sh
+    ./scripts/install-watch.sh              # builds Release, then installs
+    BUILD=0 ./scripts/install-watch.sh      # install the existing bundle (staleness checked)
 
-It pushes the Watch/StrengthWatch.app embedded in the newest Release-iphoneos phone build straight
+It builds the phone app and its embedded Watch/StrengthWatch.app, then pushes that bundle straight
 to the watch with devicectl. Use it when the iPhone's Watch app spins and silently returns to
 "Install": that handoff gives up quietly when the watch is asleep or off its charger, while this
-prints the actual result. Override with WATCH_UDID or APP_PATH.
+prints the actual result. Override with WATCH_UDID, IPHONE_UDID or APP_PATH.
+
+It refuses to install a bundle older than the watch sources (StrengthWatch, StrengthCore,
+WatchInfo.plist, the project) unless FORCE=1 is set: an install that silently pushed a stale
+bundle looks exactly like "the fix did not work".
 
 Simulator smoke test (on demand, not a CI gate):
 

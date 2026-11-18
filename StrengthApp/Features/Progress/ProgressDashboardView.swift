@@ -42,6 +42,9 @@ struct ProgressDashboardView: View {
 
                 if model.bootstrap?.capabilities.intelligenceRead == true {
                     Section("Intelligence") {
+                        NavigationLink("Cardio activity") {
+                            CardioOverviewView(model: model)
+                        }
                         NavigationLink("Weekly review") {
                             WeeklyReviewView(
                                 model: model.makeWeeklyReviewModel(),

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import StrengthCore
 
@@ -21,10 +22,15 @@ struct TodayView: View {
     var body: some View {
         NavigationStack {
             List {
+                if model.todaySummaryEnabled {
+                    TodaySummarySection(model: model)
+                        .id(model.chatModelChoice)
+                }
                 if let error = model.errorMessage {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.red)
+                            .textSelection(.enabled)
                         Button("Try again") {
                             Task { await model.refresh() }
                         }
@@ -63,6 +69,12 @@ struct TodayView: View {
                                     Text(target)
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
+                                }
+                                if let detail = Self.pendingDetail(entry) {
+                                    Text(detail)
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .accessibilityIdentifier("pending-detail")
                                 }
                             }
                         }
@@ -653,11 +665,13 @@ struct TodayView: View {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
             if let refreshError = model.healthKitRefreshError {
                 Text("Readiness was saved, but the authoritative refresh failed: \(refreshError) Retry refresh; do not import again.")
                     .font(.footnote)
                     .foregroundStyle(.orange)
+                    .textSelection(.enabled)
             }
             if let payload = model.today?.readiness {
                 healthKitValueRow(
@@ -722,10 +736,35 @@ struct TodayView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             default:
-                Text("\(label): no sample")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    field == "hrv_ms"
+                        ? "\(label): no recovery reading"
+                        : "\(label): no sample"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// What a queued write actually contains, so a stuck retry names the date and fields instead
+    /// of only an operation kind.
+    private static func pendingDetail(_ entry: PendingMutation) -> String? {
+        guard let body = try? JSONSerialization.jsonObject(with: entry.bodyData)
+                as? [String: Any] else { return nil }
+        switch entry.kind {
+        case .healthkitReadiness:
+            let date = body["date"] as? String ?? "date unknown"
+            let fields = (body["samples"] as? [[String: Any]])?
+                .compactMap { $0["field"] as? String } ?? []
+            return fields.isEmpty ? date : "\(date) · \(fields.joined(separator: ", "))"
+        case .readiness:
+            let values = body["values"] as? [String: Any] ?? [:]
+            let date = body["date"] as? String
+            let names = values.keys.sorted().joined(separator: ", ")
+            return [date, names].compactMap { $0 }.joined(separator: " · ")
+        default:
+            return nil
         }
     }
 

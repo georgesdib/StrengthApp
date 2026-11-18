@@ -9,6 +9,7 @@ private final class ProbeProvider: IntelligenceCapabilityProviding, @unchecked S
     func weeklyReview(weekEnd: String?) async throws -> String { "ok" }
     func sessionDetails(workoutID: String) async throws -> String { "ok" }
     func readinessStatus(from: String, to: String) async throws -> String { "ok" }
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String { "ok" }
 }
 
 @available(iOS 27.0, *)

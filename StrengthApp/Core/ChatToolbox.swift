@@ -56,6 +56,15 @@ final class ChatToolbox: ChatFactsProviding, PlanFactsProviding, @unchecked Send
         )
     }
 
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String {
+        let envelope = try await client.longevity(
+            session: session, includeTimeInZone: includeTimeInZone
+        )
+        _ = record(envelope, source: "longevity")
+        return LongevitySummary(envelope: envelope)?.detail
+            ?? "No longevity data is available right now."
+    }
+
     func exerciseProgression(exerciseID: String, windowDays: Int) async throws -> String {
         record(
             try await client.progression(

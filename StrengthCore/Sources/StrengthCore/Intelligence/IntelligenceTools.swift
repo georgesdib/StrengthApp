@@ -10,6 +10,16 @@ public protocol IntelligenceCapabilityProviding: Sendable {
     func weeklyReview(weekEnd: String?) async throws -> String
     func sessionDetails(workoutID: String) async throws -> String
     func readinessStatus(from: String, to: String) async throws -> String
+    /// Aerobic adequacy, VO2max status and volume headroom, as compact facts.
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String
+}
+
+public extension IntelligenceCapabilityProviding {
+    /// Default keeps purpose-built test doubles and future providers compiling. The app's provider
+    /// implements the real call; a build without it says so rather than inventing numbers.
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String {
+        "No longevity facts are available in this build."
+    }
 }
 
 /// Safe, model-facing classification of a failed capability call.
@@ -171,12 +181,15 @@ public enum IntelligenceTools {
         includeBase: Bool = true,
         planNames: Set<String>? = nil
     ) -> [any Tool] {
+        // Longevity is unconditional here: on-device generation transfers nothing, so the
+        // off-device consent toggle does not apply (DEC-LONGEVITY-02).
         var tools: [any Tool] = includeBase ? [
             TrainingOverviewTool(provider: provider, failureLog: failureLog),
             ExerciseProgressionTool(provider: provider, failureLog: failureLog),
             WeeklyReviewTool(provider: provider, failureLog: failureLog),
             SessionDetailsTool(provider: provider, failureLog: failureLog),
             ReadinessStatusTool(provider: provider, failureLog: failureLog),
+            LongevityTool(provider: provider, failureLog: failureLog),
         ] : []
         if includePlan {
             let planTools: [(String, any Tool)] = [
@@ -217,6 +230,37 @@ public struct TrainingOverviewTool: Tool {
                 return "No overview data was found."
             case .invalidIdentifier, .unknown:
                 return "The overview could not be loaded right now."
+            }
+        }
+    }
+}
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+public struct LongevityTool: Tool {
+    public typealias Arguments = NarrativeToolQuery
+    private let provider: any IntelligenceCapabilityProviding
+    private let failureLog: ToolFailureLog?
+    public init(provider: any IntelligenceCapabilityProviding, failureLog: ToolFailureLog? = nil) {
+        self.provider = provider
+        self.failureLog = failureLog
+    }
+    public let name = "longevity"
+    public let description = "Read-only aerobic and fitness facts: the completed week against the WHO 150-300 minute reference as context (never a pass-fail), this week's progress, the latest VO2max with its date and status, and per-pattern volume headroom. Use it for aerobic activity, cardio fitness or what to add this week."
+    public func call(arguments: NarrativeToolQuery) async throws -> String {
+        do {
+            return try await provider.longevityAssessment(includeTimeInZone: false)
+        } catch {
+            let failure = CapabilityFailure(error)
+            failureLog?.record(failure)
+            switch failure {
+            case .unauthorized:
+                return "The aerobic and fitness data could not be accessed. The pairing may need attention."
+            case .unavailable, .server:
+                return "The aerobic and fitness data is temporarily unavailable. Try again."
+            case .notFound:
+                return "No aerobic or fitness data was found."
+            case .invalidIdentifier, .unknown:
+                return "The aerobic and fitness data could not be loaded right now."
             }
         }
     }

@@ -82,18 +82,24 @@ raw 100.x address.
 2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
    is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
 3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
-   load, RIR, rest and any warnings. **Start workout** is on that screen, so the plan is always
+   load, RIR, any velocity target, rest and any warnings. **Start workout** is on that screen, so the plan is always
    visible before it is consumed. The server issues the plan; the phone never invents plan content.
-4. Open an exercise and tap **Start set** before the set.
-5. Enter load, reps and RIR. When the plan gives the lift a velocity target, optional mean and
-   per-rep velocity are offered; bodyweight work without a target does not ask for them. The rest
+4. Open an exercise and tap **Start set** before the set. The first set starts the exercise;
+   the exercise stays open until you end it, and starting a set in another exercise leaves the
+   first one open, which is how a superset is recorded.
+5. Enter load, reps and RIR. When the plan gives the lift a velocity target, it is shown beside
+   RIR on the phone and the watch; optional mean and per-rep velocity are offered, and bodyweight
+   work is not asked for them. The rest
    is anchored at your **first edit** of the sheet, so the time you spend entering numbers is rest,
    not part of the set; the set keeps the time you started it.
 6. Each main lift lists its warm-up ramp, starting with the empty bar (the first rung is capped
    at 20 kg, or the first warm-up when that is lighter). Warm-up rows are optional: skipping them
-   and logging the working sets is valid. To record one, use **Start another set** with RIR 6.
+   and logging the working sets is valid. To record one, tap **Start set** on its warm-up row: it
+   fills that row's load and reps, and RIR 6 is what records the set as a warm-up.
    A working set starts the rest timer automatically; logged warm-ups (RIR 6) do not.
-7. Repeat for the remaining sets and exercises.
+7. Repeat for the remaining sets and exercises. When an exercise is done, tap **End exercise**:
+   it closes any running rest, records the exercise's completion and offers the optional 1–5 form
+   rating. Leaving the screen does not end the exercise.
 8. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
 9. Review the **Session report** that opens after completion: prescription adherence, velocity,
    session feedback, quality flags and evidence. It is read-only. **Done** returns to Today.
@@ -118,6 +124,17 @@ The timer uses the prescription's rest seconds when available.
 - **+15 s** extends the timer.
 - Starting the next set also ends the current rest.
 - When rest finishes, the timer dismisses itself and the app records the actual interval.
+- The interval survives a relaunch: a rest that ended while the app was closed is recorded at the
+  time it actually ended, not when the app next opened.
+
+### Lock Screen and Control Center
+
+While a rest is running, the phone shows a Live Activity countdown on the Lock Screen and in the
+Dynamic Island. The countdown is drawn by the system from the rest's end time, so it stays correct
+with the app closed. Tapping it opens Strength, where **+15 s** and **Skip** live.
+
+Settings → Control Center (or the Action button) can host the **Strength** control. It opens the
+running workout; it does not record a set or change a rest on its own.
 
 The timer is descriptive. It does not change the next prescription or declare the session
 compliant.
@@ -201,12 +218,16 @@ Exercise information is read-only. The training rules and prescription engine ar
 
 HealthKit readiness is optional and off by default. When enabled, the app reads only:
 
-- heart-rate variability (SDNN);
+- heart-rate variability (SDNN) — readiness uses a **recovery value per night**: the median of
+  that day's readings taken before 10:00. A morning with no reading has no HRV for that day; a
+  daytime reading is kept for the record but does not drive readiness;
 - resting heart rate;
 - bodyweight.
 
 Manual readiness takes precedence over HealthKit, which takes precedence over imported
-readiness. The app never writes to HealthKit and does not import sleep or workouts.
+readiness. The app never writes to HealthKit and does not import sleep or workouts. The recovery
+series is backfilled once from Health (up to five years) and then updated nightly; the import runs
+on an app refresh and after enabling HealthKit.
 
 **Workout heart rate is read only on Apple Watch**, for the live session display and the one
 saved HealthKit workout. It is not used for readiness, fatigue, progression or prescriptions.
@@ -217,8 +238,54 @@ saved HealthKit workout. It is not used for readiness, fatigue, progression or p
 - **Exercise Library** — catalogue and history.
 - **Apple Watch** — pair, replace or revoke the watch credential.
 - **HealthKit** — opt-in readiness import.
+- **Daily reminder** — one nudge a day at a time you choose.
+- **Today summary** — the two-part prose block at the top of Today.
 - **Forget this device** — removes the local token; the server-side device record is managed
   separately with the server CLI.
+
+### Today summary
+
+The top of **Today** can carry a short block in two parts: **Where you stand**, a plain summary of
+your readiness and the session in front of you, and **Nudge**, a line or two of encouragement. It uses
+the same model you selected for Chat: Apple Intelligence on the iPhone, or DeepSeek.
+
+With DeepSeek selected, loading the card sends your readiness and four-week training facts to DeepSeek.
+Plan details travel only while **Include plan and prescription data** is on. The footer under the card
+always names the model that wrote it, so you can tell at a glance where the words came from. If the
+selected model is unavailable — Apple Intelligence off, or no DeepSeek key saved — the card says so and
+offers nothing else; it never quietly switches to the other model. **Refresh** rewrites it; otherwise it
+is generated once per day and session and reused. Turn the whole block off under
+**Settings → Today summary**.
+
+The aerobic and fitness facts — the last completed week against the WHO band, this week's progress
+and the latest VO₂max — are loaded from your server and shown without any model. With DeepSeek
+selected they are sent only while **Include health measurements** is on; on-device generation needs
+no consent. VO₂max is shown with its value, units, date, source and a **current**, **stale** or
+**absent** state; a missing reading is not evidence of poor fitness. A week above 300
+moderate-equivalent minutes is described as **above** the reference band, never as excessive. The
+chat uses the same health consent: with it off, the model cannot receive or call the longevity tool.
+
+### Daily reminder
+
+Turn on **Settings → Daily reminder** and choose a time. At that time the app posts one local
+notification that names a concrete fact from your record — a planned session, its lead lift and load,
+or a missing readiness entry — and asks you to train. The wording is written on the iPhone: by Apple
+Intelligence when it is available, otherwise from the built-in text. Nothing is sent to a server.
+
+The reminder is skipped on a day you have already trained. If you train on the watch only and never
+open the phone, the phone cannot see the session, so the reminder may still arrive. Tapping the
+notification opens Today; **Log readiness** opens the readiness form directly. If notifications are
+off for the app, the Settings row says so instead of pretending the reminder is armed.
+
+**Why the wording is sometimes plain.** The message is written by Apple Intelligence when it is
+available. When it is not — Apple Intelligence off, the model still downloading, or a generation that
+failed or ran long — the app sends built-in wording instead of guessing. Settings shows a
+**Last reminder** line saying which happened and why, so a plain message is never a mystery.
+
+**Mirroring to the watch.** The reminder is an iPhone notification, so the Apple Watch shows it only
+under Apple's mirroring rules: the iPhone must be locked or asleep, and the watch unlocked and on your
+wrist. If you are using the iPhone when it arrives, it stays on the iPhone. There is no per-app switch
+in the app for this — it is Watch app → Notifications → Mirror my iPhone, plus the locked-phone rule.
 
 ### Apple Watch pairing
 
@@ -241,9 +308,11 @@ version. When the watch has no active session, it updates its Home address witho
 token.
 
 The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR.
-Warm-up rows have their own **Log** action; they are recorded with RIR 6 and stay out of
-working-set volume. Mean velocity is available for external-load work even when the plan has no
-target; the watch records the measurement and the server owns calibration. Time-based exercises
+A warm-up is an ordinary set: tap **Use** on a warm-up row to fill its load and reps, then log it
+with RIR 6. RIR 6 is what records it as warm-up work, so it stays out of working-set volume and
+does not open a rest. When the plan supplies a velocity target it appears beside RIR and in the
+RIR sheet. Mean velocity is available for external-load work even when the plan has no target; the
+watch records the measurement and the server owns calibration. Time-based exercises
 show seconds (“30s”), not repetitions. The rest starts when you tap **End set**, so the RIR and
 velocity entry happens during the rest, not inside the set. Rest — **+15s** extends it, **−15s**
 shortens it, and a local notification fires when it ends if you allowed notifications — rate form
@@ -317,13 +386,13 @@ missing rather than being estimated.
 - Notification taps open the app but do not deep-link directly to the active workout.
 - Offline set events use a local identity until replayed; the server set ID is attached when
   available online.
-- Exercise completion is based on leaving the exercise screen, so its boundary can be
-  approximate.
+- Exercise completion is explicit on the phone (**End exercise**); on the watch it is the
+  **End exercise** button or a switch to another exercise.
 - No workout heart-rate observations.
 - The session report is only available after the server has acknowledged completion. A queued
   offline finish shows no report until it syncs; open the session from History after that.
-- Warm-up rows are a guide; only working sets count toward the plan's set completion. Logging a
-  warm-up uses **Start another set** with RIR 6.
+- Warm-up rows are a guide; only working sets count toward the plan's set completion. Tap
+  **Use** on a row to fill the ordinary set controls, then record RIR 6 at End set.
 - The notification/vibration path and all timing behaviour require physical-iPhone acceptance;
   simulator builds are not proof of those behaviours.
 

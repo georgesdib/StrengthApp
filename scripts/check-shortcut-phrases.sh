@@ -52,7 +52,7 @@ sys.exit(1 if problems else 0)
 PY
 }
 
-check "$root/StrengthApp/Intents/StrengthShortcuts.swift" 6
+check "$root/StrengthApp/Intents/StrengthShortcuts.swift" 7
 check "$root/StrengthWatch/WatchReadOnlyIntents.swift" 4
 
 echo "shortcut phrases: ok"

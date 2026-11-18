@@ -55,9 +55,13 @@ private final class StubFacts: ChatFactsProviding, PlanFactsProviding, @unchecke
     var recordedSources: [String] = []
     var planErrors: [String: Error] = [:]
     var planText = "prescription facts"
+    private(set) var longevityCalls = 0
+    private(set) var planCalls = 0
     func resetRecord() {
         recordedEnvelopes = []
         recordedSources = []
+        longevityCalls = 0
+        planCalls = 0
     }
 
     private func record() -> String {
@@ -73,16 +77,24 @@ private final class StubFacts: ChatFactsProviding, PlanFactsProviding, @unchecke
     }
 
     func prescription(query: String) async throws -> String {
+        planCalls += 1
         if let error = planErrors["prescription"] { throw error }
         return recordPlan("prescription")
     }
     func programmeSummary(query: String) async throws -> String {
+        planCalls += 1
         if let error = planErrors["programme_summary"] { throw error }
         return recordPlan("programme")
     }
     func adherence(query: String) async throws -> String {
+        planCalls += 1
         if let error = planErrors["adherence"] { throw error }
         return recordPlan("adherence")
+    }
+
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String {
+        longevityCalls += 1
+        return record()
     }
 
     func trainingOverview(asOf: String?, windowWeeks: Int) async throws -> String { record() }
@@ -223,6 +235,100 @@ final class DeepSeekChatTests: XCTestCase {
             return XCTFail("expected unavailable, got \(error)")
         }
         XCTAssertTrue(api.calls.isEmpty)
+    }
+
+    func testHealthToolIsRejectedWhenHealthConsentIsOff() async throws {
+        let facts = StubFacts(envelope: try envelope())
+        let api = StubDeepSeekAPI(responses: [
+            DeepSeekChatResult(
+                content: nil,
+                toolCalls: [
+                    DeepSeekToolCall(
+                        id: "call_health",
+                        function: .init(name: "longevity", arguments: "{}")
+                    ),
+                ]
+            ),
+            DeepSeekChatResult(content: "No health facts were read.", toolCalls: []),
+        ])
+        let generator = DeepSeekChatGenerator(
+            api: api, keyPresent: true, facts: facts, includeHealth: false
+        )
+        let reply = try await generator.reply(to: "How is my cardio?", history: [])
+        XCTAssertEqual(reply.text, "No health facts were read.")
+        XCTAssertEqual(facts.longevityCalls, 0)
+        XCTAssertTrue(
+            api.calls[1].contains {
+                $0.role == "tool" && ($0.content?.contains("No such training tool") ?? false)
+            }
+        )
+    }
+
+    func testHealthToolRunsWhenHealthConsentIsOn() async throws {
+        let facts = StubFacts(envelope: try envelope())
+        let api = StubDeepSeekAPI(responses: [
+            DeepSeekChatResult(
+                content: nil,
+                toolCalls: [
+                    DeepSeekToolCall(
+                        id: "call_health",
+                        function: .init(name: "longevity", arguments: "{}")
+                    ),
+                ]
+            ),
+            DeepSeekChatResult(content: "Your completed week is in the facts.", toolCalls: []),
+        ])
+        let generator = DeepSeekChatGenerator(
+            api: api, keyPresent: true, facts: facts, includeHealth: true
+        )
+        _ = try await generator.reply(to: "How is my cardio?", history: [])
+        XCTAssertEqual(facts.longevityCalls, 1)
+        XCTAssertEqual(facts.recordedSources, ["weekly review"])
+    }
+
+    func testPlanToolIsRejectedWhenPlanConsentIsOff() async throws {
+        let facts = StubFacts(envelope: try envelope())
+        let api = StubDeepSeekAPI(responses: [
+            DeepSeekChatResult(
+                content: nil,
+                toolCalls: [
+                    DeepSeekToolCall(
+                        id: "call_plan",
+                        function: .init(name: "prescription", arguments: "{}")
+                    ),
+                ]
+            ),
+            DeepSeekChatResult(content: "Plan data was not read.", toolCalls: []),
+        ])
+        let generator = DeepSeekChatGenerator(
+            api: api, keyPresent: true, facts: facts, includePlan: false
+        )
+        let reply = try await generator.reply(to: "What is prescribed?", history: [])
+        XCTAssertEqual(reply.text, "Plan data was not read.")
+        XCTAssertEqual(facts.planCalls, 0)
+    }
+
+    func testUnknownToolNameIsRejectedWithoutCallingTheProvider() async throws {
+        let facts = StubFacts(envelope: try envelope())
+        let api = StubDeepSeekAPI(responses: [
+            DeepSeekChatResult(
+                content: nil,
+                toolCalls: [
+                    DeepSeekToolCall(
+                        id: "call_unknown",
+                        function: .init(name: "not_a_tool", arguments: "{}")
+                    ),
+                ]
+            ),
+            DeepSeekChatResult(content: "That tool does not exist.", toolCalls: []),
+        ])
+        let generator = DeepSeekChatGenerator(
+            api: api, keyPresent: true, facts: facts
+        )
+        _ = try await generator.reply(to: "Try something else.", history: [])
+        XCTAssertTrue(facts.recordedEnvelopes.isEmpty)
+        XCTAssertEqual(facts.longevityCalls, 0)
+        XCTAssertEqual(facts.planCalls, 0)
     }
 
     func testMissingKeyIsUnavailable() {

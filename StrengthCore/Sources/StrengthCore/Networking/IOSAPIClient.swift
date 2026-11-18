@@ -175,6 +175,45 @@ public final class SameHostRedirectGuard: NSObject, URLSessionTaskDelegate {
     }
 }
 
+/// User-facing wording for transport failures whose system text names the rule but not the fix.
+///
+/// The cleartext case is the one that misleads: iOS says the resource "could not be loaded
+/// because the App Transport Security policy requires the use of a secure connection", which reads
+/// like a server fault. It is a client policy refusal, and the remedy is in the address.
+extension URLError.Code {
+    var clientFacingMessage: String? {
+        switch self {
+        case .appTransportSecurityRequiresSecureConnection:
+            return "iOS refuses plain http:// to this address. Use https://, or a private-network "
+                + "address (192.168.x.x, 10.x.x.x), a .local name or a single-word host name."
+        default:
+            return nil
+        }
+    }
+}
+
+/// Why a Home/Away probe succeeded or failed. Routing only needs `isReachable`, but the Settings
+/// screen explains the reason, so a blocked address is not reported as an offline server.
+public enum ServerProbeResult: Equatable, Sendable {
+    case reachable
+    /// The server answered but refused this device credential. Reachable: switching route
+    /// cannot fix a stale token, so routing still treats it as up.
+    case unauthorized
+    /// iOS refused the address itself (cleartext http to a host App Transport Security does not
+    /// treat as local). Nothing was sent, and no retry will help.
+    case blockedByPolicy
+    case serverError(status: Int)
+    case unreachable
+
+    /// Routing keeps the pre-existing rule: only a 2xx/4xx answer counts as up. A 5xx still
+    /// falls through to the Away Server, which is why `serverError` is reported separately.
+    public var isReachable: Bool {
+        switch self {
+        case .reachable, .unauthorized: return true
+        case .serverError, .blockedByPolicy, .unreachable: return false
+        }
+    }
+}
 private struct TransportFailure: Error {
     let code: URLError.Code
     let message: String
@@ -340,9 +379,48 @@ public final class IOSAPIClient {
         try await get(path: "api/ios/v1/bootstrap", query: [], session: session)
     }
 
-    /// Short, read-only reachability check used for Home/Away selection. A 401 still proves
-    /// the server is reachable; transport errors and 5xx do not.
-    public func isServerReachable(baseURL: URL, token: String) async -> Bool {
+// MARK: - Cardio overview (C6b)
+
+    /// The phone reads the authenticated route, never the browser one.
+    public func cardioActivity(
+        session: IOSSession,
+        weeks: Int = 12,
+        includeTimeInZone: Bool = false
+    ) async throws -> CardioActivityPayload {
+        var query = [URLQueryItem(name: "weeks", value: String(weeks))]
+        if includeTimeInZone {
+            query.append(URLQueryItem(name: "tiz", value: "true"))
+        }
+        return try await get(
+            path: "api/ios/v1/healthkit/activity/summary",
+            query: query,
+            session: session
+        )
+    }
+
+    /// The longevity envelope: the same facts the web panel shows, behind device authentication.
+    public func longevity(
+        session: IOSSession,
+        includeTimeInZone: Bool = false,
+        includePatterns: Bool = true
+    ) async throws -> IntelligenceEnvelope {
+        try await get(
+            path: "api/ios/v1/intelligence/longevity",
+            query: [
+                URLQueryItem(name: "include_time_in_zone", value: includeTimeInZone ? "true" : "false"),
+                URLQueryItem(name: "include_patterns", value: includePatterns ? "true" : "false"),
+            ],
+            session: session
+        )
+    }
+
+    /// Short, read-only reachability check used for Home/Away selection.
+    ///
+    /// The reason is kept instead of a bare Bool: "the server is off", "iOS refuses this
+    /// address" and "the server answered but rejected this device" are three different problems
+    /// with three different fixes, and collapsing them made a blocked Away address look like an
+    /// ordinary offline state.
+    public func probeServer(baseURL: URL, token: String) async -> ServerProbeResult {
         var request = URLRequest(url: baseURL.appendingPathComponent("api/ios/v1/bootstrap"))
         request.httpMethod = "GET"
         request.timeoutInterval = 2
@@ -351,10 +429,24 @@ public final class IOSAPIClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
             let (_, response) = try await transport.data(for: request)
-            return (200...499).contains(response.statusCode)
+            switch response.statusCode {
+            case 200...299: return .reachable
+            case 401, 403: return .unauthorized
+            case 400...499: return .reachable
+            default: return .serverError(status: response.statusCode)
+            }
+        } catch let error as URLError
+                  where error.code == .appTransportSecurityRequiresSecureConnection {
+            return .blockedByPolicy
         } catch {
-            return false
+            return .unreachable
         }
+    }
+
+    /// Backwards-compatible reading of the probe: a 401 still proves the server is reachable;
+    /// a blocked address and 5xx do not.
+    public func isServerReachable(baseURL: URL, token: String) async -> Bool {
+        await probeServer(baseURL: baseURL, token: token).isReachable
     }
 
     public func today(session: IOSSession) async throws -> TodayResponse {
@@ -419,6 +511,58 @@ public final class IOSAPIClient {
             path: "api/ios/v1/healthkit/readiness",
             body: body,
             kind: .healthkitReadiness,
+            targetId: nil,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    /// Uploads dated recovery-HRV nights. Not journaled: the server deduplicates by sample id,
+    /// so a failed page is simply sent again on the next pass.
+    public func importRecoveryHRV(
+        _ body: RecoveryHRVRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> RecoveryHRVUploadResult {
+        try await post(
+            path: "api/ios/v1/healthkit/hrv-recovery",
+            body: body,
+            kind: .healthkitReadiness,
+            targetId: nil,
+            session: session,
+            idempotencyKey: idempotencyKey,
+            journaling: false
+        )
+    }
+
+// MARK: - HealthKit activity (C2)
+
+    /// Uploads in two calls by design: a sample cannot be attached before its workout exists on the
+    /// server. Each call is idempotent on the HealthKit UUID, so a retry costs nothing.
+    public func uploadActivity(
+        _ body: HealthKitActivityWorkoutsBody,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> HealthKitActivityUploadResult {
+        try await post(
+            path: "api/ios/v1/healthkit/workouts",
+            body: body,
+            kind: .healthkitActivity,
+            targetId: nil,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    public func uploadActivity(
+        _ body: HealthKitActivitySamplesBody,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> HealthKitActivityUploadResult {
+        try await post(
+            path: "api/ios/v1/healthkit/samples",
+            body: body,
+            kind: .healthkitActivity,
             targetId: nil,
             session: session,
             idempotencyKey: idempotencyKey
@@ -610,6 +754,23 @@ public final class IOSAPIClient {
         )
     }
 
+    public func movePlanExercise(
+        workoutId: String,
+        itemIndex: Int,
+        body: PlanMoveRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/plan/items/\(itemIndex)/move",
+            body: body,
+            kind: .planEdit,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     public func addPlanExercise(
         workoutId: String,
         body: PlanAddRequest,
@@ -715,6 +876,23 @@ public final class IOSAPIClient {
     }
 
     /// One deterministic weekly-review envelope; `weekEnd` defaults to the last completed week.
+    /// Ask the paired server's local project-knowledge Explain endpoint.
+    public func explain(
+        question: String,
+        session: IOSSession
+    ) async throws -> ExplainResponse {
+        struct Body: Encodable { let question: String }
+        return try await post(
+            path: "api/intelligence/explain",
+            body: Body(question: question),
+            kind: .readiness,
+            targetId: nil,
+            session: session,
+            idempotencyKey: UUID().uuidString,
+            journaling: false
+        )
+    }
+
     public func weeklyReview(
         session: IOSSession,
         weekEnd: String? = nil
@@ -1051,7 +1229,9 @@ public final class IOSAPIClient {
         } catch let failure as TransportFailure {
             throw APIError.transport(failure.message)
         } catch let error as URLError {
-            throw APIError.transport(error.localizedDescription)
+            throw APIError.transport(
+                error.code.clientFacingMessage ?? error.localizedDescription
+            )
         } catch let error as APIError {
             throw error
         } catch {
@@ -1066,7 +1246,10 @@ public final class IOSAPIClient {
         do {
             return try await activeTransport.data(for: request)
         } catch let error as URLError {
-            throw TransportFailure(code: error.code, message: error.localizedDescription)
+            throw TransportFailure(
+                code: error.code,
+                message: error.code.clientFacingMessage ?? error.localizedDescription
+            )
         } catch {
             throw APIError.transport("The server could not be reached.")
         }

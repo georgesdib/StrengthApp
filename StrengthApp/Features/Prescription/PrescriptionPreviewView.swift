@@ -74,6 +74,9 @@ struct PrescriptionPreviewView: View {
                             Text(item.repsLabel)
                             Text(item.loadLabel)
                             Text(item.effortLabel)
+                            if let velocity = item.velocityTargetLabel {
+                                Text("target \(velocity)")
+                            }
                             Text("rest \(item.restS ?? 120)s")
                         }
                         .font(.caption)
@@ -159,9 +162,9 @@ struct PrescriptionPreviewView: View {
             : String(format: "%.1fkg", value)
     }
 
-    nonisolated private static func readinessLabel(_ readiness: ReadinessScore) -> String {
+    nonisolated static func readinessLabel(_ readiness: ReadinessScore) -> String {
         if let score = readiness.score {
-            return String(format: "%.1f", score) + " / 100 · " + readiness.status.capitalized
+            return "\(Int((score * 100).rounded()))% · " + readiness.status.capitalized
         }
         return readiness.status.capitalized
     }

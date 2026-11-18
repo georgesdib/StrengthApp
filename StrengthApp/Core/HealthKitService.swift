@@ -67,6 +67,28 @@ final class HealthKitReadinessService: HealthKitReadinessProviding {
         )
     }
 
+    func recoveryNights(from start: Date, to end: Date) async throws -> [RecoveryHRVSample] {
+        guard isAvailable else { throw HealthKitReadinessError.unavailable }
+        let raw = try await samples(
+            identifier: .heartRateVariabilitySDNN, start: start, end: end
+        )
+        let readings = raw.compactMap { sample -> RecoveryHRVReading? in
+            let value = sample.quantity.doubleValue(for: HKUnit.secondUnit(with: .milli))
+            guard value.isFinite, value > 0 else { return nil }
+            let sourceClass = HealthKitSourceClassifier.classify(
+                manufacturer: sample.device?.manufacturer,
+                model: sample.device?.model
+            )
+            return RecoveryHRVReading(
+                sampledAt: sample.endDate,
+                value: value,
+                sourceName: sample.sourceRevision.source.name,
+                sourceClass: sourceClass.rawValue
+            )
+        }
+        return RecoveryHRV.nights(from: readings)
+    }
+
     private func samples(
         identifier: HKQuantityTypeIdentifier,
         start: Date,

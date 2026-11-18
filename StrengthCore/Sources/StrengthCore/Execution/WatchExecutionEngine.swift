@@ -359,6 +359,25 @@ public final class WatchExecutionEngine {
         return acknowledged + queued
     }
 
+    /// The index is decided when the set is logged, because RIR is what classifies it: a set
+    /// started as a warm-up can be logged as a working set and vice versa. Warm-ups sit above
+    /// the planned range so they never take a planned slot; the server classifies them by RIR 6.
+    public func nextSetIndex(planItemIndex: Int, rir: Int?) -> Int {
+        if rir == 6 {
+            // Above every warm-up already logged, so undoing one cannot hand out a live index.
+            let acknowledged = (workout?.sets ?? []).filter {
+                ($0.planItemIndex ?? -1) == planItemIndex && $0.rir == 6
+            }.compactMap(\.setIndex)
+            let queued = pending.compactMap { operation -> Int? in
+                guard case .addSet(let body) = operation.body,
+                      body.planItemIndex == planItemIndex, body.rir == 6 else { return nil }
+                return body.setIndex
+            }
+            return max(1000, ((acknowledged + queued).max() ?? 999) + 1)
+        }
+        return setsDone(planItemIndex: planItemIndex) + 1
+    }
+
     /// Now in the session's clock domain (server-adjusted when the offset is known).
     public func serverNow(_ local: Date = Date()) -> Date {
         sessionRecord?.serverNow(at: local) ?? local
@@ -434,8 +453,20 @@ public final class WatchExecutionEngine {
     @discardableResult
     public func applyRemote(_ payload: RemoteExecutionPayload, deviceID: String?) -> Bool {
         guard let workout, payload.workoutId == workout.workoutId else { return false }
-        if let owner = payload.ownerDeviceId, !owner.isEmpty,
-           let deviceID, !deviceID.isEmpty, owner != deviceID {
+        let phoneOwns = payload.ownerDeviceId.flatMap { owner in
+            guard !owner.isEmpty, let deviceID, !deviceID.isEmpty else { return false }
+            return owner != deviceID
+        } ?? false
+        if phoneOwns {
+            // The phone owns capture, but the watch still mirrors the plan read-only.
+            if payload.planRevision > (sessionRecord?.planRevision ?? 0) {
+                if activeSet == nil {
+                    apply(plan: payload.plan, revision: payload.planRevision)
+                } else {
+                    deferredPlan = (payload.planRevision, payload.plan)
+                    planUpdated = true
+                }
+            }
             phase = .readOnly
             return true
         }
@@ -509,6 +540,8 @@ public final class WatchExecutionEngine {
             return .nothingToSend
         }
         guard owner == device else {
+            // A read-only watch still reflects phone edits; it just cannot write.
+            applyRevisionIfNeeded(envelope)
             phase = .readOnly
             return .nothingToSend
         }
@@ -692,7 +725,7 @@ public final class WatchExecutionEngine {
                 occurredAt: ServerClock.encodedISO(stamp),
                 planItemIndex: itemIndex,
                 localSetId: token,
-                payload: ["set_index": .number(Double(setIndex))]
+                payload: nil
             )], to: &capture, workout: workout)
         }
     }

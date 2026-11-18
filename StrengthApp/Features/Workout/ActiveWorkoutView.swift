@@ -21,11 +21,6 @@ struct ActiveWorkoutView: View {
     @State private var addOperation = OperationKey<AddSetRequest>()
     @State private var addError: String?
 
-    @State private var ratingExercise = ""
-    @State private var rating = 4
-    @State private var formOperation = OperationKey<FormRatingRequest>()
-    @State private var formError: String?
-
     @State private var rpe: Int? = 7
     @State private var productivity: Int? = nil
     @State private var durationText = ""
@@ -177,6 +172,32 @@ struct ActiveWorkoutView: View {
                                             }
                                             .disabled(planItems.count == 1 || exercise.isEmpty)
                                             Divider()
+                                            Button("Move up") {
+                                                Task {
+                                                    await moveExercise(
+                                                        index: index,
+                                                        to: index - 1,
+                                                        exerciseId: exercise
+                                                    )
+                                                }
+                                            }
+                                            .disabled(
+                                                model.isSaving || index == 0 || exercise.isEmpty
+                                            )
+                                            Button("Move down") {
+                                                Task {
+                                                    await moveExercise(
+                                                        index: index,
+                                                        to: index + 1,
+                                                        exerciseId: exercise
+                                                    )
+                                                }
+                                            }
+                                            .disabled(
+                                                model.isSaving || index == planItems.count - 1
+                                                    || exercise.isEmpty
+                                            )
+                                            Divider()
                                             Button("Add one set") {
                                                 Task {
                                                     await changeSets(
@@ -212,6 +233,19 @@ struct ActiveWorkoutView: View {
                                         Text(item.repsLabel)
                                         Text(item.loadLabel)
                                         Text(item.effortLabel)
+                                        if let velocity = item.velocityTargetLabel {
+                                            Text("target \(velocity)")
+                                        }
+                                        if model.isExerciseActive(
+                                            planItemIndex: identity,
+                                            exerciseId: exercise
+                                        ) {
+                                            Label("In progress", systemImage: "timer")
+                                                .foregroundStyle(.orange)
+                                                .accessibilityIdentifier(
+                                                    "exercise-in-progress-\(index)"
+                                                )
+                                        }
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -328,59 +362,6 @@ struct ActiveWorkoutView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
-                            }
-                        }
-
-                        Section("Form rating") {
-                            if model.isMirroringWatchSession {
-                                Label("Form ratings are recorded on the Apple Watch.", systemImage: "applewatch")
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityIdentifier("mirror-form-disabled")
-                                Text("Take over logging to rate form on the phone.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Picker("Exercise", selection: $ratingExercise) {
-                                    Text("Choose").tag("")
-                                    ForEach(exerciseOptions, id: \.self) { id in
-                                        Text(Self.label(id)).tag(id)
-                                    }
-                                }
-                                .onChange(of: ratingExercise) { _, id in
-                                    rating = workout.formRating(for: id)?.rating ?? 4
-                                }
-                                if let existing = workout.formRating(for: ratingExercise) {
-                                    LabeledContent("Current rating", value: "\(existing.rating) / 5")
-                                        .accessibilityIdentifier("form-current-rating")
-                                    Text("Saving again records a correction. The earlier rating is retained in the record; the latest is shown here.")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .accessibilityIdentifier("form-correction-note")
-                                }
-                                Picker("Rating", selection: $rating) {
-                                    ForEach(1...5, id: \.self) { value in
-                                        Text("\(value)").tag(value)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                if let error = formError {
-                                    Text(error).foregroundStyle(.red)
-                                }
-                                Button {
-                                    Task { await saveForm(workout) }
-                                } label: {
-                                    HStack {
-                                        Spacer()
-                                        if model.isSaving {
-                                            ProgressView()
-                                        } else {
-                                            Text(workout.formRating(for: ratingExercise) == nil ? "Save form rating" : "Save correction")
-                                        }
-                                        Spacer()
-                                    }
-                                }
-                                .accessibilityIdentifier("save-form")
-                                .disabled(model.isSaving || ratingExercise.isEmpty)
                             }
                         }
 
@@ -552,9 +533,6 @@ struct ActiveWorkoutView: View {
         if exerciseId.isEmpty, let first = exerciseOptions.first {
             exerciseId = first
         }
-        if ratingExercise.isEmpty, let first = exerciseOptions.first {
-            ratingExercise = first
-        }
     }
 
     private func addSet(to workout: WorkoutDetail) async {
@@ -654,21 +632,6 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func saveForm(_ workout: WorkoutDetail) async {
-        formError = nil
-        let request = FormRatingRequest(
-            exerciseId: ratingExercise,
-            rating: rating,
-            note: nil
-        )
-        let key = formOperation.use(request)
-        if await model.rateForm(request, idempotencyKey: key) {
-            formOperation.acknowledged()
-        } else {
-            formError = model.mutationError
-        }
-    }
-
     private func removePendingSet(_ localSetId: Int) async {
         if !(await model.cancelOfflineSet(localSetId: localSetId)) {
             addError = model.mutationError
@@ -678,7 +641,10 @@ struct ActiveWorkoutView: View {
     private func planSetState(identity: Int, exerciseId: String) -> PlanSetState {
         var attributed = 0
         var ambiguous = 0
-        for set in workout?.sets ?? [] where set.exerciseId == exerciseId {
+        for set in workout?.sets ?? []
+        where set.exerciseId == exerciseId && set.rir != 6 {
+            // A warm-up is attributed to the plan item but is not a planned set: it must not
+            // block a swap or a set-count change.
             if let itemIdentity = set.planItemIndex {
                 if itemIdentity == identity { attributed += 1 }
             } else {
@@ -719,6 +685,21 @@ struct ActiveWorkoutView: View {
             workoutId: workout.workoutId,
             itemIndex: removal.index,
             expectedExerciseId: removal.exerciseId,
+            idempotencyKey: key
+        )) {
+            planEditError = model.mutationError
+        }
+    }
+
+    private func moveExercise(index: Int, to: Int, exerciseId: String) async {
+        guard let workout, index != to else { return }
+        planEditError = nil
+        let key = UUID().uuidString.lowercased()
+        if !(await model.movePlanExercise(
+            workoutId: workout.workoutId,
+            itemIndex: index,
+            toIndex: to,
+            expectedExerciseId: exerciseId,
             idempotencyKey: key
         )) {
             planEditError = model.mutationError

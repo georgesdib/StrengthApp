@@ -192,12 +192,23 @@ record of what was exercised.
       offers the active workout instead.
 - [ ] The exercise screen shows the warm-up ramp including the empty-bar first set; a working set
       can be logged without logging any warm-up.
-- [ ] Rate form on the exercise screen; the current rating and correction label behave as on the
-      workout screen.
+- [ ] Opening an exercise records nothing. The first **Start set** starts it, and leaving the screen
+      without **End exercise** keeps it in progress.
+- [ ] **End exercise** closes any running rest, records the completion, offers the optional 1–5 form
+      rating with a skip, and returns to the plan list.
+- [ ] Start a set on exercise A, go back and start a set on exercise B: both show **In progress**,
+      starting B interrupts A's rest, and ending A leaves B open.
+- [ ] Skip a warm-up's set and log a planned set: the swap and set-count controls stay available
+      (a warm-up never counts as a planned set).
 - [ ] Start a rest, return to Today: the countdown stays visible above the tab bar, then dismisses
       itself at zero.
 - [ ] Lock the phone during a rest: the rest-end notification appears; **Done** clears it and
       returns to the app.
+- [ ] Lock the phone during a rest: the Lock Screen shows a countdown (and the Dynamic Island on a
+      supported iPhone) with the app closed; tapping it opens Strength.
+- [ ] Add the **Strength** control to Control Center and to the Action button; both open the app.
+- [ ] Force-quit during a rest, wait past its end, relaunch: the interval is recorded as completed
+      at the time it actually ended.
 - [ ] With Wi-Fi off, open Exercise Library and an exercise picker: the cached catalogue still lists
       and selects exercises; plan editing still reports that it needs the server.
 
@@ -534,3 +545,87 @@ matching the Action button's behaviour.
 - [x] Both intents work from the Shortcuts app and from Siri's intents list.
 
 Owner confirmation: pass 2026-11-15 · Build: INT-7c · Device: iPhone + Watch · iOS 27.2 / watchOS 27.2
+
+---
+
+# INT-10 Daily reminder acceptance — outstanding
+
+**Status 2026-11-16:** implemented on the iOS client; automated tests pass. The physical-device checks
+are **not run yet** — simulator success is not proof of notification delivery.
+
+## Automated
+
+- [x] `xcodebuild test -only-testing:StrengthAppTests/NudgeSchedulerTests` — 18 tests, 0 failures.
+- [x] `NudgeSchedulerTests`, `AppModelTests` and `RestTimerTests` pass together (29 tests).
+- [x] The iOS scheme builds for the iPhone 18 Pro simulator (iOS 27.2).
+- [x] The full `scripts/ci.sh` gate: both schemes build and 425 tests pass (1 skipped).
+
+## Physical device — outstanding
+
+- [ ] Enable the reminder, set it two minutes ahead, background the app and receive it on time.
+- [ ] The message names only facts the app already shows; with Apple Intelligence off it uses the
+      built-in wording rather than failing.
+- [ ] Tapping the notification opens Today; with readiness missing it presents the readiness form.
+- [ ] The **Log readiness** action opens the readiness form directly.
+- [ ] Complete a session before the reminder time and confirm no reminder fires that day.
+- [ ] Change the time, foreground the app, and confirm one pending reminder on each of the next seven
+      days and no duplicates.
+- [ ] With a Focus mode on, confirm the reminder's behaviour (this build adds no time-sensitive
+      entitlement, so Focus may hold it).
+
+## First device run — 2026-11-16 (two defects found)
+
+- **Wrong readiness state.** The reminder said readiness had not been logged after it had been. Cause:
+  the server omits `known` when a day has a usable merged row and sends `known: false` only when it
+  has none, and the client tested for `known == true`. Fixed with `ReadinessPayload.isLogged`
+  (`known ?? true`) and a decoding test that pins both shapes.
+- **No model prose.** The readiness facts contain no numbers, so any numeral the model wrote failed
+  the grounding check and the template always shipped. The owner then asked for numbers to be allowed
+  in a reminder: the nudge now enforces only length, while the narrative surfaces keep the strict
+  number-grounding check. Settings reports the last composition's origin and reason.
+- **Not mirrored to the watch.** Expected behaviour, not a defect: iOS mirrors an iPhone notification
+  only while the iPhone is locked or asleep.
+
+Both fixes are covered by `NudgeSchedulerTests` (20 tests). The physical-device list above still
+needs a re-run against the fixed build.
+
+Owner confirmation: pending.
+
+---
+
+# INT-13 Today summary acceptance — closed by owner decision (2026-11-17)
+
+**Status 2026-11-17:** implemented on the iOS client; automated tests pass. The owner closed the phase
+without a physical-device run, so the device checks below remain unverified on hardware.
+
+## Automated
+
+- [x] `TodaySummaryModelTests` and `TodaySummaryFactsTests` — 10 tests, 0 failures.
+- [x] One generation per day/readiness/plan/model state; a manual refresh forces another.
+- [x] An unavailable model is reported without a generation attempt and never falls back to the other
+      model.
+- [x] The DeepSeek reply is rejected unless it carries both passages.
+- [x] The full `scripts/ci.sh` gate: 437 tests, 1 skipped, 0 failures.
+
+## Physical device — not run (waived)
+
+- [ ] With Apple Intelligence on, the card shows two passages and the footer says **On this iPhone**.
+- [ ] With DeepSeek selected and a key saved, the footer says **DeepSeek** and the text arrives.
+- [ ] With DeepSeek selected and no key, the card says a key is needed; nothing is generated.
+- [ ] With "Include plan and prescription data" off, the DeepSeek summary carries no plan or load.
+- [ ] Changing readiness or requesting a session regenerates the card once; idle tab switches do not.
+- [ ] The toggle in Settings hides the block on Today.
+
+Owner confirmation: closed by owner decision 2026-11-17; no device run.
+
+---
+
+# INT-11 Explain acceptance — closed by owner decision (2026-11-17)
+
+**Status 2026-11-17:** implemented on the server and in the iOS Explain tab; the automated index,
+retrieval, citation, endpoint and build checks pass. The owner closed the phase without a separate
+physical-device run and without a dedicated release tag; Explain ships with the next tagged release.
+Device behaviour therefore remains unverified on hardware: paired-server answers, Safari citation
+links, copyable private-doc citations, and the offline and index-not-ready states.
+
+Owner confirmation: closed by owner decision 2026-11-17; no device run.

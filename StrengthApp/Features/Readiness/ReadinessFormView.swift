@@ -12,24 +12,29 @@ struct ReadinessFormView: View {
         let hint: String
     }
 
-    private let coreFields = [
+    private static let coreFields = [
         Field(id: "sleep", label: "Sleep", hint: "1-5"),
         Field(id: "energy", label: "Energy", hint: "1-5"),
         Field(id: "mood", label: "Mood", hint: "1-5"),
         Field(id: "soreness", label: "Soreness", hint: "1-5"),
         Field(id: "stress", label: "Stress", hint: "1-5 (5 = no stress)"),
     ]
-    private let measureFields = [
+    private static let measureFields = [
         Field(id: "hrv_ms", label: "HRV", hint: "ms, optional"),
         Field(id: "rhr_bpm", label: "Resting HR", hint: "bpm, optional"),
         Field(id: "bodyweight_kg", label: "Bodyweight", hint: "kg, optional"),
         Field(id: "wearable_score", label: "Wearable score", hint: "0-100, optional"),
     ]
-    private let legacyFields = [
-        Field(id: "squat_readiness", label: "Squat readiness", hint: "legacy 1-5"),
-        Field(id: "bench_readiness", label: "Bench readiness", hint: "legacy 1-5"),
-        Field(id: "deadlift_readiness", label: "Deadlift readiness", hint: "legacy 1-5"),
-    ]
+
+    /// Every field this form can write, in display order. The legacy per-lift labels
+    /// (`squat_readiness`, `bench_readiness`, `deadlift_readiness`) are deliberately absent:
+    /// they are historical calibration labels, not inputs, and the server rejects them on the
+    /// manual-entry path (`DEC-READINESS-06`).
+    static var inputFieldIds: [String] {
+        (coreFields + measureFields).map(\.id)
+    }
+
+    private var allFields: [Field] { Self.coreFields + Self.measureFields }
 
     @State private var text: [String: String] = [:]
     @State private var note = ""
@@ -39,7 +44,7 @@ struct ReadinessFormView: View {
     var body: some View {
         Form {
                 Section {
-                    ForEach(coreFields) { field in
+                    ForEach(Self.coreFields) { field in
                         fieldRow(field)
                     }
                 } header: {
@@ -76,6 +81,7 @@ struct ReadinessFormView: View {
                                 Text(error)
                                     .font(.footnote)
                                     .foregroundStyle(.orange)
+                                    .textSelection(.enabled)
                             }
                         }
                     } header: {
@@ -86,13 +92,7 @@ struct ReadinessFormView: View {
                 }
 
                 Section("Measurements") {
-                    ForEach(measureFields) { field in
-                        fieldRow(field)
-                    }
-                }
-
-                Section("Legacy labels") {
-                    ForEach(legacyFields) { field in
+                    ForEach(Self.measureFields) { field in
                         fieldRow(field)
                     }
                 }
@@ -168,9 +168,13 @@ struct ReadinessFormView: View {
                 .font(.caption)
                 .foregroundStyle(.orange)
         } else {
-            Text("\(label): no sample")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(
+                field == "hrv_ms"
+                    ? "\(label): no recovery reading"
+                    : "\(label): no sample"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -232,7 +236,7 @@ struct ReadinessFormView: View {
     private func save() async {
         localError = nil
         var values: [String: Double] = [:]
-        for field in coreFields + measureFields + legacyFields {
+        for field in allFields {
             let raw = (text[field.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if raw.isEmpty { continue }
             guard let value = Double(raw.replacingOccurrences(of: ",", with: ".")) else {

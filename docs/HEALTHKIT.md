@@ -1,113 +1,86 @@
 # HEALTHKIT — CURRENT STATE
 
-**Status:** describes the shipped behaviour on 2026-11-17 (v1.0 plus the watch 6.7 record). This is a
-client-owned document: it describes what the phone and watch do with HealthKit. The server side of the
-readiness path is owned by the backend and the shared
-[Phase 3A contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-3A-CONTRACT.md).
+**Status:** describes shipped behaviour on 2026-11-18 (backend 1.6.0). The cardio stage is
+**implemented and deployed**, not proposed. This is a client-owned document: it describes what the
+phone and watch do with HealthKit. Server behaviour is owned by the backend and the shared contract
+in the [Phase 3A contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-3A-CONTRACT.md).
 
-Read this before changing any HealthKit code. The import work described in the
-[cardio stage plan](https://github.com/georgesdib/strength-app/blob/development/docs/plans/CARDIO-STAGE.md) is
-**proposed and not implemented**; nothing below is waiting on it.
+Read this before changing any HealthKit code.
 
 ## 1. What the app touches today
 
 | Surface | Reads | Writes |
 |---|---|---|
-| iPhone — readiness | Heart-rate variability (SDNN), resting heart rate, body mass | Nothing |
+| iPhone — readiness | HRV (SDNN), resting heart rate, body mass | Nothing |
+| iPhone — recorded activity | Workouts, heart rate, VO₂max, workout effort score, Apple's average METs | Nothing |
 | Watch — workout execution | Heart rate, during a running workout session | One strength-training workout, one workout effort score |
 
-There is no other HealthKit surface. No sleep, no clinical records, no other workout types, no
-heart-rate time series, no background refresh.
+There is still no write path from the phone to HealthKit beyond the watch's single saved workout.
 
 ## 2. iPhone — readiness reads
 
-- Read-only adapter (`HealthKitReadinessService`). It performs no writes, no observer queries and no
-  background delivery.
-- Query window: 30 days back to five minutes ahead of now.
-- At most one sample per field per day. Apple Watch wins only when it is positively classified;
-  otherwise the newest eligible sample wins with deterministic ties.
-- Each field is reported as `eligible`, `stale` or `missing`. An empty result is never treated as
-  denied access and never as a zero reading.
-- Selected observations are uploaded to `POST api/ios/v1/healthkit/readiness` with sample identity
-  (`sample_id`, `sample_at`) and source provenance (`source_name`, `source_bundle_id`,
-  `source_class`, model, manufacturer). The backend stores them append-only and rejects reuse of the
-  same sample identity with changed immutable fields (409).
-- Gated twice: HealthKit is off by default in Settings, and the server must report the
-  `healthkit_readiness` capability before the app offers the import.
+- Read-only adapter (`HealthKitReadinessService`): no writes, no observer queries, no background
+  delivery.
+- Query window: 30 days back to five minutes ahead of now; at most one sample per field per day,
+  Apple Watch winning only when positively classified.
+- Fields report `eligible`, `stale` or `missing`; an empty result is never treated as denied access
+  and never as zero.
+- Uploaded to `POST api/ios/v1/healthkit/readiness` with sample identity and source provenance; the
+  backend stores them append-only and rejects a reused identity with changed immutable fields.
 
-### Recovery HRV series (added 2026-11-18)
+## 3. iPhone — recorded activity (incremental, post-cutoff only)
 
-- Readiness no longer reads the newest SDNN sample. It reads a **recovery value per night**: the
-  upper median of that local calendar day's HRV samples taken before 10:00
-  (`RecoveryHRV` in `StrengthCore`). A day with no sample in that window has no recovery value,
-  and the server then omits HRV from readiness rather than falling back to a daytime reading.
-  Sleep data is not read, so the window is fixed rather than sleep-derived.
-- The raw newest-sample HRV is still imported through the readiness route and stays in the audit
-  table; it no longer feeds the score.
-- The series is uploaded to `POST api/ios/v1/healthkit/hrv-recovery` with a deterministic
-  `sample_id` (`recovery-<date>-<tenths>`) and local-offset `sample_at`, so a retry is a
-  duplicate and a corrected value is a new append-only observation.
-- `RecoveryHRVService` sends the last three nights before each readiness import and runs a
-  bounded backfill (180-day pages, five-year horizon, 200 samples per request). Progress is a
-  watermark in `UserDefaults` (`recoveryHRV.backfillOldest` / `backfillComplete`) that resets
-  when the server URL changes, so an interrupted backfill resumes rather than restarts.
+`HealthKitActivityService` implements the sync:
 
-## 3. Watch — workout recording
+- **Workouts** since the workout cursor minus one day (idempotent re-send), never before
+  `history_cutoff`; the server also rejects pre-cutoff workouts as defence in depth.
+- **Heart rate** inside each uploaded workout and for ten minutes after its end, so recovery HR can
+  be computed later. Background samples are never uploaded.
+- **VO₂max** as a standalone metric, sent without a cutoff because the server deduplicates on time,
+  value and method — that lets a sync fill a gap in the exported history without duplicating it.
+- **Workout effort** (`HKMetadataKeyAverageMETs` and the effort score, 1–10) read from metadata and
+  matched to its workout by interval; stored as `avg_mets` and `srpe`.
+- Uploads go to `POST api/ios/v1/healthkit/workouts` then `.../samples` (samples and metrics in the
+  second call), each device-authenticated and idempotent on the HealthKit UUID. The response reports
+  `created`, `existing`, `rejected` so a partial write is visible.
 
-- `HKWorkoutSession(.traditionalStrengthTraining, .indoor)` with `HKLiveWorkoutBuilder` and
-  `HKLiveWorkoutDataSource`. Heart rate is consumed for liveness (keeping the screen awake while sets
-  are logged); the app stores no heart-rate samples of its own.
-- Shared to HealthKit: the workout type and `workoutEffortScore`. The effort score is attached with
-  `relateWorkoutEffortSample`; a score that cannot be related is deleted rather than left orphaned.
-- The saved workout carries `HKMetadataKeyExternalUUID` set to the watch-local `sessionUUID` — the
-  same UUID that is the idempotency key of the finish request. The server does not persist it, so a
-  session row cannot currently be traced back to its HealthKit workout. That is the gap the cardio
-  stage's reconciliation work exists to close.
-- Exactly-once save rule lives in `StrengthCore` (`HealthKitFinalizer`), not in the HealthKit adapter:
-  up to five automatic attempts, then the save is terminal `unsaved` and only an explicit retry runs
-  again. Duplicate prevention checks for an existing workout by the metadata key before saving.
+The **Cardio overview** (`CardioOverviewView`, Progress → Cardio activity) reads
+`GET api/ios/v1/healthkit/activity/summary`: last 7 days, last 28 days, twelve weeks, recent
+workouts, and a sync button. Windows are calendar windows ending today, not windows ending at the
+last workout.
 
-## 4. Privacy limits that shape every design here
+## 4. Privacy limits that shape every design
 
-- Read authorisation cannot be queried per type. A denied read is indistinguishable from an empty
-  result, so the app cannot know whether "no data" means "no data exists" or "no access granted".
-  Every surface must therefore treat missing data as unknown, never as zero activity.
-- Write authorisation *is* queryable and is used (`sharingAuthorized`, `sharingDenied`,
-  `notDetermined`).
-- The app cannot enumerate what the user granted. Coverage is established by what arrives, not by
-  what was requested.
-- HealthKit values cross the trusted home LAN to the local server over the existing plain-HTTP model.
-  Nothing is sent anywhere else.
+- Read authorisation cannot be queried per type: a denied read is indistinguishable from an empty
+  result. Missing data is therefore modelled as unknown, never as zero.
+- Write authorisation *is* queryable and is used.
+- The app cannot enumerate what was granted; coverage is established by what arrives.
+- Values cross the trusted home LAN to the local server; nothing is sent anywhere else.
 
 ## 5. Entitlements and usage strings
 
 - `StrengthApp.entitlements`: `com.apple.developer.healthkit`,
-  `com.apple.developer.healthkit.background-delivery` and
-  `com.apple.developer.healthkit.access = health-records`.
+  `com.apple.developer.healthkit.background-delivery`, `healthkit.access = health-records`.
 - `StrengthWatch.entitlements`: `com.apple.developer.healthkit` only.
-- **Owner-confirmed 2026-11-17:** the clinical-records access and the background-delivery entitlement
-  are intentional. No code path uses either today — background delivery is the expected transport for
-  the cardio stage's incremental sync (C2), and records access is retained deliberately. Neither is
-  evidence that a capability exists: keep them declared, and verify both still validate at submission
-  when the import work first depends on them.
-- `NSHealthShareUsageDescription` is written for the stage's full read scope — HRV, resting heart rate,
-  bodyweight, workouts and heart rate — rather than for the readiness fields alone (owner decision
-  2026-11-17). The app still requests the readiness types only; workout and heart-rate authorisation
-  arrives with C2, and a scope that was never granted is never silently extended to an existing
-  install. The wider prompt is re-presented at that point.
+- Both extra capabilities are owner-confirmed as intentional; no code uses background delivery or
+  clinical records yet. Verify both still validate at submission when something depends on them.
+- `NSHealthShareUsageDescription` covers the full read scope (HRV, resting HR, bodyweight, workouts
+  and heart rate). The watch string covers heart rate during a workout and one saved workout.
 
 ## 6. What is not implemented
 
-Workout import of any kind; heart-rate series; VO₂max, exercise minutes, distance, active energy or
-power; anchored incremental sync; workout deletion handling; reconciliation against strength
-sessions; cardio dashboards. Historical backfill exists only for the recovery-HRV series. The cardio stage plan scopes these across C0–C7 and none
-of it is delivered.
+- **Deletion detection.** A workout deleted in Health is never removed; the web panel's **Hide**
+  action is the substitute.
+- **Observed METs/effort on a new upload.** The fields are read and stored, but no post-cutoff
+  workout has been uploaded yet, so their presence is unconfirmed.
+- **Per-workout heart-rate charts on the phone**, and the web time-in-zone chart. Detailed traces
+  remain a web concern that is not built.
+- No sleep, clinical records or background delivery.
 
 ## 7. Behaviour authority and tests
 
-- `StrengthAppTests/HealthKitReadinessTests.swift` — selection, staleness and the empty-never-denied
+- `StrengthAppTests/HealthKitReadinessTests.swift` — readiness selection and the empty-never-denied
   rule.
-- `StrengthAppTests/RecoveryHRVTests.swift` — the night window, median, source choice and
-  deterministic sample id.
-- `StrengthAppTests/WatchHealthKitFinalizerTests.swift` — the exactly-once save rule.
-- Both encode behaviour that this document describes; a change to one without the other is a bug.
+- `StrengthAppTests/WatchHealthKitFinalizerTests.swift` — the exactly-once workout save.
+- The activity sync's contract is enforced backend-side by `tests/test_ios_workflow.py`; the iOS
+  side has no equivalent tests yet.

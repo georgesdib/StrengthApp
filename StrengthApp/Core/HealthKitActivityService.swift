@@ -287,6 +287,7 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         case .highIntensityIntervalTraining: return "HKWorkoutActivityTypeHighIntensityIntervalTraining"
         case .golf: return "HKWorkoutActivityTypeGolf"
         case .tennis: return "HKWorkoutActivityTypeTennis"
+        case .tableTennis: return "HKWorkoutActivityTypeTableTennis"
         case .yoga: return "HKWorkoutActivityTypeYoga"
         default: return "HKWorkoutActivityTypeOther"
         }

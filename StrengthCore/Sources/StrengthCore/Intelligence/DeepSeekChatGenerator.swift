@@ -21,8 +21,15 @@ public enum ChatGrounding {
 }
 
 public enum DeepSeekTools {
-    public static func specs(includePlan: Bool = false) -> [DeepSeekTool] {
+    public static func specs(includePlan: Bool = false, includeHealth: Bool = false) -> [DeepSeekTool] {
         var tools = baseSpecs
+        if includeHealth {
+            tools.append(tool(
+                name: "longevity",
+                description: "Read-only aerobic and fitness facts: last completed week against the WHO 150-300 minute reference as context (never a pass/fail), this week's progress, the latest VO2max with its date and status, and per-pattern volume headroom. Use it when the athlete asks about aerobic activity, cardio fitness, VO2max or what to add this week.",
+                query: "Optional hint; pass an empty string."
+            ))
+        }
         if includePlan {
             tools += [
                 tool(name: "prescription", description: "Read-only training prescription. Pass a date (YYYY-MM-DD) or prescription id; an empty string asks for the current prescription.", query: "Date, prescription id, or empty string."),
@@ -109,6 +116,8 @@ public enum DeepSeekTools {
                 return try await provider.sessionDetails(workoutID: query)
             case "readiness_status":
                 return try await provider.readinessStatus(from: "", to: "")
+            case "longevity":
+                return try await provider.longevityAssessment(includeTimeInZone: false)
             case "prescription":
                 guard let plan = provider as? any PlanFactsProviding else {
                     return "Plan data is not available in this build."
@@ -155,16 +164,19 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
     private let keyPresent: Bool
     private let facts: any ChatFactsProviding
     private let includePlan: Bool
+    private let includeHealth: Bool
     private let failureLog = ToolFailureLog()
 
     public init(
         api: any DeepSeekCompleting,
         keyPresent: Bool,
         facts: any ChatFactsProviding,
-        includePlan: Bool = false
+        includePlan: Bool = false,
+        includeHealth: Bool = false
     ) {
         self.api = api
         self.keyPresent = keyPresent
+        self.includeHealth = includeHealth
         self.facts = facts
         self.includePlan = includePlan
     }
@@ -211,7 +223,9 @@ public final class DeepSeekChatGenerator: TrainingChatGenerating {
             while toolRounds < 4 {
                 let result = try await api.complete(
                     messages: messages,
-                    tools: injectPlan ? [] : DeepSeekTools.specs(includePlan: includePlan)
+                    tools: injectPlan ? [] : DeepSeekTools.specs(
+                        includePlan: includePlan, includeHealth: includeHealth
+                    )
                 )
                 if !result.toolCalls.isEmpty {
                     messages.append(

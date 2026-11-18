@@ -58,6 +58,11 @@ public extension JSONValue {
         return nil
     }
 
+    var numberValue: Double? {
+        if case .number(let value) = self { return value }
+        return nil
+    }
+
     /// Presentation text only; never used to compare or compute a metric.
     var displayText: String {
         switch self {

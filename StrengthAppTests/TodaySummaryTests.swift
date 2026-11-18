@@ -173,3 +173,93 @@ final class TodaySummaryFactsTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Longevity summary (step 3)
+
+final class LongevitySummaryTests: XCTestCase {
+    private func envelope(
+        status: String,
+        relation: String,
+        equivalent: Double,
+        vo2Status: String
+    ) throws -> IntelligenceEnvelope {
+        let json = """
+        {"schema_version":"intelligence.envelope.v1","capability":"get_longevity_assessment",
+         "status":"\(status)","as_of":"2026-11-18",
+         "period":{"start":"2026-11-09","end":"2026-11-15","days":7,"weeks":1,"timezone":"Europe/London"},
+         "facts":{
+           "last_week":{"value":{"relation":"\(relation)","equivalent_minutes":\(equivalent),
+             "remaining_minutes":40,"reference":{"min_minutes":150,"max_minutes":300}},
+             "basis":"derived","method":"m"},
+           "current_week":{"value":{"equivalent_minutes":40,"days_remaining":4},
+             "basis":"derived","method":"m"},
+           "vo2max":{"value":{"status":"\(vo2Status)","value":48,"measured_on":"2026-11-12"},
+             "basis":"observed","method":"m"}
+         },
+         "coverage":{},"missing":[],"limitations":[]}
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(IntelligenceEnvelope.self, from: Data(json.utf8))
+    }
+
+    func testInsideReferenceReadsAsContextNotAPass() throws {
+        let summary = try XCTUnwrap(LongevitySummary(envelope: envelope(
+            status: "ok", relation: "inside", equivalent: 180, vo2Status: "current"
+        )))
+        XCTAssertTrue(summary.headline.contains("180"))
+        XCTAssertTrue(summary.headline.contains("inside"))
+        XCTAssertFalse(summary.headline.lowercased().contains("target"))
+    }
+
+    func testBelowReferenceStatesTheGap() throws {
+        let summary = try XCTUnwrap(LongevitySummary(envelope: envelope(
+            status: "ok", relation: "below", equivalent: 110, vo2Status: "absent"
+        )))
+        XCTAssertTrue(summary.headline.contains("40"))
+        XCTAssertTrue(summary.headline.contains("short"))
+        XCTAssertEqual(summary.vo2maxLine, "No VO₂max measurement recorded.")
+    }
+
+    func testStaleReadingIsLabelled() throws {
+        let summary = try XCTUnwrap(LongevitySummary(envelope: envelope(
+            status: "ok", relation: "inside", equivalent: 180, vo2Status: "stale"
+        )))
+        XCTAssertTrue(summary.vo2maxLine.contains("stale"))
+        XCTAssertTrue(summary.vo2maxLine.contains("2026-11-12"))
+    }
+
+    func testIncompleteClassificationDoesNotClaimABelow() throws {
+        let summary = try XCTUnwrap(LongevitySummary(envelope: envelope(
+            status: "insufficient", relation: "unknown", equivalent: 0, vo2Status: "absent"
+        )))
+        XCTAssertFalse(summary.headline.lowercased().contains("short"))
+        XCTAssertTrue(summary.headline.lowercased().contains("could not be classified"))
+    }
+
+    func testFactsCarryTheNumbersForTheModel() throws {
+        let summary = try XCTUnwrap(LongevitySummary(envelope: envelope(
+            status: "ok", relation: "inside", equivalent: 180, vo2Status: "current"
+        )))
+        XCTAssertTrue(summary.detail.contains("180"))
+        XCTAssertTrue(summary.detail.contains("context only"))
+        XCTAssertTrue(summary.detail.contains("4 days left"))
+    }
+}
+
+// MARK: - Longevity chat tool gating (step 3)
+
+final class LongevityChatToolTests: XCTestCase {
+    func testToolIsOfferedOnlyWithHealthConsent() {
+        let withConsent = DeepSeekTools.specs(includeHealth: true).map { $0.function.name }
+        let without = DeepSeekTools.specs(includeHealth: false).map { $0.function.name }
+        XCTAssertTrue(withConsent.contains("longevity"))
+        XCTAssertFalse(without.contains("longevity"))
+    }
+
+    func testPlanConsentAndHealthConsentAreIndependent() {
+        let planOnly = DeepSeekTools.specs(includePlan: true).map { $0.function.name }
+        XCTAssertTrue(planOnly.contains("prescription"))
+        XCTAssertFalse(planOnly.contains("longevity"))
+    }
+}

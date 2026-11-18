@@ -384,11 +384,32 @@ public final class IOSAPIClient {
     /// The phone reads the authenticated route, never the browser one.
     public func cardioActivity(
         session: IOSSession,
-        weeks: Int = 12
+        weeks: Int = 12,
+        includeTimeInZone: Bool = false
     ) async throws -> CardioActivityPayload {
-        try await get(
+        var query = [URLQueryItem(name: "weeks", value: String(weeks))]
+        if includeTimeInZone {
+            query.append(URLQueryItem(name: "tiz", value: "true"))
+        }
+        return try await get(
             path: "api/ios/v1/healthkit/activity/summary",
-            query: [URLQueryItem(name: "weeks", value: String(weeks))],
+            query: query,
+            session: session
+        )
+    }
+
+    /// The longevity envelope: the same facts the web panel shows, behind device authentication.
+    public func longevity(
+        session: IOSSession,
+        includeTimeInZone: Bool = false,
+        includePatterns: Bool = true
+    ) async throws -> IntelligenceEnvelope {
+        try await get(
+            path: "api/ios/v1/intelligence/longevity",
+            query: [
+                URLQueryItem(name: "include_time_in_zone", value: includeTimeInZone ? "true" : "false"),
+                URLQueryItem(name: "include_patterns", value: includePatterns ? "true" : "false"),
+            ],
             session: session
         )
     }

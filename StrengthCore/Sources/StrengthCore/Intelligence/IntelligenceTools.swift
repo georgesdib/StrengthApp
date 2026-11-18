@@ -10,6 +10,16 @@ public protocol IntelligenceCapabilityProviding: Sendable {
     func weeklyReview(weekEnd: String?) async throws -> String
     func sessionDetails(workoutID: String) async throws -> String
     func readinessStatus(from: String, to: String) async throws -> String
+    /// Aerobic adequacy, VO2max status and volume headroom, as compact facts.
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String
+}
+
+public extension IntelligenceCapabilityProviding {
+    /// Default keeps purpose-built test doubles and future providers compiling. The app's provider
+    /// implements the real call; a build without it says so rather than inventing numbers.
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String {
+        "No longevity facts are available in this build."
+    }
 }
 
 /// Safe, model-facing classification of a failed capability call.

@@ -14,6 +14,7 @@ struct TodaySummarySection: View {
 
     var body: some View {
         Section {
+            longevityBlock
             content
             footer
         } header: {
@@ -21,6 +22,22 @@ struct TodaySummarySection: View {
         }
         .task(id: model.todaySummaryFingerprint) {
             await summary.loadIfNeeded(fingerprint: model.todaySummaryFingerprint)
+        }
+    }
+
+    /// The deterministic half: the numbers, and the sentence that needs no model.
+    @ViewBuilder
+    private var longevityBlock: some View {
+        if let longevity = model.longevity {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(longevity.headline)
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(longevity.vo2maxLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityIdentifier("today-longevity-card")
         }
     }
 

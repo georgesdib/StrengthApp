@@ -243,6 +243,14 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
+                        Toggle("Include cardio and VO₂max data", isOn: $model.chatHealthEnabled)
+                            .disabled(model.chatModelChoice == .onDevice)
+                            .accessibilityIdentifier("chat-health-toggle")
+                        Text("Shares aerobic minutes, time-in-zone and your latest VO₂max with the "
+                             + "model. On this iPhone nothing leaves the device, so no consent is needed.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
                         if model.chatModelChoice == .deepSeek {
                             SecureField("DeepSeek API key", text: $deepSeekKeyInput)
                                 .textContentType(.password)

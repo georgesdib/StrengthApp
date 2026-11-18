@@ -16,7 +16,7 @@ struct CardioOverviewView: View {
         loading = true
         defer { loading = false }
         do {
-            payload = try await model.loadCardioActivity()
+            payload = try await model.loadCardioActivity(tiz: true)
             error = nil
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription
@@ -45,6 +45,23 @@ struct CardioOverviewView: View {
                      + "or heart rate. Unclassified time is reported, never counted as zero.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if let tiz = payload?.assessment?.timeInZone {
+                Section("Time in zone") {
+                    HStack {
+                        metric("\(tiz.windowDays)-day moderate", tiz.moderateMinutes)
+                        Divider()
+                        metric("\(tiz.windowDays)-day vigorous", tiz.vigorousMinutes)
+                    }
+                    .padding(.vertical, 4)
+                    Text("From heart-rate samples of \(tiz.eligibleWorkouts) workouts with complete "
+                         + "recordings (\(Int((tiz.coverageShare * 100).rounded()))% of those with "
+                         + "heart rate). Sample-based, so it is not the weekly total.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("cardio-time-in-zone")
             }
 
             if let weeks = payload?.summary.weeks, !weeks.isEmpty {

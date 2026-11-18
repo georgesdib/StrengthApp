@@ -97,6 +97,15 @@ final class AppModel: ObservableObject {
     ) {
         didSet { UserDefaults.standard.set(chatPlanEnabled, forKey: "intelligence.chat.plan") }
     }
+    /// Separate consent for health measurements (cardio minutes, time-in-zone, VO2max) leaving the
+    /// device. Plan data has its own toggle; health is a different class (DEC-LONGEVITY-02).
+    @Published var chatHealthEnabled: Bool = UserDefaults.standard.bool(
+        forKey: "intelligence.chat.health"
+    ) {
+        didSet { UserDefaults.standard.set(chatHealthEnabled, forKey: "intelligence.chat.health") }
+    }
+    /// The deterministic longevity facts behind the Today section; nil until loaded.
+    @Published private(set) var longevity: LongevitySummary?
     @Published private(set) var deepSeekKeyPresent = false
     private let deepSeekKeyStore: any DeepSeekKeyStoring = KeychainDeepSeekKeyStore()
     @Published var narrativeDetail: NarrativeDetail = NarrativeDetail(
@@ -375,9 +384,9 @@ final class AppModel: ObservableObject {
     }
 
     /// Authenticated cardio summary for the overview screen.
-    func loadCardioActivity(weeks: Int = 12) async throws -> CardioActivityPayload {
+    func loadCardioActivity(weeks: Int = 12, tiz: Bool = false) async throws -> CardioActivityPayload {
         guard let session else { throw CardioOverviewError.notPaired }
-        return try await client.cardioActivity(session: session, weeks: weeks)
+        return try await client.cardioActivity(session: session, weeks: weeks, includeTimeInZone: tiz)
     }
 
     enum CardioOverviewError: LocalizedError {
@@ -880,9 +889,19 @@ final class AppModel: ObservableObject {
         let includePlan = chatModelChoice == .onDevice || chatPlanEnabled
         let planned = includePlan ? currentNudgeFacts().planned : nil
         var overview: String?
+        var longevityFacts: String?
         if let session {
             let toolbox = ChatToolbox(client: client, session: session)
             overview = try? await toolbox.trainingOverview(asOf: nil, windowWeeks: 4)
+            if let envelope = try? await client.longevity(session: session),
+               let summary = LongevitySummary(envelope: envelope) {
+                longevity = summary
+                // The numbers are fetched from the athlete's own server; the consent governs only
+                // what is handed to an off-device model.
+                if chatModelChoice == .onDevice || chatHealthEnabled {
+                    longevityFacts = summary.detail
+                }
+            }
         }
         return TodaySummaryFacts(
             date: today?.date ?? Self.isoDate(),
@@ -892,7 +911,8 @@ final class AppModel: ObservableObject {
             exerciseCount: planned?.exerciseCount,
             leadLift: planned?.focusName,
             leadLoadKg: planned?.focusLoadKg,
-            overviewFacts: overview
+            overviewFacts: overview,
+            longevity: longevityFacts
         )
     }
 
@@ -912,6 +932,8 @@ final class AppModel: ObservableObject {
             score,
             planId,
             chatModelChoice.rawValue,
+            String(chatHealthEnabled),
+            longevity?.headline ?? "-",
         ].joined(separator: "|")
     }
 
@@ -2420,7 +2442,8 @@ final class AppModel: ObservableObject {
                     api: DeepSeekClient(apiKey: key),
                     keyPresent: key?.isEmpty == false,
                     facts: ChatToolbox(client: client, session: session),
-                    includePlan: chatPlanEnabled
+                    includePlan: chatPlanEnabled,
+                    includeHealth: chatHealthEnabled
                 ),
                 modelLabel: "DeepSeek",
                 planEnabled: chatPlanEnabled

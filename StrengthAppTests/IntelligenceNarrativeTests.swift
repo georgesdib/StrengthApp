@@ -196,6 +196,7 @@ private final class FailingProvider: IntelligenceCapabilityProviding, @unchecked
     func weeklyReview(weekEnd: String?) async throws -> String { throw error }
     func sessionDetails(workoutID: String) async throws -> String { throw error }
     func readinessStatus(from: String, to: String) async throws -> String { throw error }
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String { throw error }
 }
 
 private final class StubProvider: IntelligenceCapabilityProviding, @unchecked Sendable {

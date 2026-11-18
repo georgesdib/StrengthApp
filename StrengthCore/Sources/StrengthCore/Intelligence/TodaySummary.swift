@@ -42,6 +42,9 @@ public struct TodaySummaryFacts: Sendable, Equatable {
     public let leadLift: String?
     public let leadLoadKg: Double?
     public let overviewFacts: String?
+    /// Aerobic and fitness facts. Nil when the athlete has not consented to sending health data to
+    /// an off-device model; on-device generation always includes them (DEC-LONGEVITY-02).
+    public let longevity: String?
 
     public init(
         date: String,
@@ -51,7 +54,8 @@ public struct TodaySummaryFacts: Sendable, Equatable {
         exerciseCount: Int? = nil,
         leadLift: String? = nil,
         leadLoadKg: Double? = nil,
-        overviewFacts: String? = nil
+        overviewFacts: String? = nil,
+        longevity: String? = nil
     ) {
         self.date = date
         self.readinessLogged = readinessLogged
@@ -61,6 +65,7 @@ public struct TodaySummaryFacts: Sendable, Equatable {
         self.leadLift = leadLift
         self.leadLoadKg = leadLoadKg
         self.overviewFacts = overviewFacts
+        self.longevity = longevity
     }
 
     public var factText: String {
@@ -91,6 +96,10 @@ public struct TodaySummaryFacts: Sendable, Equatable {
         if let overviewFacts, !overviewFacts.isEmpty {
             lines.append("Four-week overview (server facts):")
             lines.append(overviewFacts)
+        }
+        if let longevity, !longevity.isEmpty {
+            lines.append("Aerobic and fitness facts (server):")
+            lines.append(longevity)
         }
         return lines.joined(separator: "\n")
     }

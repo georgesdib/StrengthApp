@@ -67,6 +67,7 @@ struct TodaySummarySection: View {
                     .font(.subheadline)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .textSelection(.enabled)
             .accessibilityIdentifier("today-summary-card")
         case .unavailable(let reason), .failed(let reason):
             Text(reason)

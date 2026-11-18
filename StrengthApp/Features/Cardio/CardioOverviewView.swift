@@ -35,6 +35,12 @@ struct CardioOverviewView: View {
             }
 
             Section {
+                Text("This page is the imported record: what Apple Health sent, how it was "
+                     + "classified, and what could not be classified. The weekly figure is an "
+                     + "estimate from Apple's METs or a workout's average heart rate; time in zone "
+                     + "comes from the heart-rate samples themselves.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 HStack {
                     metric("Last 7 days", week7?.equivalentMinutes)
                     Divider()

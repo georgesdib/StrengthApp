@@ -1565,6 +1565,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A queued HealthKit import is always superseded by the next one: its body may carry a date
+    /// the server no longer accepts, so it can never replay, and leaving it in place blocks every
+    /// later import behind a write that cannot succeed. The new import is idempotent and carries
+    /// today's values, so dropping the old one loses nothing.
+    private func discardSupersededHealthKitWrites(session: IOSSession) {
+        let pending = client.pendingMutations(for: session)
+        guard pending.contains(where: { $0.kind == .healthkitReadiness }) else { return }
+        for entry in pending where entry.kind == .healthkitReadiness {
+            client.discard(entry)
+        }
+        refreshPendingMutations()
+        if pendingMutations.isEmpty {
+            recoveryMessage = nil
+        }
+    }
+
     private func runHealthKitImport(session: IOSSession, date: String) async {
         isImportingHealthKit = true
         healthKitRefreshError = nil
@@ -1576,6 +1592,7 @@ final class AppModel: ObservableObject {
         }
         await acquireReadinessLock()
         lockHeld = true
+        discardSupersededHealthKitWrites(session: session)
         do {
             // The recovery series is what readiness reads, so the last few nights go up before
             // the readiness import and its response can show them. The backfill is bounded and
@@ -3118,6 +3135,11 @@ final class AppModel: ObservableObject {
         if isMirroringWatchSession, kind != .planEdit, kind != .abandonWorkout {
             mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
             return false
+        }
+        // A HealthKit import is read-derived, idempotent and independent of queued writes. Blocking
+        // it behind an unrelated pending operation would strand the owner with nothing to retry.
+        if kind == .healthkitReadiness {
+            return true
         }
         let unresolved = pendingMutations
         guard !unresolved.isEmpty else { return true }

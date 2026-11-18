@@ -321,6 +321,24 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertNotNil(capture.session?.rest?.endedAt, "the rest is closed, not left open")
     }
 
+    func testSkippingARestRecordsOneDeliberateSkipEvent() async throws {
+        let transport = AsyncStubTransport { _ in (200, Data(Self.watchWorkout.utf8)) }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.startRest(seconds: 120, planItemIndex: 0)
+
+        try engine.skipRest()
+
+        let capture = try store.load()
+        let types = capture.operations.flatMap { operation -> [ExecutionEventType] in
+            guard case .executionEvents(let events) = operation.body else { return [] }
+            return events.map(\.eventType)
+        }
+        XCTAssertEqual(types, [.restStarted, .restSkipped])
+        XCTAssertEqual(capture.session?.rest?.outcome, .skipped)
+        XCTAssertNotNil(capture.session?.rest?.endedAt, "the rest is closed, not left open")
+    }
+
     func testWarmupIsAnOrdinarySetWithAReservedIndexAndNoRest() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/sets") == true {

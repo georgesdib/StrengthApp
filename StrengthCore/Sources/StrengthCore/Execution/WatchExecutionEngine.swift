@@ -833,6 +833,18 @@ public final class WatchExecutionEngine {
         applyDeferredPlanIfIdle()
     }
 
+    /// Ends an open rest early on the lifter's command, recorded the way the phone records a
+    /// skip: one deliberate terminal event, `rest_skipped`. The watch has no separate skip
+    /// control, so the −15 s control bound for zero is that command (owner decision 2026-11-18).
+    public func skipRest() throws {
+        guard let workout else { return }
+        let stamp = stampedNow()
+        try mutate { capture in
+            try self.closeRest(in: &capture, at: stamp, workout: workout, outcome: .skipped)
+        }
+        applyDeferredPlanIfIdle()
+    }
+
     /// Persists the lifter's in-progress adjustments so a termination before logging loses
     /// nothing.
     public func updateActiveSetDraft(loadKg: Double?, reps: Int?) throws {
@@ -1467,15 +1479,16 @@ public final class WatchExecutionEngine {
     private func closeRest(
         in capture: inout OfflineCapture,
         at stamp: Date,
-        workout: WorkoutDetail
+        workout: WorkoutDetail,
+        outcome: RestOutcome = .completed
     ) throws {
         guard var record = capture.session, var rest = record.rest, rest.isOpen else { return }
-        rest.finish(at: stamp, outcome: .completed)
+        rest.finish(at: stamp, outcome: outcome)
         record.rest = rest
         capture.session = record
         try append([ExecutionEvent(
             eventId: UUID().uuidString.lowercased(),
-            eventType: .restCompleted,
+            eventType: outcome == .skipped ? .restSkipped : .restCompleted,
             occurredAt: ServerClock.encodedISO(stamp),
             planItemIndex: rest.planItemIndex,
             payload: nil

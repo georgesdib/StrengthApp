@@ -408,11 +408,12 @@ final class WatchExecutionController: ObservableObject {
         engine.currentStamp()
     }
 
-    /// −15s on the watch: shortens what is left, and simply ends the rest if that is all of it.
+    /// −15s on the watch: shortens what is left. Once that is all of it, the rest is over — the
+    /// deliberate early end is recorded as a skip, matching the phone's Skip button.
     func shortenRest(by seconds: Int) {
         let remaining = engine.sessionRecord?.rest.map { $0.endsAt.timeIntervalSinceNow } ?? 0
         if remaining <= Double(seconds) {
-            try? engine.endRest()
+            try? engine.skipRest()
         } else {
             try? engine.shortenRest(by: seconds)
         }

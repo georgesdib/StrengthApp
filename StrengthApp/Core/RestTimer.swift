@@ -58,18 +58,6 @@ final class RestTimerModel: ObservableObject {
     private var ticker: Task<Void, Never>?
     private var workoutId: String?
     private let defaults: UserDefaults
-    private static let stateKey = "restTimer.state"
-
-    /// The interval is persisted so a relaunch, or a termination the countdown outlived, still
-    /// records the rest it actually took rather than losing it.
-    private struct Persisted: Codable {
-        let workoutId: String?
-        let startedAt: Date
-        let prescribedSeconds: Int
-        let addedSeconds: Int
-        let planItemIndex: Int?
-        let exerciseId: String?
-    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -112,19 +100,16 @@ final class RestTimerModel: ObservableObject {
     /// Restores the interval after a relaunch. A live interval resumes counting; one that ended
     /// while the app was gone is returned so the caller can record it at its real end time.
     func restore(workoutId: String?, now: Date = Date()) -> RestTimerResult? {
-        guard let data = defaults.data(forKey: Self.stateKey),
-              let state = try? JSONDecoder().decode(Persisted.self, from: data) else {
-            return nil
-        }
+        guard let state = RestActivityStore.load(from: defaults) else { return nil }
         guard let workoutId, state.workoutId == workoutId else {
-            defaults.removeObject(forKey: Self.stateKey)
+            RestActivityStore.clear(from: defaults)
             return nil
         }
         let end = state.startedAt.addingTimeInterval(
             TimeInterval(state.prescribedSeconds + state.addedSeconds)
         )
         guard end > now else {
-            defaults.removeObject(forKey: Self.stateKey)
+            RestActivityStore.clear(from: defaults)
             return RestTimerResult(
                 startedAt: state.startedAt,
                 endedAt: end,
@@ -168,17 +153,17 @@ final class RestTimerModel: ObservableObject {
 
     private func persist() {
         guard let startedAt, let prescribedSeconds else { return }
-        let state = Persisted(
-            workoutId: workoutId,
-            startedAt: startedAt,
-            prescribedSeconds: prescribedSeconds,
-            addedSeconds: addedSeconds,
-            planItemIndex: planItemIndex,
-            exerciseId: exerciseId
+        RestActivityStore.save(
+            RestActivityState(
+                workoutId: workoutId,
+                startedAt: startedAt,
+                prescribedSeconds: prescribedSeconds,
+                addedSeconds: addedSeconds,
+                planItemIndex: planItemIndex,
+                exerciseId: exerciseId
+            ),
+            to: defaults
         )
-        if let data = try? JSONEncoder().encode(state) {
-            defaults.set(data, forKey: Self.stateKey)
-        }
     }
 
     func extend(by seconds: Int) {
@@ -221,7 +206,11 @@ final class RestTimerModel: ObservableObject {
     func dismiss() {
         RestNotificationManager.shared.cancel()
         RestLiveActivityController.shared.end()
-        defaults.removeObject(forKey: Self.stateKey)
+        RestActivityStore.clear(from: defaults)
+        clearPublishedState()
+    }
+
+    private func clearPublishedState() {
         ticker?.cancel()
         ticker = nil
         endDate = nil
@@ -234,6 +223,49 @@ final class RestTimerModel: ObservableObject {
         exerciseId = nil
     }
 
+    /// Applies a change the Live Activity made while the app was elsewhere, and consumes a rest
+    /// it ended. Returns the interval to record when the rest was skipped there, so the caller
+    /// records it exactly once; nil means nothing was recorded.
+    func reconcileExternalChanges(workoutId: String? = nil, now: Date = Date()) -> RestTimerResult? {
+        if let completion = RestActivityStore.takeCompletion(from: defaults) {
+            RestNotificationManager.shared.cancel()
+            clearPublishedState()
+            // A rest from a workout that is no longer active has nothing to attribute it to.
+            guard let workoutId, completion.workoutId == workoutId else { return nil }
+            return RestTimerResult(
+                startedAt: completion.startedAt,
+                endedAt: completion.endedAt,
+                prescribedSeconds: completion.prescribedSeconds,
+                actualSeconds: max(0, Int(completion.endedAt.timeIntervalSince(completion.startedAt))),
+                addedSeconds: completion.addedSeconds,
+                outcome: completion.outcome,
+                planItemIndex: completion.planItemIndex,
+                exerciseId: completion.exerciseId
+            )
+        }
+        guard let state = RestActivityStore.load(from: defaults) else { return nil }
+        if !state.isComplete(at: now) {
+            apply(state, now: now)
+        }
+        return nil
+    }
+
+    /// Makes the persisted interval the live one, so an extension made from the Lock Screen shows
+    /// up in the tab bar without a relaunch.
+    private func apply(_ state: RestActivityState, now: Date) {
+        startedAt = state.startedAt
+        prescribedSeconds = state.prescribedSeconds
+        addedSeconds = state.addedSeconds
+        planItemIndex = state.planItemIndex
+        exerciseId = state.exerciseId
+        workoutId = state.workoutId
+        endDate = state.endsAt
+        isComplete = false
+        remainingSeconds = max(0, Int(state.endsAt.timeIntervalSince(now).rounded(.up)))
+        RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
+        startTicker()
+    }
+
     private func tick() {
         refresh()
     }
@@ -244,6 +276,12 @@ final class RestTimerModel: ObservableObject {
         guard let endDate else { return }
         let remaining = Int(endDate.timeIntervalSince(now).rounded(.up))
         if remaining <= 0 {
+            // The Lock Screen can extend the rest while the ticker is between ticks; trust the
+            // persisted interval over the in-memory end date.
+            if let state = RestActivityStore.load(from: defaults), !state.isComplete(at: now) {
+                apply(state, now: now)
+                return
+            }
             remainingSeconds = 0
             isComplete = true
             ticker?.cancel()

@@ -233,6 +233,7 @@ final class AppModel: ObservableObject {
     private var healthKitFollowUp = false
     private var networkMonitor: NetworkMonitor?
     private var restDoneCancellable: AnyCancellable?
+    private var restActivityCancellable: AnyCancellable?
     private var nudgeTapCancellable: AnyCancellable?
     private var nudgeRefreshTask: Task<Void, Never>?
     private let nudges = NudgeScheduler.shared
@@ -316,6 +317,14 @@ final class AppModel: ObservableObject {
         restTimer.onExtend = { [weak self] seconds in
             self?.recordRestExtension(seconds)
         }
+        restActivityCancellable = NotificationCenter.default
+            .publisher(for: .restActivityChangedExternally)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.drainRestActivityChanges()
+                }
+            }
         restDoneCancellable = NotificationCenter.default
             .publisher(for: .restNotificationDone)
             .receive(on: DispatchQueue.main)
@@ -792,6 +801,7 @@ final class AppModel: ObservableObject {
     }
 
     func appBecameActive() async {
+        drainRestActivityChanges()
         await recheckServerSelection()
         await syncOfflineCapture()
         if phase == .paired, let session {
@@ -857,9 +867,16 @@ final class AppModel: ObservableObject {
     }
 
     private func currentNudgeFacts() -> NudgeFacts {
-        let readiness: NudgeFacts.Readiness = today?.readiness?.isLogged == true
-            ? .logged(score: today?.readinessScore?.score)
-            : .missing
+        let readiness: NudgeFacts.Readiness
+        if today?.readiness?.isLogged == true {
+            readiness = .logged(score: today?.readinessScore?.score)
+        } else if today?.readiness?.hasEntry == true {
+            // The athlete answered some fields but the server could not form a score. The
+            // reminder must ask for the rest, not claim readiness is already logged.
+            readiness = .partial
+        } else {
+            readiness = .missing
+        }
         var planned: NudgeFacts.PlannedSession?
         if case .issued(let issued) = prescriptionState {
             let items = issued.plan.items
@@ -935,6 +952,8 @@ final class AppModel: ObservableObject {
         return TodaySummaryFacts(
             date: today?.date ?? Self.isoDate(),
             readinessLogged: today?.readiness?.isLogged ?? false,
+            readinessPartial: today?.readiness?.hasEntry == true
+                && today?.readiness?.isLogged != true,
             readinessScore: today?.readinessScore?.score,
             sessionLabel: planned?.label,
             exerciseCount: planned?.exerciseCount,
@@ -957,6 +976,7 @@ final class AppModel: ObservableObject {
         }
         return [
             today?.date ?? "",
+            String(today?.readiness?.hasEntry ?? false),
             String(today?.readiness?.isLogged ?? false),
             score,
             planId,
@@ -1505,6 +1525,24 @@ final class AppModel: ObservableObject {
             planItemIndex: restTimer.planItemIndex,
             payload: ["added_s": .number(Double(seconds))]
         ))
+    }
+
+    /// Applies a change made from the rest Live Activity. The added time is recorded once, and a
+    /// rest the activity ended is recorded with the outcome it ended with.
+    func drainRestActivityChanges() {
+        guard let workoutId = activeWorkout?.workoutId else {
+            // Nothing to attribute: discard anything the activity left behind rather than
+            // recording it against a finished workout.
+            _ = RestActivityStore.takeExtension()
+            _ = RestActivityStore.takeCompletion()
+            return
+        }
+        if let seconds = RestActivityStore.takeExtension() {
+            recordRestExtension(seconds)
+        }
+        if let result = restTimer.reconcileExternalChanges(workoutId: workoutId) {
+            recordRestResult(result)
+        }
     }
 
     private func handleRestNotificationDone() {

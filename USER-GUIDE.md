@@ -131,7 +131,9 @@ The timer uses the prescription's rest seconds when available.
 
 While a rest is running, the phone shows a Live Activity countdown on the Lock Screen and in the
 Dynamic Island. The countdown is drawn by the system from the rest's end time, so it stays correct
-with the app closed. Tapping it opens Strength, where **+15 s** and **Skip** live.
+with the app closed. **+15 s** and **Skip** are buttons on the Lock Screen card and in the expanded
+Dynamic Island: they act at the tap without opening the app or unlocking the phone, and the app
+records the extension or the skip when it next runs. The compact Island shows the timer only.
 
 Settings → Control Center (or the Action button) can host the **Strength** control. It opens the
 running workout; it does not record a set or change a rest on its own.

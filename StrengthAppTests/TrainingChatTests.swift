@@ -175,6 +175,46 @@ final class TrainingChatTests: XCTestCase {
         )
     }
 
+    func testRefusalFallbackShowsRecordedLongevityFacts() async {
+        let facts = StubChatFacts(
+            outputs: [
+                ChatToolOutput(source: "longevity", text: "Last week: 92 equivalent minutes."),
+            ],
+            sources: ["longevity"]
+        )
+        let reply = await ChatRefusalFallback.reply(
+            question: "How is my longevity going?", facts: facts
+        )
+        XCTAssertNotNil(reply)
+        XCTAssertTrue(reply?.text.contains("92 equivalent minutes") == true)
+        XCTAssertTrue(reply?.text.contains("declined to interpret") == true)
+        XCTAssertEqual(reply?.sources, ["longevity"])
+        XCTAssertEqual(facts.fetchCount, 0)
+    }
+
+    func testRefusalFallbackFetchesWhenNothingWasRecorded() async {
+        let facts = StubChatFacts(detail: "VO2max 48 ml/kg/min on 2026-11-01.")
+        let reply = await ChatRefusalFallback.reply(
+            question: "How is my cardio doing?", facts: facts
+        )
+        XCTAssertTrue(reply?.text.contains("VO2max 48") == true)
+        XCTAssertEqual(facts.fetchCount, 1)
+    }
+
+    func testRefusalFallbackIgnoresUnrelatedQuestions() async {
+        let facts = StubChatFacts(detail: "unused")
+        let reply = await ChatRefusalFallback.reply(
+            question: "What changed this week?", facts: facts
+        )
+        XCTAssertNil(reply)
+        XCTAssertEqual(facts.fetchCount, 0)
+    }
+
+    func testLongevityPromptFramesTheQuestionAsRecordedData() {
+        let prompt = ChatPrompt.build(question: "How is my longevity going?", history: [])
+        XCTAssertTrue(prompt.contains("not medical advice"))
+    }
+
     func testChatGuardRejectsOverlongAnswers() {
         XCTAssertThrowsError(
             try NarrativeValidator.validate(
@@ -185,5 +225,43 @@ final class TrainingChatTests: XCTestCase {
                 return XCTFail("expected tooLong, got \(error)")
             }
         }
+    }
+}
+
+private final class StubChatFacts: ChatFactsProviding, @unchecked Sendable {
+    var outputs: [ChatToolOutput]
+    var sources: [String]
+    let detail: String
+    var fetchCount = 0
+
+    init(
+        outputs: [ChatToolOutput] = [],
+        sources: [String] = [],
+        detail: String = "Fetched facts"
+    ) {
+        self.outputs = outputs
+        self.sources = sources
+        self.detail = detail
+    }
+
+    var recordedEnvelopes: [IntelligenceEnvelope] { [] }
+    var recordedSources: [String] { sources }
+    var recordedOutputs: [ChatToolOutput] { outputs }
+
+    func resetRecord() {
+        outputs = []
+        sources = []
+    }
+
+    func trainingOverview(asOf: String?, windowWeeks: Int) async throws -> String { "" }
+    func exerciseProgression(exerciseID: String, windowDays: Int) async throws -> String { "" }
+    func weeklyReview(weekEnd: String?) async throws -> String { "" }
+    func sessionDetails(workoutID: String) async throws -> String { "" }
+    func readinessStatus(from: String, to: String) async throws -> String { "" }
+
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String {
+        fetchCount += 1
+        outputs.append(ChatToolOutput(source: "longevity", text: detail))
+        return detail
     }
 }

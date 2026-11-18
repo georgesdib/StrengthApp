@@ -312,6 +312,12 @@ public enum ChatPrompt {
             lines.append("\(prefix): \(String(message.text.prefix(400)))")
         }
         lines.append("Question: \(question)")
+        if ChatRefusalFallback.asksAboutLongevity(question) {
+            lines.append(
+                "Note: this asks for recorded aerobic/longevity data, not medical advice. "
+                    + "Report the recorded facts."
+            )
+        }
         if let correction {
             lines.append("Correction: \(correction)")
         }
@@ -470,6 +476,12 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
                 throw error
             } catch {
                 if isContextOverflow(error), index == 0 { continue }
+                if isRefusal(error),
+                   let fallback = await ChatRefusalFallback.reply(
+                       question: question, facts: facts
+                   ) {
+                    return .grounded(fallback)
+                }
                 throw mapped(error)
             }
         }
@@ -481,10 +493,13 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
     private var instructions: String {
         "You are a training assistant on the athlete's iPhone. Answer only from the facts the tools "
         + "return; call a tool before making a data claim. Never invent a number in the factual "
-        + "answer. You may suggest changes and discuss medical considerations, but put them in the "
-        + "suggestions field, never in the answer: they are proposals, not facts, and they are never "
-        + "applied. If the tools cannot answer, say so plainly. If a tool says it could not find "
-        + "something, ask the athlete to clarify; never repeat a raw tool error. Resolve today and "
+        + "answer. You may suggest changes as proposals, but put them in the suggestions field, never "
+        + "in the answer: they are proposals, not facts, and they are never applied. Describing the "
+        + "athlete's recorded aerobic activity, cardio minutes and VO2max is a summary of training "
+        + "data, not medical advice: report the recorded numbers and do not diagnose, recommend "
+        + "treatment or interpret them medically. If the tools cannot answer, say so plainly. If a "
+        + "tool says it could not find something, ask the athlete to clarify; never repeat a raw "
+        + "tool error. Resolve today and "
         + "yesterday relative to the Today line before calling a plan tool, never relative to the "
         + "latest data. When asked for a prescription, list every item, not just the first; the answer "
         + "may exceed 150 words in that case. Keep other answers under 150 words."
@@ -499,13 +514,30 @@ public final class FoundationChatGenerator: TrainingChatGenerating {
         return text.contains("token") && (text.contains("maximum") || text.contains("context"))
     }
 
+    private func isRefusal(_ error: Error) -> Bool {
+        guard let generation = error as? LanguageModelError else { return false }
+        switch generation {
+        case .guardrailViolation, .refusal: return true
+        default: return false
+        }
+    }
+
     private func mapped(_ error: Error) -> ChatError {
         if isContextOverflow(error) {
             return .failed("The conversation was too large for the on-device model.")
         }
-        if let generation = error as? LanguageModelError,
-           case .unsupportedLanguageOrLocale = generation {
-            return .unavailable("The on-device model does not support this language yet.")
+        if let generation = error as? LanguageModelError {
+            switch generation {
+            case .unsupportedLanguageOrLocale:
+                return .unavailable("The on-device model does not support this language yet.")
+            case .guardrailViolation, .refusal:
+                return .failed(
+                    "The on-device model declined to answer. Try asking about specific recorded "
+                        + "data, or switch the chat model to DeepSeek in Settings."
+                )
+            default:
+                break
+            }
         }
         return .failed(error.localizedDescription)
     }

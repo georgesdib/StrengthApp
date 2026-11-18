@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import StrengthCore
 
@@ -68,6 +69,12 @@ struct TodayView: View {
                                     Text(target)
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
+                                }
+                                if let detail = Self.pendingDetail(entry) {
+                                    Text(detail)
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .accessibilityIdentifier("pending-detail")
                                 }
                             }
                         }
@@ -737,6 +744,27 @@ struct TodayView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// What a queued write actually contains, so a stuck retry names the date and fields instead
+    /// of only an operation kind.
+    private static func pendingDetail(_ entry: PendingMutation) -> String? {
+        guard let body = try? JSONSerialization.jsonObject(with: entry.bodyData)
+                as? [String: Any] else { return nil }
+        switch entry.kind {
+        case .healthkitReadiness:
+            let date = body["date"] as? String ?? "date unknown"
+            let fields = (body["samples"] as? [[String: Any]])?
+                .compactMap { $0["field"] as? String } ?? []
+            return fields.isEmpty ? date : "\(date) · \(fields.joined(separator: ", "))"
+        case .readiness:
+            let values = body["values"] as? [String: Any] ?? [:]
+            let date = body["date"] as? String
+            let names = values.keys.sorted().joined(separator: ", ")
+            return [date, names].compactMap { $0 }.joined(separator: " · ")
+        default:
+            return nil
         }
     }
 

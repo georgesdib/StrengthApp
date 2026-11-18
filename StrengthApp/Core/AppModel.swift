@@ -2503,6 +2503,13 @@ final class AppModel: ObservableObject {
         }
         var message: String?
         for entry in entries {
+            // A queued HealthKit import is always superseded: the next import carries today's
+            // values, while the queued body may carry a date the server no longer accepts. Left
+            // in place it can never replay and blocks every later write.
+            if entry.kind == .healthkitReadiness {
+                client.discard(entry)
+                continue
+            }
             guard entry.state == .pending else {
                 message = "\(entry.kind.label) has an unresolved conflict."
                 continue

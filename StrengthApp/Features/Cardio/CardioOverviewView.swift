@@ -72,6 +72,10 @@ struct CardioOverviewView: View {
 
             if let weeks = payload?.summary.weeks, !weeks.isEmpty {
                 Section("Last 12 weeks") {
+                    Text("Weekly totals from the imported workouts. A week with no workout is "
+                         + "shown as zero because it genuinely had none, not because data is missing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     ForEach(weeks.suffix(12)) { week in
                         HStack {
                             Text(week.isoWeek).font(.caption.monospaced())
@@ -89,6 +93,10 @@ struct CardioOverviewView: View {
 
             if let recent = payload?.recent, !recent.isEmpty {
                 Section("Recent workouts") {
+                    Text("The five most recent imported workouts. \"hidden\" removes a workout from "
+                         + "the totals without deleting it; nothing here edits Apple Health.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     ForEach(recent) { workout in
                         HStack {
                             VStack(alignment: .leading) {

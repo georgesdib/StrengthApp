@@ -30,7 +30,11 @@ public struct LongevitySummary: Sendable, Equatable {
         switch relation {
         case "inside" where equivalent != nil:
             headline = "\(Self.minutes(equivalent ?? 0)) moderate-equivalent minutes last week "
-                + "— inside the \(Self.whole(minimum))–\(Self.whole(maximum)) reference."
+                + "— within the \(Self.whole(minimum))–\(Self.whole(maximum)) reference."
+        case "above" where equivalent != nil:
+            headline = "\(Self.minutes(equivalent ?? 0)) moderate-equivalent minutes last week "
+                + "— above the \(Self.whole(minimum))–\(Self.whole(maximum)) reference. "
+                + "The upper bound is context, not a maximum safe dose."
         case "below" where equivalent != nil:
             let short = remaining.map { Self.minutes($0) } ?? "some"
             headline = "\(Self.minutes(equivalent ?? 0)) moderate-equivalent minutes last week "
@@ -47,29 +51,36 @@ public struct LongevitySummary: Sendable, Equatable {
         let vo2Status = vo2max?["status"]?.stringValue ?? "absent"
         let vo2Value = vo2max?["value"]?.numberValue
         let vo2Date = vo2max?["measured_on"]?.stringValue
-        switch vo2Status {
-        case "current" where vo2Value != nil:
-            vo2maxLine = "VO₂max \(Self.oneDecimal(vo2Value ?? 0)) ml/kg/min · \(vo2Date ?? "")"
-        case "stale" where vo2Value != nil:
-            vo2maxLine = "VO₂max \(Self.oneDecimal(vo2Value ?? 0)) · \(vo2Date ?? "") (stale)"
-        default:
-            vo2maxLine = "No VO₂max measurement recorded."
+        let vo2Unit = vo2max?["unit"]?.stringValue ?? "ml/kg/min"
+        // The recording app or algorithm, when the server has it; the provenance class is a
+        // fallback, not a method label.
+        let vo2Source = vo2max?["method"]?.stringValue ?? vo2max?["source"]?.stringValue
+        let vo2Currency = vo2Status == "stale" ? "stale" : "current"
+        let vo2Details = [vo2Date, vo2Source, vo2Currency]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        if let vo2Value, vo2Status == "current" || vo2Status == "stale" {
+            vo2maxLine = "VO₂max \(Self.oneDecimal(vo2Value)) \(vo2Unit) · \(vo2Details)"
+        } else {
+            vo2maxLine = "No VO₂max measurement recorded. Missing is not evidence of poor fitness."
         }
 
         var facts: [String] = []
-        if let equivalent {
+        if let equivalent, relation != "unknown" {
+            let stated = relation == "inside" ? "within" : relation
             facts.append("Completed week: \(Self.minutes(equivalent)) moderate-equivalent minutes "
-                + "(reference \(Self.whole(minimum))–\(Self.whole(maximum)); context only, not a target).")
+                + "(\(stated) the \(Self.whole(minimum))–\(Self.whole(maximum)) reference; "
+                + "context only, not a target).")
         }
         if let current, let currentMinutes = current["equivalent_minutes"]?.numberValue {
             let days = current["days_remaining"]?.intValue ?? 0
             facts.append("Current week: \(Self.minutes(currentMinutes)) so far, \(days) days left.")
         }
-        switch vo2Status {
-        case "current", "stale":
-            facts.append("VO2max \(Self.oneDecimal(vo2Value ?? 0)) ml/kg/min measured "
-                + "\(vo2Date ?? "unknown date") (\(vo2Status)).")
-        default:
+        if let vo2Value, vo2Status == "current" || vo2Status == "stale" {
+            let by = vo2Source.map { " by \($0)" } ?? ""
+            facts.append("VO2max \(Self.oneDecimal(vo2Value)) \(vo2Unit) measured "
+                + "\(vo2Date ?? "unknown date")\(by) (\(vo2Status)).")
+        } else {
             facts.append("No VO2max measurement has been recorded; that is not evidence of poor fitness.")
         }
         if let patterns = envelope.facts["patterns"]?.value.objectValue,

@@ -61,9 +61,7 @@ struct CardioOverviewView: View {
                         metric("\(tiz.windowDays)-day vigorous", tiz.vigorousMinutes)
                     }
                     .padding(.vertical, 4)
-                    Text("From heart-rate samples of \(tiz.eligibleWorkouts) workouts with complete "
-                         + "recordings (\(Int((tiz.coverageShare * 100).rounded()))% of those with "
-                         + "heart rate). Sample-based, so it is not the weekly total.")
+                    Text(timeInZoneDetail(tiz))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -149,5 +147,24 @@ struct CardioOverviewView: View {
                 .font(.title2.weight(.semibold))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Coverage is stated separately from continuity eligibility: the gate says a recording is
+    /// usable, not that it spans the whole workout. Unobserved minutes are never extrapolated.
+    private func timeInZoneDetail(_ tiz: CardioTimeInZone) -> String {
+        var text = "From heart-rate samples of \(tiz.eligibleWorkouts) workouts with continuous "
+            + "recordings (\(Int((tiz.coverageShare * 100).rounded()))% of those with heart rate)."
+        if let covered = tiz.coveredMinutes, let total = tiz.workoutMinutes {
+            let pct = Int(((tiz.temporalCoverageShare ?? 0) * 100).rounded())
+            text += "\n\(Self.minutes(covered)) of \(Self.minutes(total)) workout minutes had "
+                + "usable samples (\(pct)% temporal coverage); unobserved minutes are not "
+                + "assigned to a zone."
+        }
+        text += "\nSample-based, so it is not the weekly total."
+        return text
+    }
+
+    private static func minutes(_ value: Double) -> String {
+        String(format: "%.1f", value)
     }
 }

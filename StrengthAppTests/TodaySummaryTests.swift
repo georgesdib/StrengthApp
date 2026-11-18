@@ -181,19 +181,23 @@ final class LongevitySummaryTests: XCTestCase {
         status: String,
         relation: String,
         equivalent: Double,
-        vo2Status: String
+        vo2Status: String,
+        vo2Method: String? = nil,
+        remaining: Double = 40
     ) throws -> IntelligenceEnvelope {
+        let method = vo2Method.map { "\"method\":\"\($0)\"," } ?? ""
         let json = """
         {"schema_version":"intelligence.envelope.v1","capability":"get_longevity_assessment",
          "status":"\(status)","as_of":"2026-11-18",
          "period":{"start":"2026-11-09","end":"2026-11-15","days":7,"weeks":1,"timezone":"Europe/London"},
          "facts":{
            "last_week":{"value":{"relation":"\(relation)","equivalent_minutes":\(equivalent),
-             "remaining_minutes":40,"reference":{"min_minutes":150,"max_minutes":300}},
+             "remaining_minutes":\(remaining),"reference":{"min_minutes":150,"max_minutes":300}},
              "basis":"derived","method":"m"},
            "current_week":{"value":{"equivalent_minutes":40,"days_remaining":4},
              "basis":"derived","method":"m"},
-           "vo2max":{"value":{"status":"\(vo2Status)","value":48,"measured_on":"2026-11-12"},
+           "vo2max":{"value":{"status":"\(vo2Status)","value":48,"unit":"ml/kg/min",
+             "measured_on":"2026-11-12",\(method)"source":"device"},
              "basis":"observed","method":"m"}
          },
          "coverage":{},"missing":[],"limitations":[]}
@@ -203,13 +207,35 @@ final class LongevitySummaryTests: XCTestCase {
         return try decoder.decode(IntelligenceEnvelope.self, from: Data(json.utf8))
     }
 
-    func testInsideReferenceReadsAsContextNotAPass() throws {
+    func testWithinReferenceReadsAsContextNotAPass() throws {
         let summary = try XCTUnwrap(LongevitySummary(envelope: envelope(
             status: "ok", relation: "inside", equivalent: 180, vo2Status: "current"
         )))
         XCTAssertTrue(summary.headline.contains("180"))
-        XCTAssertTrue(summary.headline.contains("inside"))
+        XCTAssertTrue(summary.headline.contains("within"))
         XCTAssertFalse(summary.headline.lowercased().contains("target"))
+    }
+
+    func testReferenceBoundariesAreWithinTheBand() throws {
+        for equivalent in [150.0, 300.0] {
+            let summary = try XCTUnwrap(LongevitySummary(envelope: envelope(
+                status: "ok", relation: "inside", equivalent: equivalent, vo2Status: "current"
+            )))
+            XCTAssertTrue(
+                summary.headline.contains("within"), "expected within at \(equivalent)"
+            )
+        }
+    }
+
+    func testAboveTheUpperBoundIsItsOwnStateAndNotAVerdict() throws {
+        let summary = try XCTUnwrap(LongevitySummary(envelope: envelope(
+            status: "ok", relation: "above", equivalent: 340, vo2Status: "current"
+        )))
+        XCTAssertTrue(summary.headline.contains("340"))
+        XCTAssertTrue(summary.headline.contains("above"))
+        XCTAssertTrue(summary.headline.contains("not a maximum safe dose"))
+        XCTAssertFalse(summary.headline.lowercased().contains("excessive"))
+        XCTAssertFalse(summary.headline.lowercased().contains("harmful"))
     }
 
     func testBelowReferenceStatesTheGap() throws {
@@ -218,15 +244,20 @@ final class LongevitySummaryTests: XCTestCase {
         )))
         XCTAssertTrue(summary.headline.contains("40"))
         XCTAssertTrue(summary.headline.contains("short"))
-        XCTAssertEqual(summary.vo2maxLine, "No VO₂max measurement recorded.")
+        XCTAssertTrue(summary.vo2maxLine.contains("No VO₂max measurement recorded"))
+        XCTAssertTrue(summary.vo2maxLine.contains("not evidence of poor fitness"))
     }
 
-    func testStaleReadingIsLabelled() throws {
+    func testStaleReadingIsLabelledWithItsProvenance() throws {
         let summary = try XCTUnwrap(LongevitySummary(envelope: envelope(
-            status: "ok", relation: "inside", equivalent: 180, vo2Status: "stale"
+            status: "ok", relation: "inside", equivalent: 180, vo2Status: "stale",
+            vo2Method: "Apple Watch"
         )))
         XCTAssertTrue(summary.vo2maxLine.contains("stale"))
         XCTAssertTrue(summary.vo2maxLine.contains("2026-11-12"))
+        XCTAssertTrue(summary.vo2maxLine.contains("48.0"))
+        XCTAssertTrue(summary.vo2maxLine.contains("ml/kg/min"))
+        XCTAssertTrue(summary.vo2maxLine.contains("Apple Watch"))
     }
 
     func testIncompleteClassificationDoesNotClaimABelow() throws {
@@ -244,6 +275,61 @@ final class LongevitySummaryTests: XCTestCase {
         XCTAssertTrue(summary.detail.contains("180"))
         XCTAssertTrue(summary.detail.contains("context only"))
         XCTAssertTrue(summary.detail.contains("4 days left"))
+    }
+
+    /// The same JSON fixture the backend test compares against, wrapped in the envelope the
+    /// intelligence route returns. If either client changes its interpretation, this fails.
+    func testCanonicalAssessmentFixtureIsDecodedIdentically() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/longevity_assessment.ok.json")
+        let data = try Data(contentsOf: url)
+        guard let assessment = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var lastWeek = assessment["last_week"] as? [String: Any],
+              let currentWeek = assessment["current_week"],
+              let vo2max = assessment["vo2max"],
+              let reference = assessment["reference"] else {
+            return XCTFail("the fixture must be the canonical assessment object")
+        }
+        lastWeek["reference"] = reference
+        let envelopeObject: [String: Any] = [
+            "schema_version": "intelligence.envelope.v1",
+            "capability": "get_longevity_assessment",
+            "status": "ok",
+            "as_of": assessment["as_of"] ?? "2026-11-18",
+            "period": [
+                "start": lastWeek["start"] ?? "",
+                "end": lastWeek["end"] ?? "",
+                "days": 7,
+                "weeks": 1,
+                "timezone": "Europe/London",
+            ],
+            "facts": [
+                "last_week": ["value": lastWeek, "basis": "derived", "method": "m"],
+                "current_week": ["value": currentWeek, "basis": "derived", "method": "m"],
+                "vo2max": ["value": vo2max, "basis": "observed", "method": "m"],
+            ],
+            "coverage": [:],
+            "missing": [],
+            "limitations": [],
+        ]
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let envelope = try decoder.decode(
+            IntelligenceEnvelope.self,
+            from: try JSONSerialization.data(withJSONObject: envelopeObject)
+        )
+        let summary = try XCTUnwrap(LongevitySummary(envelope: envelope))
+        XCTAssertEqual(summary.relation, "below")
+        XCTAssertTrue(summary.headline.contains("140"))
+        XCTAssertTrue(summary.headline.contains("10"))
+        XCTAssertTrue(summary.detail.contains("30"))
+        XCTAssertTrue(summary.vo2maxLine.contains("48.0"))
+        XCTAssertTrue(summary.vo2maxLine.contains("ml/kg/min"))
+        XCTAssertTrue(summary.vo2maxLine.contains("2026-11-12"))
+        XCTAssertTrue(summary.vo2maxLine.contains("Apple Watch"))
+        XCTAssertTrue(summary.vo2maxLine.contains("current"))
+        XCTAssertEqual(assessment["as_of"] as? String, "2026-11-18")
     }
 }
 
@@ -274,6 +360,8 @@ final class CardioAssessmentDecodeTests: XCTestCase {
         {"summary":{"weeks":[],"rolling":{},"latest_workout_at":null},
          "assessment":{"time_in_zone":{"eligible_workouts":25,"coverage_share":0.421,
            "equivalent_minutes":300.0,"minutes":{"moderate":180.0,"vigorous":60.0},
+           "covered_minutes":210.0,"workout_minutes":300.0,"unobserved_minutes":90.0,
+           "temporal_coverage_share":0.7,
            "window":{"start":"2026-10-22","end":"2026-11-18","days":28},
            "source":"heart-rate samples"}},
          "recent":[]}
@@ -287,6 +375,10 @@ final class CardioAssessmentDecodeTests: XCTestCase {
         XCTAssertEqual(tiz.moderateMinutes, 180, accuracy: 0.001)
         XCTAssertEqual(tiz.vigorousMinutes, 60, accuracy: 0.001)
         XCTAssertEqual(tiz.coverageShare, 0.421, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(tiz.coveredMinutes), 210, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(tiz.workoutMinutes), 300, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(tiz.unobservedMinutes), 90, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(tiz.temporalCoverageShare), 0.7, accuracy: 0.001)
     }
 
     func testPayloadWithoutTheAssessmentStillDecodes() throws {

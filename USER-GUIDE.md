@@ -257,6 +257,14 @@ offers nothing else; it never quietly switches to the other model. **Refresh** r
 is generated once per day and session and reused. Turn the whole block off under
 **Settings → Today summary**.
 
+The aerobic and fitness facts — the last completed week against the WHO band, this week's progress
+and the latest VO₂max — are loaded from your server and shown without any model. With DeepSeek
+selected they are sent only while **Include health measurements** is on; on-device generation needs
+no consent. VO₂max is shown with its value, units, date, source and a **current**, **stale** or
+**absent** state; a missing reading is not evidence of poor fitness. A week above 300
+moderate-equivalent minutes is described as **above** the reference band, never as excessive. The
+chat uses the same health consent: with it off, the model cannot receive or call the longevity tool.
+
 ### Daily reminder
 
 Turn on **Settings → Daily reminder** and choose a time. At that time the app posts one local

@@ -1,6 +1,6 @@
 # HEALTHKIT — CURRENT STATE
 
-**Status:** describes shipped behaviour on 2026-11-18 (backend 1.6.0). The cardio stage is
+**Status:** describes shipped behaviour on 2026-11-18 (backend 1.7.1). The cardio stage is
 **implemented and deployed**, not proposed. This is a client-owned document: it describes what the
 phone and watch do with HealthKit. Server behaviour is owned by the backend and the shared contract
 in the [Phase 3A contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-3A-CONTRACT.md).
@@ -35,7 +35,9 @@ There is still no write path from the phone to HealthKit beyond the watch's sing
 - **Workouts** since the workout cursor minus one day (idempotent re-send), never before
   `history_cutoff`; the server also rejects pre-cutoff workouts as defence in depth.
 - **Heart rate** inside each uploaded workout and for ten minutes after its end, so recovery HR can
-  be computed later. Background samples are never uploaded.
+  be computed later. Samples after the workout end are labelled `association = "tail"`; the server
+  retains them but excludes them from workout classification and time-in-zone. Background samples
+  are never uploaded.
 - **VO₂max** as a standalone metric, sent without a cutoff because the server deduplicates on time,
   value and method — that lets a sync fill a gap in the exported history without duplicating it.
 - **Workout effort** (`HKMetadataKeyAverageMETs` and the effort score, 1–10) read from metadata and
@@ -74,7 +76,9 @@ last workout.
 - **Observed METs/effort on a new upload.** The fields are read and stored, but no post-cutoff
   workout has been uploaded yet, so their presence is unconfirmed.
 - **Per-workout heart-rate charts on the phone**, and the web time-in-zone chart. Detailed traces
-  remain a web concern that is not built.
+  remain a web concern that is not built. The phone shows aggregated time-in-zone with covered and
+  unobserved minutes; zone time is elapsed-time integration over workout-interval samples, so a
+  sparse recording reports less coverage rather than being spread across the workout.
 - No sleep, clinical records or background delivery.
 
 ## 7. Behaviour authority and tests

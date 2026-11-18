@@ -43,6 +43,12 @@ public struct CardioTimeInZone: Decodable, Equatable {
     public let vigorousMinutes: Double
     public let equivalentMinutes: Double
     public let windowDays: Int
+    /// Elapsed time represented by the integrated samples, and the workout time it is drawn from.
+    /// Optional so older payloads still decode; the current server always sends them.
+    public let coveredMinutes: Double?
+    public let workoutMinutes: Double?
+    public let unobservedMinutes: Double?
+    public let temporalCoverageShare: Double?
 
     private struct Minutes: Decodable {
         let moderate: Double
@@ -55,6 +61,7 @@ public struct CardioTimeInZone: Decodable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case eligibleWorkouts, coverageShare, equivalentMinutes, minutes, window
+        case coveredMinutes, workoutMinutes, unobservedMinutes, temporalCoverageShare
     }
 
     public init(from decoder: Decoder) throws {
@@ -66,6 +73,12 @@ public struct CardioTimeInZone: Decodable, Equatable {
         moderateMinutes = minutes.moderate
         vigorousMinutes = minutes.vigorous
         windowDays = try container.decode(Window.self, forKey: .window).days
+        coveredMinutes = try container.decodeIfPresent(Double.self, forKey: .coveredMinutes)
+        workoutMinutes = try container.decodeIfPresent(Double.self, forKey: .workoutMinutes)
+        unobservedMinutes = try container.decodeIfPresent(Double.self, forKey: .unobservedMinutes)
+        temporalCoverageShare = try container.decodeIfPresent(
+            Double.self, forKey: .temporalCoverageShare
+        )
     }
 }
 

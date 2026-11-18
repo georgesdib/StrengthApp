@@ -36,6 +36,8 @@ public struct TodaySummary: Sendable, Equatable {
 public struct TodaySummaryFacts: Sendable, Equatable {
     public let date: String
     public let readinessLogged: Bool
+    /// Some readiness answers are stored but the server has not formed a score yet.
+    public let readinessPartial: Bool
     public let readinessScore: Double?
     public let sessionLabel: String?
     public let exerciseCount: Int?
@@ -49,6 +51,7 @@ public struct TodaySummaryFacts: Sendable, Equatable {
     public init(
         date: String,
         readinessLogged: Bool,
+        readinessPartial: Bool = false,
         readinessScore: Double? = nil,
         sessionLabel: String? = nil,
         exerciseCount: Int? = nil,
@@ -59,6 +62,7 @@ public struct TodaySummaryFacts: Sendable, Equatable {
     ) {
         self.date = date
         self.readinessLogged = readinessLogged
+        self.readinessPartial = readinessPartial
         self.readinessScore = readinessScore
         self.sessionLabel = sessionLabel
         self.exerciseCount = exerciseCount
@@ -76,6 +80,8 @@ public struct TodaySummaryFacts: Sendable, Equatable {
             } else {
                 lines.append("Readiness is logged.")
             }
+        } else if readinessPartial {
+            lines.append("Readiness is partly logged; it is not enough to form a score yet.")
         } else {
             lines.append("Readiness is not logged yet.")
         }

@@ -132,6 +132,15 @@ final class TodaySummaryFactsTests: XCTestCase {
         XCTAssertTrue(empty.factText.contains("No session has been issued yet."))
     }
 
+    func testPartialReadinessIsNotReportedAsLoggedOrMissing() {
+        let partial = TodaySummaryFacts(
+            date: "2026-11-16", readinessLogged: false, readinessPartial: true
+        )
+        XCTAssertTrue(partial.factText.contains("partly logged"))
+        XCTAssertFalse(partial.factText.contains("Readiness is logged."))
+        XCTAssertFalse(partial.factText.contains("not logged yet"))
+    }
+
     func testValidatorEnforcesLengthAndContent() throws {
         let fine = TodaySummary(overview: "Fine.", encouragement: "Go.", model: .onDevice)
         XCTAssertNoThrow(try TodaySummaryValidator.validate(fine))

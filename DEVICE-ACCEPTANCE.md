@@ -566,6 +566,8 @@ are **not run yet** — simulator success is not proof of notification delivery.
 - [ ] The message names only facts the app already shows; with Apple Intelligence off it uses the
       built-in wording rather than failing.
 - [ ] Tapping the notification opens Today; with readiness missing it presents the readiness form.
+- [ ] With only part of the core readiness answered, the reminder asks you to finish it rather than
+      saying it is logged, and tapping it opens the readiness form.
 - [ ] The **Log readiness** action opens the readiness form directly.
 - [ ] Complete a session before the reminder time and confirm no reminder fires that day.
 - [ ] Change the time, foreground the app, and confirm one pending reminder on each of the next seven

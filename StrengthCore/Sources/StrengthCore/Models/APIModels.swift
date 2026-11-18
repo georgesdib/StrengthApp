@@ -85,9 +85,15 @@ public struct ReadinessPayload: Decodable {
     public let sources: [String: String]?
     public let healthkit: [String: HealthKitReadinessProvenance]?
 
-    /// The server sends `known: false` only when the day has no usable row, and omits the key
-    /// entirely when a merged row exists, so an absent value means the day was logged.
-    public var isLogged: Bool { known ?? true }
+    /// The server sends `known: false` only when the day has no row at all and omits the key
+    /// when any merged row exists. Row presence is not the same as a usable answer: a partial
+    /// manual entry merges into a row whose score status is `insufficient`.
+    public var hasEntry: Bool { known ?? true }
+
+    /// A day counts as logged only when the server formed a readiness score. A merged row with
+    /// too few core fields is `hasEntry` but `insufficient`, and the athlete still has readiness
+    /// to finish; treating row presence as logged hid that in the daily reminder.
+    public var isLogged: Bool { hasEntry && score?.status == "ready" }
 }
 
 public struct HealthKitReadinessProvenance: Decodable, Equatable {

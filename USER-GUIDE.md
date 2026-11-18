@@ -274,6 +274,9 @@ notification that names a concrete fact from your record — a planned session, 
 or a missing readiness entry — and asks you to train. The wording is written on the iPhone: by Apple
 Intelligence when it is available, otherwise from the built-in text. Nothing is sent to a server.
 
+A readiness entry with too few answers to form a score is not treated as done: the reminder asks
+you to finish it, and tapping it opens the readiness form.
+
 The reminder is skipped on a day you have already trained. If you train on the watch only and never
 open the phone, the phone cannot see the session, so the reminder may still arrive. Tapping the
 notification opens Today; **Log readiness** opens the readiness form directly. If notifications are

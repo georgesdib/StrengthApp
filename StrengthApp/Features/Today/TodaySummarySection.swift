@@ -20,9 +20,10 @@ struct TodaySummarySection: View {
         } header: {
             Label("Today at a glance", systemImage: "sparkles")
         }
+        // The facts have their own lifetime: tying them to the summary's fingerprint cancelled the
+        // request whenever that fingerprint changed, and the cancellation surfaced as "cancelled".
+        .task { await model.loadLongevity() }
         .task(id: model.todaySummaryFingerprint) {
-            // Facts first: they need no model, so they must not wait on one.
-            await model.loadLongevity()
             await summary.loadIfNeeded(fingerprint: model.todaySummaryFingerprint)
         }
     }

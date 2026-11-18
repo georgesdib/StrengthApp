@@ -404,6 +404,12 @@ final class AppModel: ObservableObject {
             } else {
                 longevityError = "the server returned no longevity assessment."
             }
+        } catch is CancellationError {
+            // The view went away mid-request. Cancellation is not a finding; the next appearance
+            // asks again rather than displaying "cancelled".
+            return
+        } catch let error as URLError where error.code == .cancelled {
+            return
         } catch {
             longevityError = (error as? LocalizedError)?.errorDescription
                 ?? "the longevity assessment could not be loaded."

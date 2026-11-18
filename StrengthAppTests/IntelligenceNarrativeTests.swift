@@ -207,6 +207,7 @@ private final class StubProvider: IntelligenceCapabilityProviding, @unchecked Se
     func weeklyReview(weekEnd: String?) async throws -> String { "weekly facts" }
     func sessionDetails(workoutID: String) async throws -> String { "session facts" }
     func readinessStatus(from: String, to: String) async throws -> String { "readiness facts" }
+    func longevityAssessment(includeTimeInZone: Bool) async throws -> String { "longevity facts" }
 }
 
 private final class StubGenerator: NarrativeGenerating, @unchecked Sendable {
@@ -230,13 +231,13 @@ private final class StubGenerator: NarrativeGenerating, @unchecked Sendable {
 }
 
 extension IntelligenceNarrativeTests {
-    func testToolSurfaceHasFiveAdapters() throws {
+    func testToolSurfaceHasSixAdapters() throws {
         let tools = IntelligenceTools.make(provider: StubProvider())
-        XCTAssertEqual(tools.count, 5)
+        XCTAssertEqual(tools.count, 6)
         XCTAssertEqual(
             Set(tools.map(\.name)),
             ["training_overview", "exercise_progression", "weekly_review",
-             "session_details", "readiness_status"]
+             "session_details", "readiness_status", "longevity"]
         )
     }
 
@@ -313,8 +314,8 @@ extension IntelligenceNarrativeTests {
     func testPlanToolsAreOnlyAddedWhenEnabled() throws {
         let base = IntelligenceTools.make(provider: StubProvider())
         let withPlan = IntelligenceTools.make(provider: StubProvider(), includePlan: true)
-        XCTAssertEqual(base.count, 5)
-        XCTAssertEqual(withPlan.count, 8)
+        XCTAssertEqual(base.count, 6)
+        XCTAssertEqual(withPlan.count, 9)
         XCTAssertTrue(withPlan.map(\.name).contains("prescription"))
         XCTAssertTrue(withPlan.map(\.name).contains("programme_summary"))
         XCTAssertTrue(withPlan.map(\.name).contains("adherence"))
@@ -501,5 +502,33 @@ extension IntelligenceNarrativeTests {
             limitation: "Descriptive only."
         )
         XCTAssertNoThrow(try NarrativeValidator.validate(grounded, context: context))
+    }
+}
+
+// MARK: - Longevity tool and catalogue parity
+
+@available(iOS 27.0, *)
+final class LongevityToolTests: XCTestCase {
+    func testLongevityToolReturnsItsFacts() async throws {
+        let tool = LongevityTool(provider: StubProvider())
+        let output = try await tool.call(arguments: NarrativeToolQuery())
+        XCTAssertEqual(output, "longevity facts")
+        XCTAssertFalse(tool.description.isEmpty)
+    }
+
+    /// Drift alarm: the on-device and DeepSeek catalogues are declared separately, so a capability
+    /// added to one and forgotten in the other must fail here rather than disappear silently.
+    func testBothChatCataloguesExposeTheSameCapabilities() {
+        let onDevice = Set(IntelligenceTools.make(provider: StubProvider()).map(\.name))
+        let deepSeek = Set(DeepSeekTools.specs(includeHealth: true).map(\.function.name))
+        XCTAssertEqual(onDevice, deepSeek)
+
+        let onDevicePlan = Set(
+            IntelligenceTools.make(provider: StubProvider(), includePlan: true).map(\.name)
+        )
+        let deepSeekPlan = Set(
+            DeepSeekTools.specs(includePlan: true, includeHealth: true).map(\.function.name)
+        )
+        XCTAssertEqual(onDevicePlan, deepSeekPlan)
     }
 }

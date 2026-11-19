@@ -33,18 +33,27 @@ There is still no write path from the phone to HealthKit beyond the watch's sing
 `HealthKitActivityService` implements the sync:
 
 - **Workouts** since the workout cursor minus one day (idempotent re-send), never before
-  `history_cutoff`; the server also rejects pre-cutoff workouts as defence in depth.
-- **Heart rate** inside each uploaded workout and for ten minutes after its end, so recovery HR can
-  be computed later. Samples after the workout end are labelled `association = "tail"`; the server
-  retains them but excludes them from workout classification and time-in-zone. Background samples
-  are never uploaded.
+  `history_cutoff`; the server also rejects pre-cutoff workouts as defence in depth. The cursor
+  advances only after the server accepted every workout in the batch.
+- **Uploaded workout intervals** are persisted (HealthKit UUID, start, end, ten-minute tail) so a
+  sample that arrives after its workout has left the 24-hour workout query can still be attached.
+  The first run after this build backfills the interval store from the sample window once.
+- **Heart rate** inside each uploaded or previously uploaded workout and for ten minutes after its
+  end, so recovery HR can be computed later. Samples after the workout end are labelled
+  `association = "tail"`; the server retains them but excludes them from workout classification and
+  time-in-zone. Background samples are never uploaded. The sample cursor advances only after the
+  server accepted every sample in the batch.
 - **VO₂max** as a standalone metric, sent without a cutoff because the server deduplicates on time,
   value and method — that lets a sync fill a gap in the exported history without duplicating it.
 - **Workout effort** (`HKMetadataKeyAverageMETs` and the effort score, 1–10) read from metadata and
   matched to its workout by interval; stored as `avg_mets` and `srpe`.
 - Uploads go to `POST api/ios/v1/healthkit/workouts` then `.../samples` (samples and metrics in the
   second call), each device-authenticated and idempotent on the HealthKit UUID. The response reports
-  `created`, `existing`, `rejected` so a partial write is visible.
+  `created`, `existing`, `rejected` (plus nested `metrics.written`/`metrics.skipped` on the sample
+  call). The app inspects both responses: a rejected workout holds the workout cursor and defers
+  samples; a rejected sample holds the sample cursor; a skipped metric is surfaced but does not hold
+  it because metrics are re-read on every sync. The Cardio and Settings screens show the partial
+  counts with a warning, and the last partial sync is remembered across launches.
 
 The **Cardio overview** (`CardioOverviewView`, Progress → Cardio activity) reads
 `GET api/ios/v1/healthkit/activity/summary`: last 7 days, last 28 days, twelve weeks, recent
@@ -86,5 +95,6 @@ last workout.
 - `StrengthAppTests/HealthKitReadinessTests.swift` — readiness selection and the empty-never-denied
   rule.
 - `StrengthAppTests/WatchHealthKitFinalizerTests.swift` — the exactly-once workout save.
-- The activity sync's contract is enforced backend-side by `tests/test_ios_workflow.py`; the iOS
-  side has no equivalent tests yet.
+- `StrengthAppTests/HealthKitActivityTests.swift` — independent cursor advancement, persisted
+  workout-interval association, partial-response handling and the `rejected`/`skipped` decoding.
+- The activity sync's contract is also enforced backend-side by `tests/test_ios_workflow.py`.

@@ -215,10 +215,18 @@ struct SettingsView: View {
                     .disabled(!model.canSyncActivity || model.isSyncingActivity)
                     .accessibilityIdentifier("activity-sync-button")
                     if let message = model.activitySyncMessage {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                        HStack(alignment: .top, spacing: 6) {
+                            if model.activitySyncNeedsAttention {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                            }
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundStyle(
+                                    model.activitySyncNeedsAttention ? .orange : .secondary
+                                )
+                                .textSelection(.enabled)
+                        }
                     }
                     Text("Sends workouts recorded since the import cutoff, plus heart rate inside them "
                          + "and for ten minutes after. Nothing is backfilled and nothing is written to Health.")

@@ -197,6 +197,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var isImportingHealthKit = false
     @Published private(set) var isSyncingActivity = false
     @Published private(set) var activitySyncMessage: String?
+    /// True when the last activity sync left rejected records on the server. The Cardio screen uses
+    /// this to distinguish a partial ingestion from an ordinary success message.
+    @Published private(set) var activitySyncNeedsAttention = false
     @Published private(set) var healthKitSelection: HealthKitReadinessSelection?
 
     @Published var serverURLText: String
@@ -216,6 +219,17 @@ final class AppModel: ObservableObject {
     @Published var pairingLabelText: String
 
     private static let healthKitDefaultsKey = "healthKitReadinessEnabled"
+    private static let activitySyncIssueKey = "healthkit.activity.lastIssue.v1"
+
+    /// Persisted so a partial ingestion is still visible after the app is relaunched; the in-memory
+    /// message alone would make the warning easy to miss.
+    private struct ActivitySyncIssue: Codable {
+        let at: Date
+        let workoutsRejected: Int
+        let samplesRejected: Int
+        let metricsSkipped: Int
+        let samplesDeferred: Bool
+    }
     private let client: IOSAPIClient
     private let tokens: TokenStoring
     private let store: PairedStore
@@ -264,7 +278,7 @@ final class AppModel: ObservableObject {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
         let readiness = healthKit ?? HealthKitReadinessService()
-        let activity = HealthKitActivityService()
+        let activity = HealthKitActivityService(defaults: healthKitDefaults)
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
         let resolvedAutomation = automation ?? WorkoutAutomation.shared
@@ -341,6 +355,10 @@ final class AppModel: ObservableObject {
                     self?.handlePendingNudgeTap()
                 }
             }
+        if let issue = Self.loadActivitySyncIssue(from: healthKitDefaults) {
+            activitySyncMessage = Self.activityIssueMessage(issue)
+            activitySyncNeedsAttention = true
+        }
         restoreExerciseSession()
     }
 
@@ -447,28 +465,94 @@ final class AppModel: ObservableObject {
         do {
             try await healthKitActivity.requestAuthorization()
             let now = Date()
-            let batch = try await healthKitActivity.fetchBatch(now: now)
-            if !batch.workouts.isEmpty {
-                _ = try await client.uploadActivity(
-                    HealthKitActivityWorkoutsBody(workouts: batch.workouts),
-                    session: session,
-                    idempotencyKey: UUID().uuidString
+            let report = try await HealthKitActivitySync(
+                client: client, activity: healthKitActivity
+            ).run(session: session, at: now)
+            if report.isPartial {
+                let issue = ActivitySyncIssue(
+                    at: now,
+                    workoutsRejected: report.workoutsRejected,
+                    samplesRejected: report.samplesRejected,
+                    metricsSkipped: report.metricsSkipped,
+                    samplesDeferred: report.samplesDeferred
                 )
+                Self.saveActivitySyncIssue(issue, to: healthKitDefaults)
+                activitySyncNeedsAttention = true
+                activitySyncMessage = Self.activityIssueMessage(issue)
+            } else {
+                Self.clearActivitySyncIssue(from: healthKitDefaults)
+                activitySyncNeedsAttention = false
+                activitySyncMessage = Self.activitySuccessMessage(report, now: now)
             }
-            if !batch.samples.isEmpty || !batch.metrics.isEmpty {
-                _ = try await client.uploadActivity(
-                    HealthKitActivitySamplesBody(samples: batch.samples, metrics: batch.metrics),
-                    session: session,
-                    idempotencyKey: UUID().uuidString
-                )
-            }
-            healthKitActivity.markSynced(now: now, workouts: batch.workouts)
-            activitySyncMessage = batch.isEmpty
-                ? "Nothing new since \(Self.shortDate(now))."
-                : "Synced \(batch.workouts.count) workout(s) and \(batch.samples.count) heart-rate sample(s)."
         } catch {
-            activitySyncMessage = error.localizedDescription
+            // A transport or validation failure is eligible for retry: the coordinator advances
+            // each cursor only after its own half was accepted, so a confirmed half is kept.
+            activitySyncNeedsAttention = true
+            activitySyncMessage = "Sync stopped before all data was confirmed: "
+                + "\(error.localizedDescription) The next sync retries from the last saved cursor."
         }
+    }
+
+    private static func activitySuccessMessage(
+        _ report: HealthKitActivitySyncReport,
+        now: Date
+    ) -> String {
+        if report.isEmpty {
+            return "Nothing new since \(shortDate(now))."
+        }
+        let created = report.workoutsCreated + report.samplesCreated + report.metricsWritten
+        if created == 0 {
+            return "Everything in this sync window was already on the server."
+        }
+        var parts: [String] = []
+        if report.workoutsCreated > 0 {
+            parts.append("\(report.workoutsCreated) workout(s)")
+        }
+        if report.samplesCreated > 0 {
+            parts.append("\(report.samplesCreated) heart-rate sample(s)")
+        }
+        if report.metricsWritten > 0 {
+            parts.append("\(report.metricsWritten) VO₂max measurement(s)")
+        }
+        return "Synced " + parts.joined(separator: ", ") + "."
+    }
+
+    private static func activityIssueMessage(_ issue: ActivitySyncIssue) -> String {
+        var counts: [String] = []
+        if issue.workoutsRejected > 0 {
+            counts.append("\(issue.workoutsRejected) workout(s)")
+        }
+        if issue.samplesRejected > 0 {
+            counts.append("\(issue.samplesRejected) heart-rate sample(s)")
+        }
+        if issue.metricsSkipped > 0 {
+            counts.append("\(issue.metricsSkipped) VO₂max measurement(s)")
+        }
+        let rejected = counts.isEmpty ? "Some records" : counts.joined(separator: ", ")
+        var message = "Partial sync on \(shortDate(issue.at)): \(rejected) rejected or skipped "
+            + "by the server."
+        if issue.samplesDeferred {
+            message += " Heart-rate samples were held until the workout half succeeds."
+        }
+        message += " The affected cursor was not advanced; investigate before retrying."
+        return message
+    }
+
+    private static func loadActivitySyncIssue(from defaults: UserDefaults) -> ActivitySyncIssue? {
+        guard let data = defaults.data(forKey: activitySyncIssueKey) else { return nil }
+        return try? JSONDecoder().decode(ActivitySyncIssue.self, from: data)
+    }
+
+    private static func saveActivitySyncIssue(
+        _ issue: ActivitySyncIssue,
+        to defaults: UserDefaults
+    ) {
+        guard let data = try? JSONEncoder().encode(issue) else { return }
+        defaults.set(data, forKey: activitySyncIssueKey)
+    }
+
+    private static func clearActivitySyncIssue(from defaults: UserDefaults) {
+        defaults.removeObject(forKey: activitySyncIssueKey)
     }
 
     private static func shortDate(_ date: Date) -> String {

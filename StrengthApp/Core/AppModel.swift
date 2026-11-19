@@ -200,6 +200,10 @@ final class AppModel: ObservableObject {
     /// True when the last activity sync left rejected records on the server. The Cardio screen uses
     /// this to distinguish a partial ingestion from an ordinary success message.
     @Published private(set) var activitySyncNeedsAttention = false
+    /// Keys the backend rejected and the app now skips. They need investigation; dismissing the
+    /// warning does not make the missing data reappear.
+    @Published private(set) var quarantinedActivityWorkoutKeys: [String] = []
+    @Published private(set) var quarantinedActivitySampleKeys: [String] = []
     @Published private(set) var healthKitSelection: HealthKitReadinessSelection?
 
     @Published var serverURLText: String
@@ -355,8 +359,21 @@ final class AppModel: ObservableObject {
                     self?.handlePendingNudgeTap()
                 }
             }
+        quarantinedActivityWorkoutKeys = activity.quarantinedWorkoutKeys
+        quarantinedActivitySampleKeys = activity.quarantinedSampleKeys
         if let issue = Self.loadActivitySyncIssue(from: healthKitDefaults) {
-            activitySyncMessage = Self.activityIssueMessage(issue)
+            activitySyncMessage = Self.activityIssueMessage(
+                issue,
+                quarantinedWorkouts: quarantinedActivityWorkoutKeys,
+                quarantinedSamples: quarantinedActivitySampleKeys
+            )
+            activitySyncNeedsAttention = true
+        } else if !quarantinedActivityWorkoutKeys.isEmpty
+                    || !quarantinedActivitySampleKeys.isEmpty {
+            activitySyncMessage = Self.activityQuarantineMessage(
+                quarantinedWorkouts: quarantinedActivityWorkoutKeys,
+                quarantinedSamples: quarantinedActivitySampleKeys
+            )
             activitySyncNeedsAttention = true
         }
         restoreExerciseSession()
@@ -468,6 +485,7 @@ final class AppModel: ObservableObject {
             let report = try await HealthKitActivitySync(
                 client: client, activity: healthKitActivity
             ).run(session: session, at: now)
+            refreshActivityQuarantine()
             if report.isPartial {
                 let issue = ActivitySyncIssue(
                     at: now,
@@ -478,7 +496,21 @@ final class AppModel: ObservableObject {
                 )
                 Self.saveActivitySyncIssue(issue, to: healthKitDefaults)
                 activitySyncNeedsAttention = true
-                activitySyncMessage = Self.activityIssueMessage(issue)
+                activitySyncMessage = Self.activityIssueMessage(
+                    issue,
+                    quarantinedWorkouts: quarantinedActivityWorkoutKeys,
+                    quarantinedSamples: quarantinedActivitySampleKeys
+                )
+            } else if !quarantinedActivityWorkoutKeys.isEmpty
+                        || !quarantinedActivitySampleKeys.isEmpty {
+                // This sync was clean, but earlier rejected records are still skipped. Keep the
+                // warning rather than implying the history is complete.
+                Self.clearActivitySyncIssue(from: healthKitDefaults)
+                activitySyncNeedsAttention = true
+                activitySyncMessage = Self.activityQuarantineMessage(
+                    quarantinedWorkouts: quarantinedActivityWorkoutKeys,
+                    quarantinedSamples: quarantinedActivitySampleKeys
+                )
             } else {
                 Self.clearActivitySyncIssue(from: healthKitDefaults)
                 activitySyncNeedsAttention = false
@@ -487,10 +519,27 @@ final class AppModel: ObservableObject {
         } catch {
             // A transport or validation failure is eligible for retry: the coordinator advances
             // each cursor only after its own half was accepted, so a confirmed half is kept.
+            refreshActivityQuarantine()
             activitySyncNeedsAttention = true
             activitySyncMessage = "Sync stopped before all data was confirmed: "
                 + "\(error.localizedDescription) The next sync retries from the last saved cursor."
         }
+    }
+
+    /// Stop showing a quarantine warning after the owner has investigated it. The rejected records
+    /// stay on the server untouched; this only clears the local warning and the skip list, so a
+    /// later sync inside the overlap window can retry them.
+    func dismissActivityQuarantine() {
+        healthKitActivity.clearQuarantine()
+        refreshActivityQuarantine()
+        Self.clearActivitySyncIssue(from: healthKitDefaults)
+        activitySyncNeedsAttention = false
+        activitySyncMessage = nil
+    }
+
+    private func refreshActivityQuarantine() {
+        quarantinedActivityWorkoutKeys = healthKitActivity.quarantinedWorkoutKeys
+        quarantinedActivitySampleKeys = healthKitActivity.quarantinedSampleKeys
     }
 
     private static func activitySuccessMessage(
@@ -517,7 +566,11 @@ final class AppModel: ObservableObject {
         return "Synced " + parts.joined(separator: ", ") + "."
     }
 
-    private static func activityIssueMessage(_ issue: ActivitySyncIssue) -> String {
+    private static func activityIssueMessage(
+        _ issue: ActivitySyncIssue,
+        quarantinedWorkouts: [String],
+        quarantinedSamples: [String]
+    ) -> String {
         var counts: [String] = []
         if issue.workoutsRejected > 0 {
             counts.append("\(issue.workoutsRejected) workout(s)")
@@ -532,10 +585,58 @@ final class AppModel: ObservableObject {
         var message = "Partial sync on \(shortDate(issue.at)): \(rejected) rejected or skipped "
             + "by the server."
         if issue.samplesDeferred {
-            message += " Heart-rate samples were held until the workout half succeeds."
+            message += " The workout cursor was held and samples were deferred."
         }
-        message += " The affected cursor was not advanced; investigate before retrying."
+        let hasQuarantine = !quarantinedWorkouts.isEmpty || !quarantinedSamples.isEmpty
+        if hasQuarantine {
+            message += " " + quarantineSummary(
+                quarantinedWorkouts: quarantinedWorkouts,
+                quarantinedSamples: quarantinedSamples
+            )
+            message += " The cursor advanced past the quarantined keys."
+        } else if issue.metricsSkipped > 0 {
+            message += " Skipped metrics are re-checked on every sync."
+        } else if !issue.samplesDeferred {
+            message += " The affected cursor was not advanced."
+        }
+        message += " Investigate before retrying."
         return message
+    }
+
+    private static func activityQuarantineMessage(
+        quarantinedWorkouts: [String],
+        quarantinedSamples: [String]
+    ) -> String {
+        quarantineSummary(
+            quarantinedWorkouts: quarantinedWorkouts,
+            quarantinedSamples: quarantinedSamples
+        ) + " They are skipped on future syncs; dismiss this warning only after investigating."
+    }
+
+    private static func quarantineSummary(
+        quarantinedWorkouts: [String],
+        quarantinedSamples: [String]
+    ) -> String {
+        var parts: [String] = []
+        if !quarantinedWorkouts.isEmpty {
+            parts.append(
+                "\(quarantinedWorkouts.count) workout(s) quarantined: "
+                    + keyList(quarantinedWorkouts)
+            )
+        }
+        if !quarantinedSamples.isEmpty {
+            parts.append(
+                "\(quarantinedSamples.count) heart-rate sample(s) quarantined: "
+                    + keyList(quarantinedSamples)
+            )
+        }
+        return parts.joined(separator: ". ") + "."
+    }
+
+    private static func keyList(_ keys: [String]) -> String {
+        let shown = keys.prefix(3).joined(separator: ", ")
+        guard keys.count > 3 else { return shown }
+        return shown + ", +" + String(keys.count - 3) + " more"
     }
 
     private static func loadActivitySyncIssue(from defaults: UserDefaults) -> ActivitySyncIssue? {

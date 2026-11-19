@@ -58,8 +58,12 @@ final class HealthKitActivitySyncTests: XCTestCase {
         var lastSyncedAt: Date
         var lastWorkoutAt: Date
         private(set) var authorizationRequests = 0
-        private(set) var workoutCommits: [[HealthKitActivityWorkout]] = []
-        private(set) var sampleCommits: [Date] = []
+        private(set) var workoutCommitCount = 0
+        private(set) var workoutRejectedKeys: [Set<String>] = []
+        private(set) var sampleCommitDates: [Date] = []
+        private(set) var sampleRejectedKeys: [Set<String>] = []
+        var quarantinedWorkoutKeys: [String] = []
+        var quarantinedSampleKeys: [String] = []
 
         init(batch: HealthKitActivityBatch, now: Date) {
             self.batch = batch
@@ -73,12 +77,24 @@ final class HealthKitActivitySyncTests: XCTestCase {
 
         func fetchBatch(now: Date) async throws -> HealthKitActivityBatch { batch }
 
-        func markWorkoutsSynced(_ workouts: [HealthKitActivityWorkout]) {
-            workoutCommits.append(workouts)
+        func markWorkoutsSynced(
+            _ workouts: [HealthKitActivityWorkout],
+            rejectedKeys: Set<String>
+        ) {
+            workoutCommitCount += 1
+            workoutRejectedKeys.append(rejectedKeys)
+            quarantinedWorkoutKeys.append(contentsOf: rejectedKeys.sorted())
         }
 
-        func markSamplesSynced(at date: Date) {
-            sampleCommits.append(date)
+        func markSamplesSynced(at date: Date, rejectedKeys: Set<String>) {
+            sampleCommitDates.append(date)
+            sampleRejectedKeys.append(rejectedKeys)
+            quarantinedSampleKeys.append(contentsOf: rejectedKeys.sorted())
+        }
+
+        func clearQuarantine() {
+            quarantinedWorkoutKeys = []
+            quarantinedSampleKeys = []
         }
     }
 
@@ -118,8 +134,8 @@ final class HealthKitActivitySyncTests: XCTestCase {
         XCTAssertFalse(report.isPartial)
         XCTAssertEqual(report.workoutsCreated, 1)
         XCTAssertEqual(report.samplesCreated, 1)
-        XCTAssertEqual(activity.workoutCommits.count, 1)
-        XCTAssertEqual(activity.sampleCommits, [now])
+        XCTAssertEqual(activity.workoutCommitCount, 1)
+        XCTAssertEqual(activity.sampleCommitDates, [now])
         XCTAssertEqual(transport.requests.count, 2)
     }
 
@@ -141,10 +157,94 @@ final class HealthKitActivitySyncTests: XCTestCase {
         XCTAssertTrue(report.isPartial)
         XCTAssertTrue(report.samplesDeferred)
         XCTAssertEqual(report.workoutsRejected, 1)
-        XCTAssertTrue(activity.workoutCommits.isEmpty)
-        XCTAssertTrue(activity.sampleCommits.isEmpty)
+        XCTAssertEqual(activity.workoutCommitCount, 0)
+        XCTAssertTrue(activity.sampleCommitDates.isEmpty)
         XCTAssertEqual(transport.requests.count, 1)
         XCTAssertEqual(transport.requests.first?.url?.path, "/api/ios/v1/healthkit/workouts")
+    }
+
+    func testRejectedWorkoutWithKeysIsQuarantinedAndItsSamplesAreSkipped() async throws {
+        let now = Date()
+        let rejectedWorkout = workout(
+            key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            start: now.addingTimeInterval(-3600),
+            end: now
+        )
+        let acceptedWorkout = workout(
+            key: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            start: now.addingTimeInterval(-7200),
+            end: now.addingTimeInterval(-3600)
+        )
+        let rejectedSample = sample(
+            key: "cccccccccccccccccccccccccccccccc",
+            workoutKey: rejectedWorkout.key,
+            at: now.addingTimeInterval(-1800)
+        )
+        let acceptedSample = sample(
+            key: "dddddddddddddddddddddddddddddddd",
+            workoutKey: acceptedWorkout.key,
+            at: now.addingTimeInterval(-5400)
+        )
+        let activity = StubActivity(
+            batch: HealthKitActivityBatch(
+                workouts: [rejectedWorkout, acceptedWorkout],
+                samples: [rejectedSample, acceptedSample]
+            ),
+            now: now
+        )
+        let (client, transport) = makeClient(
+            workoutsResponse: #"""
+            {"workouts":2,"created":1,"existing":0,"rejected":1,
+             "rejected_keys":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}
+            """#,
+            samplesResponse: #"{"samples":1,"created":1,"existing":0,"rejected":0}"#
+        )
+
+        let report = try await HealthKitActivitySync(client: client, activity: activity)
+            .run(session: session(), at: now)
+
+        XCTAssertTrue(report.isPartial)
+        XCTAssertEqual(report.rejectedWorkoutKeys, [rejectedWorkout.key])
+        XCTAssertEqual(report.samplesSkippedForQuarantine, 1)
+        XCTAssertFalse(report.samplesDeferred)
+        XCTAssertEqual(activity.workoutCommitCount, 1)
+        XCTAssertEqual(activity.workoutRejectedKeys.first, Set([rejectedWorkout.key]))
+        XCTAssertEqual(activity.sampleCommitDates, [now])
+        XCTAssertEqual(transport.requests.count, 2)
+
+        let body = try XCTUnwrap(transport.requests.last?.httpBody)
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        let sent = try XCTUnwrap(json["samples"] as? [[String: Any]])
+        XCTAssertEqual(sent.compactMap { $0["workout_key"] as? String }, [acceptedWorkout.key])
+    }
+
+    func testRejectedSampleWithKeysIsQuarantinedAndCursorAdvances() async throws {
+        let now = Date()
+        let workout = workout(start: now.addingTimeInterval(-3600), end: now)
+        let sample = sample(workoutKey: workout.key, at: now.addingTimeInterval(-1800))
+        let activity = StubActivity(
+            batch: HealthKitActivityBatch(workouts: [workout], samples: [sample]),
+            now: now
+        )
+        let (client, _) = makeClient(
+            samplesResponse: #"""
+            {"samples":1,"created":0,"existing":0,"rejected":1,
+             "rejected_keys":["ffeeddccbbaa99887766554433221100"]}
+            """#
+        )
+
+        let report = try await HealthKitActivitySync(client: client, activity: activity)
+            .run(session: session(), at: now)
+
+        XCTAssertTrue(report.isPartial)
+        XCTAssertEqual(report.rejectedSampleKeys, ["ffeeddccbbaa99887766554433221100"])
+        XCTAssertEqual(activity.sampleCommitDates, [now])
+        XCTAssertEqual(
+            activity.sampleRejectedKeys.first,
+            Set(["ffeeddccbbaa99887766554433221100"])
+        )
     }
 
     func testRejectedSampleHoldsOnlyTheSampleCursor() async throws {
@@ -163,8 +263,8 @@ final class HealthKitActivitySyncTests: XCTestCase {
             .run(session: session(), at: now)
 
         XCTAssertTrue(report.isPartial)
-        XCTAssertEqual(activity.workoutCommits.count, 1)
-        XCTAssertTrue(activity.sampleCommits.isEmpty)
+        XCTAssertEqual(activity.workoutCommitCount, 1)
+        XCTAssertTrue(activity.sampleCommitDates.isEmpty)
         XCTAssertEqual(report.samplesRejected, 1)
     }
 
@@ -191,8 +291,8 @@ final class HealthKitActivitySyncTests: XCTestCase {
 
         XCTAssertTrue(report.isPartial)
         XCTAssertEqual(report.metricsSkipped, 1)
-        XCTAssertEqual(activity.workoutCommits.count, 1)
-        XCTAssertEqual(activity.sampleCommits, [now])
+        XCTAssertEqual(activity.workoutCommitCount, 1)
+        XCTAssertEqual(activity.sampleCommitDates, [now])
     }
 
     // MARK: - Cursor and interval persistence
@@ -205,7 +305,7 @@ final class HealthKitActivitySyncTests: XCTestCase {
         let start = now.addingTimeInterval(-1800)
         let workout = workout(start: start, end: now)
 
-        service.markWorkoutsSynced([workout])
+        service.markWorkoutsSynced([workout], rejectedKeys: [])
 
         // The workout cursor is parsed back from the ISO string the upload carried, so compare
         // with the one-second precision that format keeps.
@@ -223,7 +323,7 @@ final class HealthKitActivitySyncTests: XCTestCase {
         )
 
         let sampleSync = now.addingTimeInterval(120)
-        service.markSamplesSynced(at: sampleSync)
+        service.markSamplesSynced(at: sampleSync, rejectedKeys: [])
 
         XCTAssertEqual(service.lastSyncedAt, sampleSync)
         XCTAssertEqual(
@@ -231,6 +331,34 @@ final class HealthKitActivitySyncTests: XCTestCase {
             now.timeIntervalSince1970,
             accuracy: 1
         )
+    }
+
+    func testQuarantinedWorkoutAdvancesCursorWithoutPersistingItsInterval() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = HealthKitActivityService(defaults: defaults)
+        let now = Date()
+        let workout = workout(start: now.addingTimeInterval(-1800), end: now)
+
+        service.markWorkoutsSynced([workout], rejectedKeys: [workout.key])
+
+        XCTAssertEqual(
+            service.lastWorkoutAt.timeIntervalSince1970,
+            now.timeIntervalSince1970,
+            accuracy: 1
+        )
+        XCTAssertTrue(service.knownIntervals(now: now).isEmpty)
+        XCTAssertEqual(service.quarantinedWorkoutKeys, [workout.key])
+
+        service.markSamplesSynced(
+            at: now.addingTimeInterval(60),
+            rejectedKeys: ["rejected-sample"]
+        )
+        XCTAssertEqual(service.quarantinedSampleKeys, ["rejected-sample"])
+
+        service.clearQuarantine()
+        XCTAssertTrue(service.quarantinedWorkoutKeys.isEmpty)
+        XCTAssertTrue(service.quarantinedSampleKeys.isEmpty)
     }
 
     func testPersistedIntervalAssociatesASampleOutsideThisRunsWorkoutQuery() {
@@ -295,6 +423,7 @@ final class HealthKitActivitySyncTests: XCTestCase {
             HealthKitActivityUploadResult.self,
             from: Data(#"""
             {"samples":3,"created":1,"existing":1,"rejected":1,
+             "rejected_keys":["abc123"],
              "metrics":{"written":2,"skipped":1}}
             """#.utf8)
         )
@@ -302,6 +431,7 @@ final class HealthKitActivitySyncTests: XCTestCase {
         XCTAssertEqual(result.created, 1)
         XCTAssertEqual(result.existing, 1)
         XCTAssertEqual(result.rejected, 1)
+        XCTAssertEqual(result.rejectedKeys, ["abc123"])
         XCTAssertEqual(result.metrics?.written, 2)
         XCTAssertEqual(result.skippedMetrics, 1)
         XCTAssertTrue(result.isPartial)
@@ -316,6 +446,7 @@ final class HealthKitActivitySyncTests: XCTestCase {
         )
 
         XCTAssertEqual(result.rejected, 0)
+        XCTAssertEqual(result.rejectedKeys, [])
         XCTAssertFalse(result.isPartial)
     }
 }

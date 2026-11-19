@@ -227,6 +227,12 @@ struct SettingsView: View {
                                 )
                                 .textSelection(.enabled)
                         }
+                        if model.activitySyncNeedsAttention {
+                            Button("Dismiss warning") {
+                                model.dismissActivityQuarantine()
+                            }
+                            .font(.footnote)
+                        }
                     }
                     Text("Sends workouts recorded since the import cutoff, plus heart rate inside them "
                          + "and for ten minutes after. Nothing is backfilled and nothing is written to Health.")

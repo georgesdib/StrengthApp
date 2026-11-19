@@ -139,6 +139,13 @@ struct CardioOverviewView: View {
                     }
                     .accessibilityIdentifier("cardio-sync-status")
                 }
+                if model.activitySyncNeedsAttention {
+                    Button("Dismiss warning") {
+                        model.dismissActivityQuarantine()
+                    }
+                    .font(.caption)
+                    .accessibilityIdentifier("cardio-sync-dismiss")
+                }
                 if let latest = payload?.summary.latestWorkoutAt {
                     Text("Last recorded workout: \(latest.prefix(10))")
                         .font(.caption).foregroundStyle(.secondary)

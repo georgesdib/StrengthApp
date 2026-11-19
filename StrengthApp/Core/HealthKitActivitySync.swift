@@ -15,22 +15,28 @@ struct HealthKitActivitySyncReport: Equatable {
     var samplesRejected = 0
     var metricsWritten = 0
     var metricsSkipped = 0
+    /// Keys the server named as rejected. Empty when an older server only returned a count.
+    var rejectedWorkoutKeys: [String] = []
+    var rejectedSampleKeys: [String] = []
     /// True when a rejected workout stopped samples from being submitted in this run.
     var samplesDeferred = false
+    /// Samples skipped because their workout was rejected and is now quarantined.
+    var samplesSkippedForQuarantine = 0
 
     var isEmpty: Bool { !hadActivity }
 
     var isPartial: Bool {
-        workoutsRejected > 0 || samplesRejected > 0 || metricsSkipped > 0 || samplesDeferred
+        workoutsRejected > 0 || samplesRejected > 0 || metricsSkipped > 0
+            || samplesDeferred || samplesSkippedForQuarantine > 0
     }
 }
 
 /// Orchestrates one incremental HealthKit activity sync.
 ///
-/// Cursors are advanced per half, and only after that half was completely accepted:
-/// - a workout rejection holds the workout cursor and defers samples to the next run;
-/// - a sample rejection holds the sample cursor;
-/// - a transport failure advances neither cursor.
+/// The server identifies rejected items by key. Those keys are quarantined and the cursor advances
+/// past them, so one immutable conflict cannot stall every later workout or sample. If an older
+/// server returns only a count, the client keeps the conservative behaviour: hold the affected
+/// cursor (and defer samples after a workout rejection) rather than guessing which item failed.
 @MainActor
 struct HealthKitActivitySync {
     private let client: IOSAPIClient
@@ -46,6 +52,7 @@ struct HealthKitActivitySync {
         var report = HealthKitActivitySyncReport()
         report.hadActivity = !batch.isEmpty
 
+        var quarantinedWorkouts: Set<String> = []
         if !batch.workouts.isEmpty {
             let result = try await client.uploadActivity(
                 HealthKitActivityWorkoutsBody(workouts: batch.workouts),
@@ -55,19 +62,28 @@ struct HealthKitActivitySync {
             report.workoutsCreated = result.created
             report.workoutsExisting = result.existing
             report.workoutsRejected = result.rejected
-            guard result.rejected == 0 else {
-                // The response carries counts, not keys, so the client cannot know which workout
-                // was rejected. Sending samples now could reference a workout the server does not
-                // have, so the whole sample half waits while the workout cursor stays put.
+            let rejected = Set(result.rejectedKeys)
+            guard result.rejected == rejected.count else {
+                // Count without keys: do not guess. Sending samples now could reference a workout
+                // the server does not have, so the whole sample half waits with the cursor.
                 report.samplesDeferred = !batch.samples.isEmpty || !batch.metrics.isEmpty
                 return report
             }
-            activity.markWorkoutsSynced(batch.workouts)
+            quarantinedWorkouts = rejected
+            report.rejectedWorkoutKeys = rejected.sorted()
+            activity.markWorkoutsSynced(batch.workouts, rejectedKeys: rejected)
         }
 
-        if !batch.samples.isEmpty || !batch.metrics.isEmpty {
+        // A newly rejected workout is quarantined above, but its samples were already fetched. Drop
+        // them: the server requires the workout to exist before accepting its samples.
+        let samples = batch.samples.filter {
+            !quarantinedWorkouts.contains($0.workoutKey)
+        }
+        report.samplesSkippedForQuarantine = batch.samples.count - samples.count
+
+        if !samples.isEmpty || !batch.metrics.isEmpty {
             let result = try await client.uploadActivity(
-                HealthKitActivitySamplesBody(samples: batch.samples, metrics: batch.metrics),
+                HealthKitActivitySamplesBody(samples: samples, metrics: batch.metrics),
                 session: session,
                 idempotencyKey: UUID().uuidString
             )
@@ -76,14 +92,16 @@ struct HealthKitActivitySync {
             report.samplesRejected = result.rejected
             report.metricsWritten = result.metrics?.written ?? 0
             report.metricsSkipped = result.skippedMetrics
-            // Metrics have no cursor and are re-read on every sync, so a skipped VO2max reading is
-            // surfaced but does not force the whole sample window to be re-sent forever. A rejected
-            // heart-rate sample does hold the cursor: its identity conflict needs investigation.
-            if result.rejected == 0 {
-                activity.markSamplesSynced(at: now)
+            let rejected = Set(result.rejectedKeys)
+            if result.rejected == rejected.count {
+                report.rejectedSampleKeys = rejected.sorted()
+                // Metrics have no cursor and are re-read on every sync, so a skipped VO2max reading
+                // is surfaced but does not force the sample window to be re-sent. Rejected samples
+                // are quarantined by key and the cursor moves past them.
+                activity.markSamplesSynced(at: now, rejectedKeys: rejected)
             }
         } else {
-            activity.markSamplesSynced(at: now)
+            activity.markSamplesSynced(at: now, rejectedKeys: [])
         }
 
         return report

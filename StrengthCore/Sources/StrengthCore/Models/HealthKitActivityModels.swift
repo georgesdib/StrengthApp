@@ -107,22 +107,27 @@ public struct HealthKitActivityUploadResult: Decodable, Equatable {
     public let existing: Int
     /// Items the server declined to store. They need investigation, not blind re-submission.
     public let rejected: Int
+    /// HealthKit keys the server rejected, when it can identify them. Empty from an older server;
+    /// the caller must then hold the cursor instead of quarantining by key.
+    public let rejectedKeys: [String]
     /// Present only on the samples call, which carries standalone metrics too.
     public let metrics: HealthKitActivityMetricUploadResult?
 
     private enum CodingKeys: String, CodingKey {
-        case created, existing, rejected, metrics
+        case created, existing, rejected, rejectedKeys, metrics
     }
 
     public init(
         created: Int = 0,
         existing: Int = 0,
         rejected: Int = 0,
+        rejectedKeys: [String] = [],
         metrics: HealthKitActivityMetricUploadResult? = nil
     ) {
         self.created = created
         self.existing = existing
         self.rejected = rejected
+        self.rejectedKeys = rejectedKeys
         self.metrics = metrics
     }
 
@@ -132,6 +137,7 @@ public struct HealthKitActivityUploadResult: Decodable, Equatable {
         existing = try container.decodeIfPresent(Int.self, forKey: .existing) ?? 0
         // A metrics-only samples call omits rejected entirely.
         rejected = try container.decodeIfPresent(Int.self, forKey: .rejected) ?? 0
+        rejectedKeys = try container.decodeIfPresent([String].self, forKey: .rejectedKeys) ?? []
         metrics = try container.decodeIfPresent(
             HealthKitActivityMetricUploadResult.self, forKey: .metrics
         )

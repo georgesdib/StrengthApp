@@ -108,6 +108,11 @@ raw 100.x address.
 
 ### Substituting and adding work
 
+A plan item with more than one target group (for example a top set and a back-off) lists each
+group as its own target line, in order, on the phone and on the watch. The logging sheet
+prefills the next group by the number of working sets already recorded, and the last group holds
+beyond the plan.
+
 The plan is frozen when the workout starts. The **⋯** menu on a plan row offers the two
 mid-session changes:
 

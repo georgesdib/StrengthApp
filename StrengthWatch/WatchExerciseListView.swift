@@ -54,6 +54,24 @@ struct WatchExerciseListView: View {
                                         .foregroundStyle(.blue)
                                         .accessibilityIdentifier("watch-substituted-\(index)")
                                 }
+                                if let groups = row?.groups, !groups.isEmpty {
+                                    // One row per planned group, in order, so the top set and
+                                    // its back-off are both visible (DEC-RESOLVER-18).
+                                    ForEach(Array(groups.enumerated()), id: \.offset) {
+                                        groupIndex, group in
+                                        Text(group.rowLabel)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .accessibilityIdentifier(
+                                                "watch-group-\(index)-\(groupIndex)"
+                                            )
+                                    }
+                                } else if let row, row.kind == .substituted {
+                                    Text(row.repsLabel + " · " + row.loadLabel)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityIdentifier("watch-substitute-target-\(index)")
+                                }
                                 Text("\(execution.completedSetCount(for: item)) of \(item.sets ?? 0)")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)

@@ -173,23 +173,50 @@ struct ActiveWorkoutView: View {
                                         }
                                         .disabled(model.isSaving)
                                     }
-                                    HStack(spacing: 8) {
-                                        Text(row?.repsLabel ?? item.repsLabel)
-                                        Text(row?.loadLabel ?? item.loadLabel)
-                                        Text(row?.effortLabel ?? item.effortLabel)
-                                        if let velocity = item.velocityTargetLabel {
-                                            Text("target " + velocity)
+                                    if let groups = row?.groups, !groups.isEmpty {
+                                        // One row per planned group, in order; the item-level
+                                        // summary is not shown so a top set and its back-off
+                                        // stay distinct.
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            ForEach(Array(groups.enumerated()), id: \.offset) {
+                                                groupIndex, group in
+                                                Text(group.rowLabel)
+                                                    .accessibilityIdentifier(
+                                                        "plan-group-\(index)-\(groupIndex)"
+                                                    )
+                                            }
+                                            if let velocity = item.velocityTargetLabel {
+                                                Text("target " + velocity)
+                                            }
+                                            if model.isExerciseActive(
+                                                planItemIndex: identity,
+                                                exerciseId: row?.exerciseId ?? exercise
+                                            ) {
+                                                Label("In progress", systemImage: "timer")
+                                                    .foregroundStyle(.orange)
+                                            }
                                         }
-                                        if model.isExerciseActive(
-                                            planItemIndex: identity,
-                                            exerciseId: row?.exerciseId ?? exercise
-                                        ) {
-                                            Label("In progress", systemImage: "timer")
-                                                .foregroundStyle(.orange)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    } else {
+                                        HStack(spacing: 8) {
+                                            Text(row?.repsLabel ?? item.repsLabel)
+                                            Text(row?.loadLabel ?? item.loadLabel)
+                                            Text(row?.effortLabel ?? item.effortLabel)
+                                            if let velocity = item.velocityTargetLabel {
+                                                Text("target " + velocity)
+                                            }
+                                            if model.isExerciseActive(
+                                                planItemIndex: identity,
+                                                exerciseId: row?.exerciseId ?? exercise
+                                            ) {
+                                                Label("In progress", systemImage: "timer")
+                                                    .foregroundStyle(.orange)
+                                            }
                                         }
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                     }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                                     if let row, row.kind == .substituted {
                                         Text(
                                             "Changed on this phone"

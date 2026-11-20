@@ -308,8 +308,15 @@ final class StrengthAppUITests: XCTestCase {
 
     private func scrollTo(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<8 {
-            if element.exists && element.isHittable {
-                return
+            if element.exists {
+                // isHittable fails outright when an element is clipped by the screen edge and
+                // has no valid activation point, so require it to sit inside the safe area.
+                let frame = element.frame
+                let inside = frame.minY > app.frame.minY + 60
+                    && frame.maxY < app.frame.maxY - 90
+                if inside, frame.width > 0, frame.height > 0, element.isHittable {
+                    return
+                }
             }
             app.swipeUp()
         }

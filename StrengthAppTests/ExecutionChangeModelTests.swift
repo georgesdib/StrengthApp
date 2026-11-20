@@ -53,6 +53,11 @@ final class ExecutionChangeModelTests: XCTestCase {
         XCTAssertEqual(first.setGroups?.count, 2)
         XCTAssertEqual(first.setGroups?[0].rowLabel, "1 × 3-5 @ 120.0 kg · RIR 1")
         let rows = ExecutionView.empty.rows(plan: plan)
+        // The plan surfaces render one row per group from this list, in order.
+        XCTAssertEqual(rows[0].groups.map(\.rowLabel), [
+            "1 × 3-5 @ 120.0 kg · RIR 1",
+            "3 × 3-5 @ 100.0 kg · RIR 3"
+        ])
         XCTAssertEqual(rows[0].group(forLoggedCount: 0)?.loadKg, 120)
         XCTAssertEqual(rows[0].group(forLoggedCount: 1)?.loadKg, 100)
         XCTAssertEqual(rows[0].group(forLoggedCount: 6)?.loadKg, 100)

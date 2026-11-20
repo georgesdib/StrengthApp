@@ -71,6 +71,45 @@ public enum JSONValue: Codable, Equatable, Sendable {
 
 // MARK: - Prescription
 
+/// The frozen top-set outcome from the plan. Status is applied, not_applicable, fallback or
+/// unsatisfied; reason_code names the blocker and reason is the human text (DEC-RESOLVER-24).
+public struct TopSetStatus: Codable, Equatable, Sendable {
+    public let status: String?
+    public let reasonCode: String?
+    public let reason: String?
+    public let topSetLoadKg: Double?
+    public let topSetRir: Int?
+    public let backoffLoadKg: Double?
+
+    public init(
+        status: String? = nil,
+        reasonCode: String? = nil,
+        reason: String? = nil,
+        topSetLoadKg: Double? = nil,
+        topSetRir: Int? = nil,
+        backoffLoadKg: Double? = nil
+    ) {
+        self.status = status
+        self.reasonCode = reasonCode
+        self.reason = reason
+        self.topSetLoadKg = topSetLoadKg
+        self.topSetRir = topSetRir
+        self.backoffLoadKg = backoffLoadKg
+    }
+
+    public var isApplied: Bool { status == "applied" }
+
+    public var statusLabel: String {
+        switch status {
+        case "applied": return "Applied"
+        case "not_applicable": return "Not applicable"
+        case "fallback": return "Fell back to straight sets"
+        case "unsatisfied": return "Required but unavailable"
+        default: return status ?? "Unknown"
+        }
+    }
+}
+
 public struct PrescriptionPlan: Codable, Sendable {
     public let forDate: String?
     public let sessionType: String?
@@ -78,6 +117,8 @@ public struct PrescriptionPlan: Codable, Sendable {
     public let items: [PrescriptionItem]
     public let warnings: [String]?
     public let issues: [String]?
+    /// Frozen top-set outcome; nil for plans issued before the tri-state.
+    public let topSet: TopSetStatus?
 
     public init(
         forDate: String?,
@@ -85,7 +126,8 @@ public struct PrescriptionPlan: Codable, Sendable {
         sessionLabel: String?,
         items: [PrescriptionItem],
         warnings: [String]?,
-        issues: [String]?
+        issues: [String]?,
+        topSet: TopSetStatus? = nil
     ) {
         self.forDate = forDate
         self.sessionType = sessionType
@@ -93,6 +135,7 @@ public struct PrescriptionPlan: Codable, Sendable {
         self.items = items
         self.warnings = warnings
         self.issues = issues
+        self.topSet = topSet
     }
 }
 
@@ -265,25 +308,40 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
 
 // MARK: - Plan request (R7)
 
+/// One request-time top-set choice. Nil follows the settings profile; the server still owns
+/// eligibility, structure, loads and every training decision (DEC-RESOLVER-24).
+public enum PrescriptionTopSetIntent: String, Codable, CaseIterable, Sendable {
+    case off
+    case preferred
+    case required
+
+    public var label: String {
+        switch self {
+        case .off: return "Straight sets"
+        case .preferred: return "Prefer top set + back-off"
+        case .required: return "Require top set + back-off"
+        }
+    }
+}
+
 /// Workout settings sent with a request. The phone chooses an input; the server owns the plan.
 public struct PlanSettings: Codable, Equatable {
     public var sessionType: String = "auto"
     public var minimumSession: Bool = false
     public var minimumTargetMinutes: Int?
-    /// nil lets the server/resolver decide; true asks for top set/back-off; false asks for
-    /// straight sets. The server still owns eligibility and every load/repetition decision.
-    public var topSet: Bool? = nil
+    /// nil follows the settings profile; otherwise this request overrides it.
+    public var topSetIntent: PrescriptionTopSetIntent? = nil
 
     public init(
         sessionType: String = "auto",
         minimumSession: Bool = false,
         minimumTargetMinutes: Int? = nil,
-        topSet: Bool? = nil
+        topSetIntent: PrescriptionTopSetIntent? = nil
     ) {
         self.sessionType = sessionType
         self.minimumSession = minimumSession
         self.minimumTargetMinutes = minimumTargetMinutes
-        self.topSet = topSet
+        self.topSetIntent = topSetIntent
     }
 }
 

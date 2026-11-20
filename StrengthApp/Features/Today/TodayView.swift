@@ -882,8 +882,9 @@ struct PlanSettingsView: View {
     ]
 
     private enum MainLiftStructure: String, CaseIterable, Identifiable {
-        case server = "Server decides"
-        case topSet = "Top set + back-off"
+        case server = "Server default"
+        case preferred = "Prefer top set + back-off"
+        case required = "Require top set + back-off"
         case straight = "Straight sets"
 
         var id: String { rawValue }
@@ -892,17 +893,19 @@ struct PlanSettingsView: View {
     private var structure: Binding<MainLiftStructure> {
         Binding(
             get: {
-                switch settings.topSet {
-                case .some(true): return .topSet
-                case .some(false): return .straight
+                switch settings.topSetIntent {
+                case .preferred: return .preferred
+                case .required: return .required
+                case .off: return .straight
                 case nil: return .server
                 }
             },
             set: { value in
                 switch value {
-                case .server: settings.topSet = nil
-                case .topSet: settings.topSet = true
-                case .straight: settings.topSet = false
+                case .server: settings.topSetIntent = nil
+                case .preferred: settings.topSetIntent = .preferred
+                case .required: settings.topSetIntent = .required
+                case .straight: settings.topSetIntent = .off
                 }
             }
         )
@@ -936,7 +939,7 @@ struct PlanSettingsView: View {
                         }
                     }
                     .accessibilityIdentifier("main-lift-structure")
-                    Text("Top set/back-off is applied by the server only when the resolver supports it for this session. Straight sets asks for no top-set structure.")
+                    Text("Preferred accepts a straight-set fallback with a recorded reason; required marks an unexpected fallback unsatisfied on a still-startable plan. The server owns eligibility, structure and every load.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

@@ -1086,10 +1086,10 @@ final class Phase2AppModelTests: XCTestCase {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         let settings = try encoder.encode(
-            PlanSettings(sessionType: "squat", topSet: true)
+            PlanSettings(sessionType: "squat", topSetIntent: .required)
         )
         let settingsText = try XCTUnwrap(String(data: settings, encoding: .utf8))
-        XCTAssertTrue(settingsText.contains("\"top_set\":true"))
+        XCTAssertTrue(settingsText.contains("\"top_set_intent\":\"required\""))
 
         let complete = try encoder.encode(
             CompleteWorkoutRequest(
@@ -1103,6 +1103,26 @@ final class Phase2AppModelTests: XCTestCase {
         let removal = try encoder.encode(RemoveSetRequest(setId: 42))
         let removalText = try XCTUnwrap(String(data: removal, encoding: .utf8))
         XCTAssertTrue(removalText.contains("\"set_id\":42"))
+    }
+
+    func testFrozenTopSetStatusDecodes() throws {
+        let json = """
+        {
+          "items": [],
+          "top_set": {
+            "status": "unsatisfied",
+            "reason_code": "no_usable_load",
+            "reason": "no usable main-lift load"
+          }
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let plan = try decoder.decode(PrescriptionPlan.self, from: Data(json.utf8))
+        XCTAssertEqual(plan.topSet?.status, "unsatisfied")
+        XCTAssertEqual(plan.topSet?.reasonCode, "no_usable_load")
+        XCTAssertEqual(plan.topSet?.statusLabel, "Required but unavailable")
+        XCTAssertFalse(plan.topSet?.isApplied ?? true)
     }
 
     func testAppModelForwardsWatchExecutionTarget() async {

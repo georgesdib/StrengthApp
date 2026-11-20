@@ -81,6 +81,10 @@ raw 100.x address.
 1. Open **Today** and review readiness and the prescription.
 2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
    is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
+   The main-lift structure offers **Server default**, **Prefer top set + back-off**,
+   **Require top set + back-off** or **Straight sets**. Preferred accepts a straight-set fallback
+   with a recorded reason; required marks an unexpected fallback as unsatisfied, but the plan stays
+   startable. The server owns eligibility and every load.
 3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
    load, RIR, any velocity target, rest and any warnings. **Start workout** is on that screen, so the plan is always
    visible before it is consumed. The server issues the plan; the phone never invents plan content.

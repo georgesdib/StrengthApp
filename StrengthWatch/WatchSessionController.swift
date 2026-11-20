@@ -175,6 +175,64 @@ final class WatchSessionController: NSObject, ObservableObject {
     }
 }
 
+extension WatchSessionController: WatchRelayTransport {
+    func send(_ request: WatchRelayRequest) async throws -> WatchRelayResponse {
+        guard let session, session.activationState == .activated else {
+            throw NSError(
+                domain: "StrengthWatch.Relay",
+                code: 0,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "WatchConnectivity is not active."
+                ]
+            )
+        }
+        guard session.isReachable else {
+            throw NSError(
+                domain: "StrengthWatch.Relay",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Open the iPhone app to relay this set. It will retry when the phone is reachable."
+                ]
+            )
+        }
+        guard let encoded = WatchRelayCoding.encodeRequest(request) else {
+            throw NSError(
+                domain: "StrengthWatch.Relay",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "The relay request could not be encoded."]
+            )
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            session.sendMessage(
+                ["kind": "relay", "request": encoded],
+                replyHandler: { reply in
+                    guard (reply["kind"] as? String) == "relay_reply",
+                          let value = reply["response"] as? String,
+                          let response = WatchRelayCoding.decodeResponse(value),
+                          response.requestId == request.requestId else {
+                        continuation.resume(
+                            throwing: NSError(
+                                domain: "StrengthWatch.Relay",
+                                code: 3,
+                                userInfo: [
+                                    NSLocalizedDescriptionKey:
+                                        "The iPhone returned an invalid relay response."
+                                ]
+                            )
+                        )
+                        return
+                    }
+                    continuation.resume(returning: response)
+                },
+                errorHandler: { error in
+                    continuation.resume(throwing: error)
+                }
+            )
+        }
+    }
+}
+
 extension WatchSessionController: WCSessionDelegate {
     nonisolated func session(
         _ session: WCSession,

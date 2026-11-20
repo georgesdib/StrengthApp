@@ -225,11 +225,13 @@ public final class WatchExecutionEngine {
     public init(
         client: IOSAPIClient,
         store: OfflineCaptureStore,
+        relay: (any WatchRelayTransport)? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.client = client
         self.store = store
         self.now = now
+        client.relay = relay
     }
 
     // MARK: - Derived state

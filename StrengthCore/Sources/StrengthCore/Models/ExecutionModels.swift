@@ -49,7 +49,7 @@ public struct ExecutionEvent: Codable, Equatable, Identifiable {
     }
 }
 
-public struct ExecutionEventsRequest: Encodable {
+public struct ExecutionEventsRequest: Codable {
     public let events: [ExecutionEvent]
 
     public init(events: [ExecutionEvent]) {
@@ -57,7 +57,7 @@ public struct ExecutionEventsRequest: Encodable {
     }
 }
 
-public struct ExecutionEventsResponse: Decodable {
+public struct ExecutionEventsResponse: Codable {
     public let workoutId: String
     public let accepted: [String]
     public let duplicates: [String]

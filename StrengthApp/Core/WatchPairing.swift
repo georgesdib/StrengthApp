@@ -796,6 +796,119 @@ final class WatchPairingCoordinator: ObservableObject {
         )
     }
 
+    /// Executes one watch operation with the watch token. The phone is a transport, not a
+    /// second author: it does not journal, retry or reinterpret the request.
+    private func relay(_ request: WatchRelayRequest) async -> WatchRelayResponse {
+        do {
+            let baseURL = try IOSAPIClient.validatedBaseURL(request.baseURL)
+            let watchSession = IOSSession(
+                baseURL: baseURL, token: request.token, deviceID: request.deviceID
+            )
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            func payload<T: Decodable>(_ type: T.Type) throws -> T {
+                guard let data = request.payload else {
+                    throw APIError.decoding
+                }
+                return try decoder.decode(T.self, from: data)
+            }
+            func encode<T: Encodable>(_ value: T) -> Data? {
+                try? encoder.encode(value)
+            }
+            switch request.operation {
+            case .bootstrap:
+                let value = try await client.bootstrap(session: watchSession)
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .start:
+                guard let issuedPlanId = request.issuedPlanId,
+                      let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "start relay is incomplete", fields: [:])
+                }
+                let value = try await client.startWorkout(
+                    issuedPlanId: issuedPlanId, session: watchSession, idempotencyKey: key
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .addSet:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "set relay is incomplete", fields: [:])
+                }
+                let value = try await client.addSet(
+                    workoutId: workoutId,
+                    body: try payload(AddSetRequest.self),
+                    session: watchSession,
+                    idempotencyKey: key,
+                    journaling: false
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .executionEvents:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "event relay is incomplete", fields: [:])
+                }
+                let value = try await client.submitExecutionEvents(
+                    workoutId: workoutId,
+                    events: try payload(ExecutionEventsRequest.self).events,
+                    session: watchSession,
+                    idempotencyKey: key
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .finish:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "finish relay is incomplete", fields: [:])
+                }
+                let value = try await client.completeWorkout(
+                    workoutId: workoutId,
+                    body: try payload(CompleteWorkoutRequest.self),
+                    session: watchSession,
+                    idempotencyKey: key,
+                    journaling: false
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .abandon:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "abandon relay is incomplete", fields: [:])
+                }
+                let value = try await client.abandonWorkout(
+                    workoutId: workoutId, session: watchSession, idempotencyKey: key
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .rateForm:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "form relay is incomplete", fields: [:])
+                }
+                let value = try await client.rateForm(
+                    workoutId: workoutId,
+                    body: try payload(FormRatingRequest.self),
+                    session: watchSession,
+                    idempotencyKey: key,
+                    journaling: false
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            }
+        } catch {
+            return WatchRelayResponse(
+                requestId: request.requestId,
+                ok: false,
+                errorMessage: error.localizedDescription
+            )
+        }
+    }
+
     private func validHomeBaseURL() -> URL? {
         guard let homeBaseURL, !homeBaseURL.isEmpty else { return nil }
         return try? IOSAPIClient.validatedBaseURL(homeBaseURL)
@@ -837,7 +950,20 @@ extension WatchPairingCoordinator: WatchConnectivitySessionDelegate {
         _ message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
-        guard (message["kind"] as? String) == "spike" else {
+        let kind = message["kind"] as? String
+        if kind == "relay",
+           let encoded = message["request"] as? String,
+           let request = WatchRelayCoding.decodeRequest(encoded) {
+            Task { @MainActor in
+                let response = await self.relay(request)
+                replyHandler([
+                    "kind": "relay_reply",
+                    "response": WatchRelayCoding.encodeResponse(response) ?? "",
+                ])
+            }
+            return
+        }
+        guard kind == "spike" else {
             replyHandler(["kind": "unsupported"])
             return
         }

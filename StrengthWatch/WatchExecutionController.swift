@@ -65,6 +65,7 @@ final class WatchExecutionController: ObservableObject {
         store: WatchCredentialStore = WatchCredentialStore(),
         anchor: WatchLivenessAnchor? = nil,
         recorder: WatchHealthKitRecorder? = nil,
+        relay: (any WatchRelayTransport)? = nil,
         onCredentialsMissing: @escaping @MainActor () -> Void
     ) {
         self.credentialStore = store
@@ -82,7 +83,8 @@ final class WatchExecutionController: ObservableObject {
         }
         self.engine = WatchExecutionEngine(
             client: IOSAPIClient(),
-            store: OfflineCaptureStore(fileURL: Self.recordFileURL)
+            store: OfflineCaptureStore(fileURL: Self.recordFileURL),
+            relay: relay
         )
         healthRecorder?.onHeartRate = { [weak self] bpm in
             self?.heartRateUpdated(bpm)

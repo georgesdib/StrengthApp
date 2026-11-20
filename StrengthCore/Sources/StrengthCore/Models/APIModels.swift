@@ -19,7 +19,7 @@ public struct PairResponse: Decodable {
 
 // MARK: - Bootstrap
 
-public struct BootstrapResponse: Decodable, Equatable {
+public struct BootstrapResponse: Codable, Equatable {
     public let apiVersion: String
     public let serverDate: String
     public let serverTime: String
@@ -28,7 +28,7 @@ public struct BootstrapResponse: Decodable, Equatable {
     public let capabilities: Capabilities
 }
 
-public struct Capabilities: Decodable, Equatable {
+public struct Capabilities: Codable, Equatable {
     public let readiness: Bool
     public let prescription: Bool
     public let workoutWrite: Bool

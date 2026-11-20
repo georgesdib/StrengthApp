@@ -25,6 +25,13 @@ public enum APIError: LocalizedError, Equatable {
     case forbidden
     case decoding
 
+    /// True only for a connection-level failure, which is the one case the phone relay may
+    /// safely retry; a server rejection must be surfaced unchanged.
+    public var isTransport: Bool {
+        if case .transport = self { return true }
+        return false
+    }
+
     public var errorDescription: String? {
         switch self {
         case .invalidBaseURL(let message):
@@ -241,6 +248,9 @@ public final class IOSAPIClient {
     private let encoder = JSONEncoder()
     private let journal: MutationJournal?
     private let maxGETRetries = 2
+    /// When set, a transport failure falls back to the paired phone. The direct server path is
+    /// always attempted first; a relay is never the only copy.
+    public var relay: (any WatchRelayTransport)?
 
     public init(
         transport: HTTPTransport,
@@ -262,6 +272,47 @@ public final class IOSAPIClient {
             journal: journal,
             longTransport: URLSessionTransport(timeout: 60)
         )
+    }
+
+    /// Relay one operation to the paired phone after the direct path failed at the transport.
+    /// The watch token and original idempotency key are preserved so the server sees the watch
+    /// as the execution device and a later direct retry cannot duplicate the write.
+    private func relayed<T: Decodable>(
+        _ operation: WatchRelayOperation,
+        session: IOSSession,
+        workoutId: String? = nil,
+        issuedPlanId: String? = nil,
+        idempotencyKey: String? = nil,
+        payload: Data? = nil
+    ) async throws -> T {
+        guard let relay else {
+            throw APIError.transport("The server is unreachable and no phone relay is available.")
+        }
+        let request = WatchRelayRequest(
+            operation: operation,
+            baseURL: session.baseURL.absoluteString,
+            token: session.token,
+            deviceID: session.deviceID,
+            workoutId: workoutId,
+            issuedPlanId: issuedPlanId,
+            idempotencyKey: idempotencyKey,
+            payload: payload
+        )
+        let response = try await relay.send(request)
+        guard response.ok, let data = response.payload else {
+            throw APIError.server(
+                status: 400,
+                code: "relay_failed",
+                message: response.errorMessage ?? "The phone could not relay the request.",
+                fields: [:],
+                details: [:]
+            )
+        }
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw APIError.decoding
+        }
     }
 
     // MARK: Input validation
@@ -376,7 +427,12 @@ public final class IOSAPIClient {
     }
 
     public func bootstrap(session: IOSSession) async throws -> BootstrapResponse {
-        try await get(path: "api/ios/v1/bootstrap", query: [], session: session)
+        do {
+            return try await get(path: "api/ios/v1/bootstrap", query: [], session: session)
+        } catch let error as APIError where error.isTransport {
+            guard relay != nil else { throw error }
+            return try await relayed(.bootstrap, session: session)
+        }
     }
 
 // MARK: - Cardio overview (C6b)
@@ -630,14 +686,26 @@ public final class IOSAPIClient {
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts",
-            body: StartWorkoutRequest(issuedPlanId: issuedPlanId),
-            kind: .startWorkout,
-            targetId: issuedPlanId,
-            session: session,
-            idempotencyKey: idempotencyKey
-        )
+        let body = StartWorkoutRequest(issuedPlanId: issuedPlanId)
+        do {
+            return try await post(
+                path: "api/ios/v1/workouts",
+                body: body,
+                kind: .startWorkout,
+                targetId: issuedPlanId,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+        } catch let error as APIError where error.isTransport {
+            guard relay != nil else { throw error }
+            return try await relayed(
+                .start,
+                session: session,
+                issuedPlanId: issuedPlanId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
     }
 
     public func addSet(
@@ -647,15 +715,26 @@ public final class IOSAPIClient {
         idempotencyKey: String,
         journaling: Bool = true
     ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/sets",
-            body: body,
-            kind: .addSet,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey,
-            journaling: journaling
-        )
+        do {
+            return try await post(
+                path: "api/ios/v1/workouts/\(workoutId)/sets",
+                body: body,
+                kind: .addSet,
+                targetId: workoutId,
+                session: session,
+                idempotencyKey: idempotencyKey,
+                journaling: journaling
+            )
+        } catch let error as APIError where error.isTransport {
+            guard relay != nil else { throw error }
+            return try await relayed(
+                .addSet,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
     }
 
     public func submitExecutionEvents(
@@ -664,15 +743,27 @@ public final class IOSAPIClient {
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> ExecutionEventsResponse {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/execution-events",
-            body: ExecutionEventsRequest(events: events),
-            kind: .executionEvents,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey,
-            journaling: false
-        )
+        let body = ExecutionEventsRequest(events: events)
+        do {
+            return try await post(
+                path: "api/ios/v1/workouts/\(workoutId)/execution-events",
+                body: body,
+                kind: .executionEvents,
+                targetId: workoutId,
+                session: session,
+                idempotencyKey: idempotencyKey,
+                journaling: false
+            )
+        } catch let error as APIError where error.isTransport {
+            guard relay != nil else { throw error }
+            return try await relayed(
+                .executionEvents,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
     }
 
     public func executionAnalytics(
@@ -765,15 +856,26 @@ public final class IOSAPIClient {
         idempotencyKey: String,
         journaling: Bool = true
     ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/form",
-            body: body,
-            kind: .rateForm,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey,
-            journaling: journaling
-        )
+        do {
+            return try await post(
+                path: "api/ios/v1/workouts/\(workoutId)/form",
+                body: body,
+                kind: .rateForm,
+                targetId: workoutId,
+                session: session,
+                idempotencyKey: idempotencyKey,
+                journaling: journaling
+            )
+        } catch let error as APIError where error.isTransport {
+            guard relay != nil else { throw error }
+            return try await relayed(
+                .rateForm,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
     }
 
     public func completeWorkout(
@@ -783,15 +885,26 @@ public final class IOSAPIClient {
         idempotencyKey: String,
         journaling: Bool = true
     ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/complete",
-            body: body,
-            kind: .completeWorkout,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey,
-            journaling: journaling
-        )
+        do {
+            return try await post(
+                path: "api/ios/v1/workouts/\(workoutId)/complete",
+                body: body,
+                kind: .completeWorkout,
+                targetId: workoutId,
+                session: session,
+                idempotencyKey: idempotencyKey,
+                journaling: journaling
+            )
+        } catch let error as APIError where error.isTransport {
+            guard relay != nil else { throw error }
+            return try await relayed(
+                .finish,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
     }
 
     /// Transfers ownership of an in-progress workout to the calling device (contract §9).
@@ -820,14 +933,24 @@ public final class IOSAPIClient {
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/abandon",
-            body: EmptyRequest(),
-            kind: .abandonWorkout,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey
-        )
+        do {
+            return try await post(
+                path: "api/ios/v1/workouts/\(workoutId)/abandon",
+                body: EmptyRequest(),
+                kind: .abandonWorkout,
+                targetId: workoutId,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+        } catch let error as APIError where error.isTransport {
+            guard relay != nil else { throw error }
+            return try await relayed(
+                .abandon,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey
+            )
+        }
     }
 
     public func progress(

@@ -95,6 +95,36 @@ public struct ProgrammeHeaderCompetition: Decodable, Equatable, Sendable {
     public let window: String?
 }
 
+/// The one AFC-4 review nudge for Today (DEC-AFC-05, DEC-RESOLVER-26).
+public struct NudgeEvidence: Decodable, Equatable, Sendable {
+    public let evidenceId: String?
+    public let source: String?
+    public let method: String?
+    public let gate: String?
+    public let n: Int?
+    public let limitations: [String]?
+}
+
+public struct Nudge: Decodable, Equatable, Identifiable, Sendable {
+    public let key: String
+    public let family: String
+    public let statement: String
+    public let gate: String?
+    public let n: Int?
+    public let evidenceId: String?
+    public let observationId: String?
+    public let category: String?
+    public let source: String?
+    public let evidence: NudgeEvidence?
+
+    public var id: String { key }
+}
+
+public struct NudgeResponse: Decodable {
+    public let onDate: String?
+    public let nudge: Nudge?
+}
+
 public struct TodayResponse: Decodable {
     public let date: String
     public let readiness: ReadinessPayload?

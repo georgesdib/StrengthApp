@@ -453,6 +453,40 @@ public final class IOSAPIClient {
         try await get(path: "api/ios/v1/today", query: [], session: session)
     }
 
+    /// The one AFC-4 review nudge for today, or nil when suppressed or absent.
+    public func nudge(session: IOSSession) async throws -> NudgeResponse {
+        try await get(path: "api/nudge", query: [], session: session)
+    }
+
+    /// Append a dismissal or a 14-day snooze. Not journalled: a nudge decision is a review
+    /// record, not a training mutation, and the server is the only owner of the suppression.
+    public func recordNudge(
+        key: String,
+        action: String,
+        evidenceId: String?,
+        date: String,
+        session: IOSSession
+    ) async throws -> NudgeResponse {
+        struct NudgeDecisionRequest: Encodable {
+            let action: String
+            let key: String
+            let evidenceId: String?
+            let date: String
+        }
+        let body = NudgeDecisionRequest(
+            action: action, key: key, evidenceId: evidenceId, date: date
+        )
+        let request = try makeRequest(
+            path: "api/nudge",
+            bodyData: try encoder.encode(body),
+            session: session,
+            idempotencyKey: UUID().uuidString.lowercased()
+        )
+        let (data, response) = try await performNoRetry(request)
+        try validate(response, data: data)
+        return try decode(NudgeResponse.self, from: data)
+    }
+
     public func history(session: IOSSession, limit: Int = 50, offset: Int = 0) async throws -> HistoryResponse {
         try await get(
             path: "api/ios/v1/history",

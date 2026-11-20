@@ -1105,6 +1105,78 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertTrue(removalText.contains("\"set_id\":42"))
     }
 
+    func testNudgeResponseDecodes() throws {
+        let json = """
+        {
+          "on_date": "2026-11-20",
+          "nudge": {
+            "key": "nudge:programme:deload",
+            "family": "programme",
+            "statement": "A scheduled deload is due (block week 3).",
+            "gate": "signal",
+            "n": 1,
+            "evidence_id": "programme:deload:3",
+            "observation_id": "ob:programme:abc",
+            "category": "review",
+            "source": "programme context",
+            "evidence": {
+              "evidence_id": "programme:deload:3",
+              "source": "programme_header",
+              "method": "strength_coach.features.programme.header",
+              "gate": "signal",
+              "n": 1,
+              "limitations": ["A policy suggestion, not a measured requirement."]
+            }
+          }
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let response = try decoder.decode(NudgeResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(response.nudge?.key, "nudge:programme:deload")
+        XCTAssertEqual(response.nudge?.family, "programme")
+        XCTAssertEqual(response.nudge?.evidenceId, "programme:deload:3")
+        XCTAssertEqual(response.nudge?.evidence?.limitations?.count, 1)
+    }
+
+    func testNudgeClientReadsAndRecordsTheDecision() async throws {
+        let session = IOSSession(
+            baseURL: URL(string: "http://127.0.0.1:8000")!,
+            token: "token-abc"
+        )
+        let responseJSON = """
+        {"nudge": {"key": "nudge:programme:deload", "family": "programme",
+         "statement": "A scheduled deload is due.", "gate": "signal", "n": 1,
+         "evidence_id": "programme:deload:3", "observation_id": "ob:programme:abc",
+         "category": "review", "source": "programme context",
+         "evidence": {"evidence_id": "programme:deload:3", "limitations": []}}}
+        """
+        let transport = StubTransport { request in
+            if request.httpMethod == "GET" {
+                return (200, Data(responseJSON.utf8))
+            }
+            return (200, Data(#"{"nudge": null}"#.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        let response = try await client.nudge(session: session)
+        XCTAssertEqual(response.nudge?.key, "nudge:programme:deload")
+
+        let after = try await client.recordNudge(
+            key: "nudge:programme:deload",
+            action: "dismiss",
+            evidenceId: "programme:deload:3",
+            date: "2026-11-20",
+            session: session
+        )
+        XCTAssertNil(after.nudge)
+        let post = try XCTUnwrap(transport.requests.last)
+        XCTAssertEqual(post.url?.path, "/api/nudge")
+        let body = String(data: try XCTUnwrap(post.httpBody), encoding: .utf8) ?? ""
+        XCTAssertTrue(body.contains(#""action":"dismiss""#))
+        XCTAssertTrue(body.contains(#""evidence_id":"programme:deload:3""#))
+        XCTAssertTrue(body.contains(#""date":"2026-11-20""#))
+    }
+
     func testTodayDecodesTheProgrammeHeader() throws {
         let json = """
         {

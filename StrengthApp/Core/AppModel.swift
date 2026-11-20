@@ -53,6 +53,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var bootstrap: BootstrapResponse?
     @Published private(set) var today: TodayResponse?
+    /// The one AFC-4 review nudge for today, or nil when suppressed/absent.
+    @Published private(set) var nudge: Nudge?
     @Published private(set) var sessions: [HistorySession] = []
     @Published private(set) var historyTotal = 0
     @Published private(set) var isPairing = false
@@ -1240,6 +1242,12 @@ final class AppModel: ObservableObject {
             let (newBootstrap, newToday) = try await (bootstrapTask, todayTask)
             bootstrap = newBootstrap
             today = newToday
+            // The nudge is a separate, non-blocking read: a slow observation pass must not
+            // delay the Today refresh, and a failure must not fail it.
+            Task { @MainActor [weak self] in
+                guard let self, self.session != nil else { return }
+                self.nudge = (try? await self.client.nudge(session: session))?.nudge
+            }
             // R7: the plan area is rendered from the authoritative read, never from a cached
             // Today payload (contract section 6). An active workout wins over a plan preview.
             let planStateResponse = try? await client.planState(session: session)
@@ -3389,6 +3397,31 @@ final class AppModel: ObservableObject {
 
     // MARK: Local credential management
 
+    /// Dismiss or snooze the current review nudge. The server owns the append-only decision.
+    func dismissNudge() async {
+        await decideNudge(action: "dismiss")
+    }
+
+    func snoozeNudge() async {
+        await decideNudge(action: "snooze")
+    }
+
+    private func decideNudge(action: String) async {
+        guard let session, let nudge, let day = today?.date else { return }
+        do {
+            self.nudge = try await client.recordNudge(
+                key: nudge.key,
+                action: action,
+                evidenceId: action == "dismiss" ? nudge.evidenceId : nil,
+                date: day,
+                session: session
+            ).nudge
+            mutationError = nil
+        } catch {
+            mutationError = message(for: error)
+        }
+    }
+
     func forgetDevice() {
         forgetLocally(message: nil)
     }
@@ -3405,6 +3438,7 @@ final class AppModel: ObservableObject {
         session = nil
         bootstrap = nil
         today = nil
+        nudge = nil
         sessions = []
         historyTotal = 0
         historyOffset = 0

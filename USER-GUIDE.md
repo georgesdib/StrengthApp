@@ -78,7 +78,10 @@ raw 100.x address.
 
 ## 4. Daily workout flow
 
-1. Open **Today** and review readiness and the prescription. The read-only **Programme** card
+1. Open **Today** and review readiness and the prescription. A **Review** card may show one
+   coaching nudge at a time (for example a scheduled deload or an active competition window);
+   **Snooze 14 days** or **Dismiss** records the decision on the server, and the card returns when
+   the underlying state changes. The read-only **Programme** card
    shows the trained week, the DUP cycle, the deload status with its calendar week, and the
    competition date/countdown. Trained week and deload week are different definitions: trained
    weeks count only weeks with a session, while the deload calendar counts every week since the

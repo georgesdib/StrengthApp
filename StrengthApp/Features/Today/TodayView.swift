@@ -29,6 +29,9 @@ struct TodayView: View {
                 if let header = model.today?.programmeHeader {
                     ProgrammeHeaderSection(header: header)
                 }
+                if let nudge = model.nudge {
+                    NudgeReviewSection(nudge: nudge, model: model)
+                }
                 if let error = model.errorMessage {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -1059,6 +1062,46 @@ private struct ProgrammeHeaderSection: View {
             parts.append(window)
         }
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    }
+}
+
+
+
+private struct NudgeReviewSection: View {
+    let nudge: Nudge
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Section {
+            Text(nudge.statement)
+                .font(.subheadline)
+            Text("Coaching nudge · " + nudge.family.replacingOccurrences(of: "_", with: " "))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let limitations = nudge.evidence?.limitations, !limitations.isEmpty {
+                DisclosureGroup("Why this nudge") {
+                    ForEach(Array(limitations.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            HStack {
+                Button("Snooze 14 days") {
+                    Task { await model.snoozeNudge() }
+                }
+                .accessibilityIdentifier("nudge-snooze")
+                Spacer()
+                Button("Dismiss", role: .destructive) {
+                    Task { await model.dismissNudge() }
+                }
+                .accessibilityIdentifier("nudge-dismiss")
+            }
+        } header: {
+            Text("Review")
+        }
+        .accessibilityIdentifier("today-nudge")
     }
 }
 

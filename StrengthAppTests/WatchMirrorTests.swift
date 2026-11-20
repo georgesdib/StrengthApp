@@ -388,6 +388,7 @@ private final class RecordingConnectivity: WatchConnectivitySession {
     var isSupported = true
     var isPaired = true
     var isWatchAppInstalled = true
+    var isReachable = true
     var activationState: WCSessionActivationState = .activated
     var receivedApplicationContext: [String: Any] = [:]
     private(set) var userInfos: [[String: Any]] = []
@@ -401,5 +402,16 @@ private final class RecordingConnectivity: WatchConnectivitySession {
 
     func transferUserInfo(_ userInfo: [String: Any]) {
         userInfos.append(userInfo)
+    }
+
+    func sendMessage(
+        _ message: [String: Any],
+        replyHandler: (([String: Any]) -> Void)?,
+        errorHandler: ((Error) -> Void)?
+    ) {
+        replyHandler?([
+            "kind": "spike_reply",
+            "request_id": message["request_id"] as? String ?? "",
+        ])
     }
 }

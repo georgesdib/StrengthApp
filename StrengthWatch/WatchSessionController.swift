@@ -14,6 +14,7 @@ final class WatchSessionController: NSObject, ObservableObject {
 
     @Published private(set) var state: State = .waiting
     @Published private(set) var lastError: String?
+    @Published private(set) var spikeStatus: String?
 
     /// The app decides when a configuration change may be applied (contract §7.8: not while a
     /// session is active or work is queued).
@@ -61,6 +62,36 @@ final class WatchSessionController: NSObject, ObservableObject {
         guard let context = deferredContext, canApplyConfig() else { return }
         process(context)
         sendAcknowledgement()
+    }
+
+    /// WP8 spike: a reachable-phone round trip carrying a request id.
+    func testConnectivity() {
+        spikeStatus = nil
+        guard let session, session.activationState == .activated else {
+            spikeStatus = "WatchConnectivity is not active."
+            return
+        }
+        guard session.isReachable else {
+            spikeStatus = "Open the iPhone app to make it reachable."
+            return
+        }
+        let requestID = UUID().uuidString.lowercased()
+        let started = Date()
+        session.sendMessage(
+            ["kind": "spike", "request_id": requestID],
+            replyHandler: { [weak self] reply in
+                Task { @MainActor in
+                    let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+                    let echoed = reply["request_id"] as? String
+                    self?.spikeStatus = echoed == requestID
+                        ? "iPhone replied in \(elapsed) ms."
+                        : "iPhone replied with the wrong request id."
+                }
+            },
+            errorHandler: { [weak self] error in
+                Task { @MainActor in self?.spikeStatus = error.localizedDescription }
+            }
+        )
     }
 
     /// Called by the 6.3 API layer after a 401/403. The token is wiped immediately; the next
@@ -181,6 +212,22 @@ extension WatchSessionController: WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         Task { @MainActor in
             self.sendAcknowledgement()
+        }
+    }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        let kind = message["kind"] as? String
+        if kind == "spike" {
+            replyHandler([
+                "kind": "spike_reply",
+                "request_id": message["request_id"] as? String ?? "",
+            ])
+        } else {
+            replyHandler(["kind": "unsupported"])
         }
     }
 }

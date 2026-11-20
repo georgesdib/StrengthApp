@@ -12,7 +12,7 @@ struct WatchRootView: View {
     var body: some View {
         Group {
             if execution.phase == .ready {
-                WatchTodayView(today: today, execution: execution)
+                WatchTodayView(today: today, execution: execution, session: session)
             } else {
                 WatchExecutionView(execution: execution)
             }

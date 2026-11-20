@@ -28,6 +28,17 @@ struct WatchSettingsSection: View {
                     .foregroundStyle(.red)
                     .accessibilityIdentifier("watch-error")
             }
+            Button("Test watch connection") {
+                watch.testConnectivity()
+            }
+            .disabled(!watch.isWatchPaired || watch.link?.revoked == true)
+            .accessibilityIdentifier("watch-test-connection-phone")
+            if let spike = watch.connectivitySpikeStatus {
+                Text(spike)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("watch-spike-status")
+            }
             Button {
                 Task { await watch.pair() }
             } label: {

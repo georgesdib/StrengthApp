@@ -7,6 +7,10 @@ import WatchConnectivity
 protocol WatchConnectivitySessionDelegate: AnyObject {
     func watchConnectivityDidChange()
     func watchConnectivityDidReceive(_ context: [String: Any])
+    func watchConnectivityDidReceiveMessage(
+        _ message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    )
 }
 
 @MainActor
@@ -17,7 +21,13 @@ protocol WatchConnectivitySession: AnyObject {
     var isWatchAppInstalled: Bool { get }
     var activationState: WCSessionActivationState { get }
     var receivedApplicationContext: [String: Any] { get }
+    var isReachable: Bool { get }
     func activate()
+    func sendMessage(
+        _ message: [String: Any],
+        replyHandler: (([String: Any]) -> Void)?,
+        errorHandler: ((Error) -> Void)?
+    )
     func updateApplicationContext(_ context: [String: Any]) throws
     /// Queued delivery for content that must not be dropped when the watch is unreachable.
     /// Used for execution payloads; the credential handshake keeps the single-slot
@@ -42,6 +52,19 @@ final class LiveWatchConnectivitySession: NSObject, WatchConnectivitySession, WC
     var isWatchAppInstalled: Bool { session?.isWatchAppInstalled ?? false }
     var activationState: WCSessionActivationState { session?.activationState ?? .notActivated }
     var receivedApplicationContext: [String: Any] { session?.receivedApplicationContext ?? [:] }
+    var isReachable: Bool { session?.isReachable ?? false }
+
+    func sendMessage(
+        _ message: [String: Any],
+        replyHandler: (([String: Any]) -> Void)?,
+        errorHandler: ((Error) -> Void)?
+    ) {
+        guard let session, session.activationState == .activated else {
+            errorHandler?(WatchConnectivityError.unavailable)
+            return
+        }
+        session.sendMessage(message, replyHandler: replyHandler, errorHandler: errorHandler)
+    }
 
     func activate() {
         guard let session else { return }
@@ -91,6 +114,18 @@ final class LiveWatchConnectivitySession: NSObject, WatchConnectivitySession, WC
     ) {
         Task { @MainActor in self.delegate?.watchConnectivityDidReceive(applicationContext) }
     }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        Task { @MainActor in
+            self.delegate?.watchConnectivityDidReceiveMessage(
+                message, replyHandler: replyHandler
+            )
+        }
+    }
 }
 
 enum WatchConnectivityError: LocalizedError {
@@ -119,6 +154,7 @@ final class WatchPairingCoordinator: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var isWatchPaired = false
     @Published private(set) var isWatchAppInstalled = false
+    @Published private(set) var connectivitySpikeStatus: String?
 
     private let client: IOSAPIClient
     private let store: PairedStore
@@ -155,6 +191,42 @@ final class WatchPairingCoordinator: ObservableObject {
     var canRevoke: Bool {
         guard let link, !link.revoked, !isRevoking else { return false }
         return true
+    }
+
+    /// Runs the WP8 WatchConnectivity spike: a reachable-watch round trip carrying an id.
+    func testConnectivity() {
+        connectivitySpikeStatus = nil
+        guard isActive, let link, !link.revoked, let connectivity else {
+            connectivitySpikeStatus = "Pair the watch and open both apps first."
+            return
+        }
+        guard connectivity.activationState == .activated else {
+            connectivitySpikeStatus = "WatchConnectivity is not active yet."
+            return
+        }
+        guard connectivity.isReachable else {
+            connectivitySpikeStatus = "Watch is not reachable. Open the watch app."
+            return
+        }
+        let requestID = UUID().uuidString.lowercased()
+        let started = Date()
+        connectivity.sendMessage(
+            ["kind": "spike", "request_id": requestID],
+            replyHandler: { [weak self] reply in
+                Task { @MainActor in
+                    let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+                    let echoed = reply["request_id"] as? String
+                    self?.connectivitySpikeStatus = echoed == requestID
+                        ? "Watch replied in \(elapsed) ms."
+                        : "Watch replied with the wrong request id."
+                }
+            },
+            errorHandler: { [weak self] error in
+                Task { @MainActor in
+                    self?.connectivitySpikeStatus = error.localizedDescription
+                }
+            }
+        )
     }
 
     var statusText: String {
@@ -761,6 +833,20 @@ final class WatchPairingCoordinator: ObservableObject {
 }
 
 extension WatchPairingCoordinator: WatchConnectivitySessionDelegate {
+    func watchConnectivityDidReceiveMessage(
+        _ message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        guard (message["kind"] as? String) == "spike" else {
+            replyHandler(["kind": "unsupported"])
+            return
+        }
+        replyHandler([
+            "kind": "spike_reply",
+            "request_id": message["request_id"] as? String ?? "",
+        ])
+    }
+
     func watchConnectivityDidChange() {
         refreshAvailability()
         updatePhase()

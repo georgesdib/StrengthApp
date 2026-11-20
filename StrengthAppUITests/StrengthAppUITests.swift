@@ -104,7 +104,12 @@ final class StrengthAppUITests: XCTestCase {
         let pairButton = app.buttons["pair-button"]
         XCTAssertTrue(pairButton.waitForExistence(timeout: 5))
         pairButton.tap()
-        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 20))
+        // Pairing restores the tab that was selected before the device was forgotten, so
+        // select Today explicitly instead of assuming it is the restored tab.
+        let todayTab = app.tabBars.buttons["Today"]
+        XCTAssertTrue(todayTab.waitForExistence(timeout: 20))
+        todayTab.tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 10))
 
         let readiness = app.buttons["log-readiness"]
         XCTAssertTrue(readiness.waitForExistence(timeout: 10))
@@ -145,6 +150,7 @@ final class StrengthAppUITests: XCTestCase {
         review.tap()
         XCTAssertTrue(app.navigationBars["Review workout"].waitForExistence(timeout: 10))
         let readyStart = app.buttons["preview-start"]
+        scrollTo(readyStart, in: app)
         XCTAssertTrue(readyStart.waitForExistence(timeout: 10))
         readyStart.tap()
         XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 25))
@@ -171,8 +177,9 @@ final class StrengthAppUITests: XCTestCase {
         XCTAssertTrue(latLabel.waitForExistence(timeout: 10))
         attachScreenshot(app, name: "11b-extra-work-added")
 
-        // Exercise-centric logging: open the first planned exercise and complete planned set 1.
-        let openExercise = app.descendants(matching: .any)["open-exercise-0"]
+        // Exercise-centric logging: open the first external-load lift and complete planned set 1.
+        // The first plan item can be bodyweight work, which correctly offers no velocity field.
+        let openExercise = app.descendants(matching: .any)["open-exercise-1"]
         for _ in 0..<8 {
             if openExercise.exists && openExercise.isHittable { break }
             app.swipeDown()

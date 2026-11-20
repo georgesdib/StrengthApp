@@ -703,87 +703,24 @@ public final class IOSAPIClient {
         )
     }
 
-    public func swapPlanExercise(
+    /// Appends one phone-authored execution substitution or addition (DEC-RESOLVER-23).
+    /// Journaling is the offline author: the queued body sets prefillRequested false, so the
+    /// server stores no prefill and never retro-solves.
+    public func recordExecutionChange(
         workoutId: String,
-        itemIndex: Int,
-        body: PlanSwapRequest,
+        body: ExecutionChangeRequest,
         session: IOSSession,
-        idempotencyKey: String
-    ) async throws -> WorkoutDetail {
+        idempotencyKey: String,
+        journaling: Bool = true
+    ) async throws -> ExecutionChangeResponse {
         try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/plan/items/\(itemIndex)/swap",
+            path: "api/ios/v1/workouts/\(workoutId)/execution",
             body: body,
-            kind: .planEdit,
+            kind: .executionChange,
             targetId: workoutId,
             session: session,
-            idempotencyKey: idempotencyKey
-        )
-    }
-
-    public func removePlanExercise(
-        workoutId: String,
-        itemIndex: Int,
-        body: PlanRemoveRequest,
-        session: IOSSession,
-        idempotencyKey: String
-    ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/plan/items/\(itemIndex)/remove",
-            body: body,
-            kind: .planEdit,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey
-        )
-    }
-
-    public func changePlanSets(
-        workoutId: String,
-        itemIndex: Int,
-        body: PlanSetsRequest,
-        session: IOSSession,
-        idempotencyKey: String
-    ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/plan/items/\(itemIndex)/sets",
-            body: body,
-            kind: .planEdit,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey
-        )
-    }
-
-    public func movePlanExercise(
-        workoutId: String,
-        itemIndex: Int,
-        body: PlanMoveRequest,
-        session: IOSSession,
-        idempotencyKey: String
-    ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/plan/items/\(itemIndex)/move",
-            body: body,
-            kind: .planEdit,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey
-        )
-    }
-
-    public func addPlanExercise(
-        workoutId: String,
-        body: PlanAddRequest,
-        session: IOSSession,
-        idempotencyKey: String
-    ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/plan/exercises",
-            body: body,
-            kind: .planEdit,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            journaling: journaling
         )
     }
 

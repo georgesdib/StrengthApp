@@ -90,7 +90,7 @@ struct WatchExerciseView: View {
                     }
                     .accessibilityIdentifier("watch-back-to-list")
                 }
-                Text(exerciseName(item))
+                Text(execution.selectedExerciseName)
                     .font(.headline)
                 Spacer()
                 Button {
@@ -106,7 +106,7 @@ struct WatchExerciseView: View {
                 }
                 .accessibilityIdentifier("watch-session")
             }
-            Text("Set \(setNumber(item)) of \(item.sets ?? 0)")
+            Text("Set \(setNumber(item)) of \(execution.selectedPlannedSets)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
@@ -125,11 +125,17 @@ struct WatchExerciseView: View {
             }
             .font(.caption)
             .monospacedDigit()
-            Text("\(item.loadLabel) × \(item.repsLabel)")
+            Text("\(execution.selectedLoadLabel) × \(execution.selectedRepsLabel)")
                 .font(.title3)
-            Text(item.effortLabel)
+            Text(execution.selectedEffortLabel)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            if let note = execution.selectedSubstitutionNote {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.blue)
+                    .accessibilityIdentifier("watch-substitution-note")
+            }
             if let target = item.velocityTargetLabel {
                 Text("target \(target)")
                     .font(.caption2)

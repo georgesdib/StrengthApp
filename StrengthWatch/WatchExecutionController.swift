@@ -279,9 +279,11 @@ final class WatchExecutionController: ObservableObject {
     ) async {
         guard let session = currentSession(), let item = engine.selectedItem else { return }
         let itemIndex = item.orderIndex ?? 0
+        let row = executionRow(for: item)
         let entry = WatchExecutionEngine.SetEntry(
-            exerciseId: item.exerciseId ?? "",
+            exerciseId: row?.exerciseId ?? item.exerciseId ?? "",
             planItemIndex: itemIndex,
+            substitutesPlanItemIndex: row?.substitutesPlanItemIndex,
             setIndex: engine.nextSetIndex(planItemIndex: itemIndex, rir: rir),
             loadKg: loadKg,
             reps: reps,
@@ -324,6 +326,59 @@ final class WatchExecutionController: ObservableObject {
 
     var planItems: [PrescriptionItem] {
         engine.planItems
+    }
+
+    /// Plan rows with the phone-authored execution view applied (DEC-RESOLVER-23).
+    var executionRows: [ExecutionRow] {
+        engine.executionRows
+    }
+
+    func executionRow(for item: PrescriptionItem) -> ExecutionRow? {
+        let identity = item.orderIndex ?? 0
+        return executionRows.first { $0.kind != .added && $0.planItemIndex == identity }
+    }
+
+    var selectedExecutionRow: ExecutionRow? {
+        guard let item = engine.selectedItem else { return nil }
+        return executionRow(for: item)
+    }
+
+    /// The next planned group for the selected exercise, by completed sets.
+    var selectedGroup: SetGroup? {
+        guard let item = engine.selectedItem, let row = selectedExecutionRow else { return nil }
+        return row.group(forLoggedCount: engine.setsDone(planItemIndex: item.orderIndex ?? 0))
+    }
+
+    var selectedExerciseName: String {
+        let id = selectedExecutionRow?.exerciseId ?? engine.selectedItem?.exerciseId ?? ""
+        return Self.displayName(forExercise: id)
+    }
+
+    var selectedSubstitutionNote: String? {
+        guard let row = selectedExecutionRow, row.kind == .substituted else { return nil }
+        guard let planned = row.plannedExerciseId, !planned.isEmpty else {
+            return "Changed on phone"
+        }
+        return "Changed on phone from " + Self.displayName(forExercise: planned)
+    }
+
+    var selectedLoadLabel: String {
+        if let group = selectedGroup { return group.loadLabel }
+        return engine.selectedItem?.loadLabel ?? "—"
+    }
+
+    var selectedRepsLabel: String {
+        if let group = selectedGroup { return group.repsLabel }
+        return engine.selectedItem?.repsLabel ?? "—"
+    }
+
+    var selectedEffortLabel: String {
+        if let group = selectedGroup, let rir = group.rirTarget { return "RIR " + String(rir) }
+        return engine.selectedItem?.effortLabel ?? "—"
+    }
+
+    var selectedPlannedSets: Int {
+        selectedExecutionRow?.sets ?? engine.selectedItem?.sets ?? 0
     }
 
     /// Read-only rows for the active-session Plan screen.
@@ -650,7 +705,10 @@ final class WatchExecutionController: ObservableObject {
     }
 
     nonisolated private static func displayName(_ item: PrescriptionItem) -> String {
-        let id = item.exerciseId ?? ""
+        displayName(forExercise: item.exerciseId ?? "")
+    }
+
+    nonisolated static func displayName(forExercise id: String) -> String {
         guard !id.isEmpty else { return "Exercise" }
         return id
             .split(separator: "_")

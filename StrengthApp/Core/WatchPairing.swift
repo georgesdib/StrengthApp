@@ -209,14 +209,17 @@ final class WatchPairingCoordinator: ObservableObject {
     /// anything not newer than its snapshot (contract §10.2, §10.5). Best effort: the watch also
     /// refreshes on foreground and after each set, so a lost nudge is recoverable.
     @discardableResult
-    func pushExecution(_ workout: WorkoutDetail) -> Bool {
+    func pushExecution(_ workout: WorkoutDetail, execution: ExecutionView? = nil) -> Bool {
         guard isActive,
               link?.revoked != true,
               let connectivity,
               connectivity.activationState == .activated,
               connectivity.isWatchAppInstalled,
-              let revision = workout.planRevision,
-              let payload = RemoteExecutionPayload(workout: workout, revision: revision),
+              let payload = RemoteExecutionPayload(
+                workout: workout,
+                revision: workout.planRevision ?? 0,
+                execution: execution
+              ),
               let json = payload.encodedString() else {
             return false
         }

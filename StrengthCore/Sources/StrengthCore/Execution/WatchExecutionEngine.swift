@@ -120,6 +120,9 @@ public final class WatchExecutionEngine {
     public struct SetEntry: Equatable, Sendable {
         public var exerciseId: String
         public var planItemIndex: Int?
+        /// Set only when the phone substituted this plan slot: the performed exercise is the
+        /// substitute and the slot is the annotation (DEC-RESOLVER-23).
+        public var substitutesPlanItemIndex: Int?
         public var setIndex: Int
         public var loadKg: Double?
         public var reps: Int
@@ -135,6 +138,7 @@ public final class WatchExecutionEngine {
         public init(
             exerciseId: String,
             planItemIndex: Int?,
+            substitutesPlanItemIndex: Int? = nil,
             setIndex: Int,
             loadKg: Double?,
             reps: Int,
@@ -145,6 +149,7 @@ public final class WatchExecutionEngine {
         ) {
             self.exerciseId = exerciseId
             self.planItemIndex = planItemIndex
+            self.substitutesPlanItemIndex = substitutesPlanItemIndex
             self.setIndex = setIndex
             self.loadKg = loadKg
             self.reps = reps
@@ -180,6 +185,20 @@ public final class WatchExecutionEngine {
     public private(set) var healthKitFailure: String?
     /// The server considers this session idle (contract §16 idle warning); display only.
     public private(set) var isStale = false
+
+    /// The latest server-confirmed execution view (substitutions and additions).
+    public var executionView: ExecutionView? { sessionRecord?.execution }
+
+    /// The plan rows to render and log against, with substitutions applied and additions after
+    /// their anchor. Order is the plan order (DEC-RESOLVER-23).
+    public var executionRows: [ExecutionRow] {
+        (executionView ?? .empty).rows(plan: workout?.plan)
+    }
+
+    /// The next planned group for a row, by cumulative logged sets. Nil for straight sets.
+    public func group(for row: ExecutionRow, logged: Int) -> SetGroup? {
+        row.group(forLoggedCount: logged)
+    }
 
     /// Descriptive tonnage of acknowledged plus queued sets. Not a training decision.
     public var tonnageKg: Double {
@@ -453,6 +472,7 @@ public final class WatchExecutionEngine {
     @discardableResult
     public func applyRemote(_ payload: RemoteExecutionPayload, deviceID: String?) -> Bool {
         guard let workout, payload.workoutId == workout.workoutId else { return false }
+        let executionApplied = applyExecutionIfNeeded(payload.execution)
         let phoneOwns = payload.ownerDeviceId.flatMap { owner in
             guard !owner.isEmpty, let deviceID, !deviceID.isEmpty else { return false }
             return owner != deviceID
@@ -470,7 +490,9 @@ public final class WatchExecutionEngine {
             phase = .readOnly
             return true
         }
-        guard payload.planRevision > (sessionRecord?.planRevision ?? 0) else { return false }
+        guard payload.planRevision > (sessionRecord?.planRevision ?? 0) else {
+            return executionApplied
+        }
         guard activeSet == nil else {
             deferredPlan = (payload.planRevision, payload.plan)
             planUpdated = true
@@ -528,6 +550,7 @@ public final class WatchExecutionEngine {
             phase = .ended(WatchEndedReason(status: envelope.status))
             return .nothingToSend
         }
+        _ = applyExecutionIfNeeded(envelope.execution)
         // Missing ownership is never permission to write (fail closed).
         guard let owner = envelope.ownerDeviceId, !owner.isEmpty else {
             phase = .readOnly
@@ -554,6 +577,26 @@ public final class WatchExecutionEngine {
         applyRevisionIfNeeded(envelope)
         markOnline(session)
         return .allSent
+    }
+
+    /// Merges an execution view only when it is at least as new as the stored one. The view is a
+    /// hint, never the record; a delayed replay cannot move it backwards.
+    @discardableResult
+    private func applyExecutionIfNeeded(_ view: ExecutionView?) -> Bool {
+        guard let view, let record = sessionRecord else { return false }
+        guard view.watermark >= (record.execution?.watermark ?? 0) else { return false }
+        guard view != record.execution else { return false }
+        do {
+            try mutate { capture in
+                guard var current = capture.session else { return }
+                current.execution = view
+                capture.session = current
+            }
+            return true
+        } catch {
+            lastError = message(for: error)
+            return false
+        }
     }
 
     private func applyRevisionIfNeeded(_ envelope: ExecutionAnalyticsResponse) {
@@ -892,6 +935,7 @@ public final class WatchExecutionEngine {
             velocityMps: entry.velocityMps,
             setIndex: entry.setIndex,
             planItemIndex: entry.planItemIndex,
+            substitutesPlanItemIndex: entry.substitutesPlanItemIndex,
             repVelocities: entry.repVelocities,
             performedAt: ServerClock.encodedISO(performed)
         )
@@ -1446,6 +1490,7 @@ public final class WatchExecutionEngine {
                 velocityMps: body.velocityMps,
                 setIndex: body.setIndex,
                 planItemIndex: nil,
+                substitutesPlanItemIndex: body.substitutesPlanItemIndex,
                 repVelocities: body.repVelocities,
                 performedAt: body.performedAt
             ))

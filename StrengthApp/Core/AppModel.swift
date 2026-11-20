@@ -75,6 +75,20 @@ final class AppModel: ObservableObject {
     /// Exercises the lifter started and has not ended. Supersets keep more than one open, and a
     /// set — not a screen — is what starts one.
     @Published private(set) var activeExercises: [ActiveExercise] = []
+
+    /// The current execution substitutions and additions for the active workout. The plan is
+    /// frozen at start, so this is the only mid-session change (DEC-RESOLVER-23).
+    @Published private(set) var executionView: ExecutionView?
+
+    /// Plan rows with the execution view applied; extra work follows its anchor item.
+    var executionRows: [ExecutionRow] {
+        (executionView ?? .empty).rows(plan: activeWorkout?.plan)
+    }
+
+    /// The execution row for one frozen plan slot, if the plan has it.
+    func executionRow(forPlanIndex index: Int) -> ExecutionRow? {
+        executionRows.first { $0.kind != .added && $0.planItemIndex == index }
+    }
     @Published var narrativeEnabled: Bool = UserDefaults.standard.bool(
         forKey: "intelligence.narrative.enabled"
     ) {
@@ -2402,136 +2416,64 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func swapPlanExercise(
+    /// Appends a phone-authored substitution or addition and refreshes the execution view.
+    /// An offline author queues the body with prefillRequested false and is never retro-solved
+    /// (DEC-RESOLVER-23).
+    func recordExecutionChange(
         workoutId: String,
-        itemIndex: Int,
+        planItemIndex: Int? = nil,
+        afterItemIndex: Int? = nil,
         exerciseId: String,
-        expectedExerciseId: String,
+        repsLow: Int? = nil,
+        repsHigh: Int? = nil,
+        rirTarget: Int? = nil,
         idempotencyKey: String
     ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.swapPlanExercise(
-                workoutId: workoutId,
-                itemIndex: itemIndex,
-                body: PlanSwapRequest(
-                    exerciseId: exerciseId,
-                    expectedExerciseId: expectedExerciseId
-                ),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    func removePlanExercise(
-        workoutId: String,
-        itemIndex: Int,
-        expectedExerciseId: String,
-        idempotencyKey: String
-    ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.removePlanExercise(
-                workoutId: workoutId,
-                itemIndex: itemIndex,
-                body: PlanRemoveRequest(expectedExerciseId: expectedExerciseId),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    func changePlanSets(
-        workoutId: String,
-        itemIndex: Int,
-        delta: Int,
-        expectedExerciseId: String,
-        idempotencyKey: String
-    ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.changePlanSets(
-                workoutId: workoutId,
-                itemIndex: itemIndex,
-                body: PlanSetsRequest(
-                    delta: delta,
-                    expectedExerciseId: expectedExerciseId
-                ),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    func movePlanExercise(
-        workoutId: String,
-        itemIndex: Int,
-        toIndex: Int,
-        expectedExerciseId: String,
-        idempotencyKey: String
-    ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.movePlanExercise(
-                workoutId: workoutId,
-                itemIndex: itemIndex,
-                body: PlanMoveRequest(
-                    toIndex: toIndex,
-                    expectedExerciseId: expectedExerciseId
-                ),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    func addPlanExercise(
-        workoutId: String,
-        exerciseId: String,
-        idempotencyKey: String
-    ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.addPlanExercise(
-                workoutId: workoutId,
-                body: PlanAddRequest(exerciseId: exerciseId),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    private func performPlanEdit(
-        idempotencyKey: String,
-        _ operation: () async throws -> WorkoutDetail
-    ) async -> Bool {
-        guard !isSaving, session != nil, activeWorkout != nil else { return false }
-        guard !offlineCaptureActive else {
-            mutationError = "Plan editing requires the server."
+        guard !isSaving, let session, activeWorkout != nil else { return false }
+        guard permitsMutation(kind: .executionChange, operationId: idempotencyKey) else {
             return false
         }
-        guard permitsMutation(kind: .planEdit, operationId: idempotencyKey) else {
-            return false
-        }
+        let body = ExecutionChangeRequest(
+            eventId: idempotencyKey,
+            change: planItemIndex == nil ? "addition" : "substitution",
+            planItemIndex: planItemIndex,
+            afterItemIndex: afterItemIndex,
+            exerciseId: exerciseId,
+            repsLow: repsLow,
+            repsHigh: repsHigh,
+            rirTarget: rirTarget,
+            prefillRequested: !isOffline
+        )
         _ = apply(.operationBegan)
         defer { _ = apply(.operationEnded) }
         do {
-            let updated = try await operation()
-            _ = apply(.operationSucceeded(updated))
-            workoutRefreshGrace = true
-            persistActiveWorkout()
+            let response = try await client.recordExecutionChange(
+                workoutId: workoutId,
+                body: body,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            executionView = response.execution
+            mutationError = nil
             pushExecutionToWatch()
             return true
         } catch {
-            if let api = error as? APIError,
-               ["workout_not_active", "plan_consumed", "plan_changed",
-                "sets_already_logged", "sets_below_logged", "last_plan_item",
-                "exercise_already_present"].contains(api.code ?? "") {
-                await refresh()
-            }
             handleMutation(error)
             return false
+        }
+    }
+
+    /// Reads the current execution view so a reopened workout shows the changes.
+    func refreshExecutionView(workoutId: String) async {
+        guard let session, activeWorkout?.workoutId == workoutId else { return }
+        do {
+            let envelope = try await client.executionAnalytics(
+                workoutId: workoutId,
+                session: session
+            )
+            executionView = envelope.execution ?? executionView
+        } catch {
+            // A read failure is not a session failure; the next foreground refresh retries.
         }
     }
 
@@ -2808,9 +2750,14 @@ final class AppModel: ObservableObject {
                     let ack: PlanAckEnvelope = try await client.replay(entry, session: session)
                     _ = ack
                     await reconcilePlanState()
-                case .startWorkout, .addSet, .removeSet, .rateForm, .planEdit, .takeover:
+                case .startWorkout, .addSet, .removeSet, .rateForm, .takeover:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = true
+                case .executionChange:
+                    let response: ExecutionChangeResponse = try await client.replay(
+                        entry, session: session
+                    )
+                    executionView = response.execution
                 case .completeWorkout, .abandonWorkout:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = false
@@ -3380,10 +3327,10 @@ final class AppModel: ObservableObject {
     /// design: the watch also refreshes on foreground and after each set (contract §10.2), so a
     /// dropped payload costs one stale view, never a lost edit.
     private func pushExecutionToWatch() {
-        // Push after any plan edit, whether the watch owns capture or is read-only; the watch
-        // mirrors the plan in both states and its read-only path now applies revisions.
+        // Push after an execution change, whether the watch owns capture or is read-only; the
+        // watch mirrors the plan in both states and merges the execution view by watermark.
         guard let workout = activeWorkout else { return }
-        watchPairing.pushExecution(workout)
+        watchPairing.pushExecution(workout, execution: executionView)
     }
 
     /// Takes logging back from the watch. The watch turns read-only on its next refresh.
@@ -3406,7 +3353,7 @@ final class AppModel: ObservableObject {
             persistActiveWorkout()
             // Tell an open watch immediately; otherwise it keeps writing until its next
             // foreground/refresh, even though the server now assigns ownership to the phone.
-            watchPairing.pushExecution(updated)
+            watchPairing.pushExecution(updated, execution: executionView)
             mutationError = nil
             return true
         } catch {
@@ -3420,7 +3367,7 @@ final class AppModel: ObservableObject {
         // The server allows abandonment from any device (contract §9), and the watch turns
         // read-only on the next refresh. Everything else that writes to a watch-owned session
         // needs the take-over first.
-        if isMirroringWatchSession, kind != .planEdit, kind != .abandonWorkout {
+        if isMirroringWatchSession, kind != .executionChange, kind != .abandonWorkout {
             mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
             return false
         }

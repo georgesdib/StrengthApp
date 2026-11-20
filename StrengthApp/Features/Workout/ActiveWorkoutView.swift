@@ -32,9 +32,9 @@ struct ActiveWorkoutView: View {
     @State private var abandonKey = UUID().uuidString.lowercased()
     @State private var confirmingAbandon = false
     @State private var abandonError: String?
-    @State private var planPicker: PlanPickerMode?
-    @State private var pendingRemoval: PlanRemoval?
-    @State private var planEditError: String?
+    @State private var substituteTarget: ExecutionTarget?
+    @State private var additionTarget: ExecutionTarget?
+    @State private var executionError: String?
     @State private var confirmingTakeOver = false
     @State private var takeOverError: String?
     @StateObject private var drafts = WorkoutDraftStore()
@@ -147,144 +147,103 @@ struct ActiveWorkoutView: View {
                             ForEach(Array(planItems.enumerated()), id: \.offset) { index, item in
                                 let exercise = item.exerciseId ?? ""
                                 let identity = item.orderIndex ?? index
-                                let setState = planSetState(identity: identity, exerciseId: exercise)
+                                let row = model.executionRow(forPlanIndex: identity)
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack {
-                                        Text(Self.label(exercise.isEmpty ? "exercise" : exercise))
+                                        Text(Self.label(row?.exerciseId ?? (exercise.isEmpty ? "exercise" : exercise)))
                                             .font(.headline)
                                         Spacer()
-                                        if let sets = item.sets {
-                                            Text("\(sets) sets")
+                                        if let sets = row?.sets ?? item.sets {
+                                            Text(String(sets) + " sets")
                                                 .font(.subheadline)
                                                 .foregroundStyle(.secondary)
                                         }
                                         Menu {
-                                            Button("Swap exercise") {
-                                                planPicker = .swap(index: index)
+                                            Button("Substitute exercise…") {
+                                                substituteTarget = ExecutionTarget(id: identity)
                                             }
-                                            .disabled(setState.logged > 0 || exercise.isEmpty)
-                                            Button("Remove exercise", role: .destructive) {
-                                                pendingRemoval = PlanRemoval(
-                                                    index: index,
-                                                    exerciseId: exercise,
-                                                    label: Self.label(exercise)
-                                                )
+                                            .disabled(model.isSaving || exercise.isEmpty)
+                                            Button("Add extra work after…") {
+                                                additionTarget = ExecutionTarget(id: identity)
                                             }
-                                            .disabled(planItems.count == 1 || exercise.isEmpty)
-                                            Divider()
-                                            Button("Move up") {
-                                                Task {
-                                                    await moveExercise(
-                                                        index: index,
-                                                        to: index - 1,
-                                                        exerciseId: exercise
-                                                    )
-                                                }
-                                            }
-                                            .disabled(
-                                                model.isSaving || index == 0 || exercise.isEmpty
-                                            )
-                                            Button("Move down") {
-                                                Task {
-                                                    await moveExercise(
-                                                        index: index,
-                                                        to: index + 1,
-                                                        exerciseId: exercise
-                                                    )
-                                                }
-                                            }
-                                            .disabled(
-                                                model.isSaving || index == planItems.count - 1
-                                                    || exercise.isEmpty
-                                            )
-                                            Divider()
-                                            Button("Add one set") {
-                                                Task {
-                                                    await changeSets(
-                                                        workout: workout,
-                                                        index: index,
-                                                        delta: 1,
-                                                        exerciseId: exercise
-                                                    )
-                                                }
-                                            }
-                                            .disabled(model.isSaving || (item.sets ?? 1) >= 20)
-                                            Button("Remove one set") {
-                                                Task {
-                                                    await changeSets(
-                                                        workout: workout,
-                                                        index: index,
-                                                        delta: -1,
-                                                        exerciseId: exercise
-                                                    )
-                                                }
-                                            }
-                                            .disabled(model.isSaving || !canDecrease(
-                                                item: item,
-                                                state: setState
-                                            ))
+                                            .disabled(model.isSaving || exercise.isEmpty)
                                         } label: {
                                             Image(systemName: "ellipsis.circle")
-                                                .accessibilityLabel("Plan options")
+                                                .accessibilityLabel("Exercise options")
                                         }
                                         .disabled(model.isSaving)
                                     }
                                     HStack(spacing: 8) {
-                                        Text(item.repsLabel)
-                                        Text(item.loadLabel)
-                                        Text(item.effortLabel)
+                                        Text(row?.repsLabel ?? item.repsLabel)
+                                        Text(row?.loadLabel ?? item.loadLabel)
+                                        Text(row?.effortLabel ?? item.effortLabel)
                                         if let velocity = item.velocityTargetLabel {
-                                            Text("target \(velocity)")
+                                            Text("target " + velocity)
                                         }
                                         if model.isExerciseActive(
                                             planItemIndex: identity,
-                                            exerciseId: exercise
+                                            exerciseId: row?.exerciseId ?? exercise
                                         ) {
                                             Label("In progress", systemImage: "timer")
                                                 .foregroundStyle(.orange)
-                                                .accessibilityIdentifier(
-                                                    "exercise-in-progress-\(index)"
-                                                )
                                         }
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                    if setState.logged > 0 {
-                                        Text("Swap is unavailable after sets are logged.")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
+                                    if let row, row.kind == .substituted {
+                                        Text(
+                                            "Changed on this phone"
+                                                + (row.plannedExerciseId.map { " from " + Self.label($0) } ?? "")
+                                        )
+                                        .font(.caption2)
+                                        .foregroundStyle(.blue)
+                                        .accessibilityIdentifier("substituted-" + String(index))
                                     }
                                     NavigationLink {
                                         ExerciseWorkoutView(
                                             model: model,
-                                            exerciseId: exercise,
+                                            exerciseId: row?.exerciseId ?? exercise,
                                             planIndex: index,
+                                            substitutesPlanItemIndex: row?.substitutesPlanItemIndex,
                                             drafts: drafts
                                         )
                                     } label: {
                                         Label("Open sets", systemImage: "list.bullet")
                                             .font(.caption)
                                     }
-                                    .accessibilityIdentifier("open-exercise-\(index)")
+                                    .accessibilityIdentifier("open-exercise-" + String(index))
                                 }
                                 .padding(.vertical, 2)
                             }
-                            if let planEditError {
-                                Text(planEditError)
+                            if let error = executionError {
+                                Text(error)
                                     .foregroundStyle(.red)
-                                    .accessibilityIdentifier("plan-edit-error")
+                                    .accessibilityIdentifier("execution-change-error")
                             }
                         } header: {
-                            HStack {
-                                Text("Plan")
-                                Spacer()
-                                Button {
-                                    planPicker = .add
-                                } label: {
-                                    Label("Add", systemImage: "plus")
+                            Text("Plan")
+                        }
+
+                        let additions = model.executionRows.filter { $0.kind == .added }
+                        if !additions.isEmpty {
+                            Section("Extra work") {
+                                ForEach(additions) { row in
+                                    NavigationLink {
+                                        ExerciseWorkoutView(
+                                            model: model,
+                                            exerciseId: row.exerciseId,
+                                            planIndex: nil,
+                                            drafts: drafts
+                                        )
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(Self.label(row.exerciseId))
+                                            Text(row.repsLabel + " · " + row.loadLabel)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
                                 }
-                                .accessibilityIdentifier("add-plan-exercise")
-                                .disabled(model.isSaving)
                             }
                         }
 
@@ -430,6 +389,9 @@ struct ActiveWorkoutView: View {
                         prepare(workout)
                         // Opening a recovered server workout resolves the prompt that led here.
                         model.clearRecoveryIssue()
+                        // Re-read the execution view so a change authored on the phone (or on
+                        // another session) is visible here (DEC-RESOLVER-23).
+                        Task { await model.refreshExecutionView(workoutId: workout.workoutId) }
                     }
                     .onChange(of: workout.status) { _, status in
                         if (status == "completed" || status == "abandoned"),
@@ -458,6 +420,18 @@ struct ActiveWorkoutView: View {
                 ExercisePickerSheet(model: model, title: "Exercise outside plan") { id in
                     showingOtherExercisePicker = false
                     otherExerciseId = id
+                }
+            }
+            .sheet(item: $substituteTarget) { target in
+                ExercisePickerSheet(model: model, title: "Substitute exercise") { id in
+                    substituteTarget = nil
+                    Task { await substitute(planItemIndex: target.id, exerciseId: id) }
+                }
+            }
+            .sheet(item: $additionTarget) { target in
+                ExercisePickerSheet(model: model, title: "Add extra work after") { id in
+                    additionTarget = nil
+                    Task { await addExtraWork(afterItemIndex: target.id, exerciseId: id) }
                 }
             }
             .toolbar {
@@ -492,29 +466,6 @@ struct ActiveWorkoutView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("The watch stops logging and becomes read-only. Sets it already recorded stay in the session; anything still queued on the watch is sent when it reconnects.")
-            }
-            .sheet(item: $planPicker) { mode in
-                ExercisePickerSheet(model: model, title: mode.title) { exerciseId in
-                    planPicker = nil
-                    Task {
-                        switch mode {
-                        case .swap(let index):
-                            await swapExercise(index: index, exerciseId: exerciseId)
-                        case .add:
-                            await addExercise(exerciseId: exerciseId)
-                        }
-                    }
-                }
-            }
-            .alert(item: $pendingRemoval) { removal in
-                Alert(
-                    title: Text("Remove \(removal.label)?"),
-                    message: Text("Logged sets are kept. The original prescription stays unchanged."),
-                    primaryButton: .destructive(Text("Remove")) {
-                        Task { await removeExercise(removal) }
-                    },
-                    secondaryButton: .cancel()
-                )
             }
             .fullScreenCover(item: $reportTarget, onDismiss: {
                 dismiss()
@@ -638,103 +589,34 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func planSetState(identity: Int, exerciseId: String) -> PlanSetState {
-        var attributed = 0
-        var ambiguous = 0
-        for set in workout?.sets ?? []
-        where set.exerciseId == exerciseId && set.rir != 6 {
-            // A warm-up is attributed to the plan item but is not a planned set: it must not
-            // block a swap or a set-count change.
-            if let itemIdentity = set.planItemIndex {
-                if itemIdentity == identity { attributed += 1 }
-            } else {
-                ambiguous += 1
-            }
-        }
-        return PlanSetState(attributed: attributed, ambiguous: ambiguous)
-    }
-
-    private func canDecrease(item: PrescriptionItem, state: PlanSetState) -> Bool {
-        let current = item.sets ?? 1
-        return state.ambiguous == 0 && current > 1 && current - 1 >= state.attributed
-    }
-
-    private func swapExercise(index: Int, exerciseId: String) async {
-        guard let workout,
-              let items = workout.plan?.items,
-              items.indices.contains(index),
-              let expected = items[index].exerciseId else { return }
-        planEditError = nil
-        let key = UUID().uuidString.lowercased()
-        if !(await model.swapPlanExercise(
-            workoutId: workout.workoutId,
-            itemIndex: index,
-            exerciseId: exerciseId,
-            expectedExerciseId: expected,
-            idempotencyKey: key
-        )) {
-            planEditError = model.mutationError
-        }
-    }
-
-    private func removeExercise(_ removal: PlanRemoval) async {
+    private func substitute(planItemIndex: Int, exerciseId: String) async {
         guard let workout else { return }
-        planEditError = nil
+        executionError = nil
         let key = UUID().uuidString.lowercased()
-        if !(await model.removePlanExercise(
+        if !(await model.recordExecutionChange(
             workoutId: workout.workoutId,
-            itemIndex: removal.index,
-            expectedExerciseId: removal.exerciseId,
-            idempotencyKey: key
-        )) {
-            planEditError = model.mutationError
-        }
-    }
-
-    private func moveExercise(index: Int, to: Int, exerciseId: String) async {
-        guard let workout, index != to else { return }
-        planEditError = nil
-        let key = UUID().uuidString.lowercased()
-        if !(await model.movePlanExercise(
-            workoutId: workout.workoutId,
-            itemIndex: index,
-            toIndex: to,
-            expectedExerciseId: exerciseId,
-            idempotencyKey: key
-        )) {
-            planEditError = model.mutationError
-        }
-    }
-
-    private func changeSets(
-        workout: WorkoutDetail,
-        index: Int,
-        delta: Int,
-        exerciseId: String
-    ) async {
-        planEditError = nil
-        let key = UUID().uuidString.lowercased()
-        if !(await model.changePlanSets(
-            workoutId: workout.workoutId,
-            itemIndex: index,
-            delta: delta,
-            expectedExerciseId: exerciseId,
-            idempotencyKey: key
-        )) {
-            planEditError = model.mutationError
-        }
-    }
-
-    private func addExercise(exerciseId: String) async {
-        guard let workout else { return }
-        planEditError = nil
-        let key = UUID().uuidString.lowercased()
-        if !(await model.addPlanExercise(
-            workoutId: workout.workoutId,
+            planItemIndex: planItemIndex,
             exerciseId: exerciseId,
             idempotencyKey: key
         )) {
-            planEditError = model.mutationError
+            executionError = model.mutationError
+        }
+    }
+
+    private func addExtraWork(afterItemIndex: Int, exerciseId: String) async {
+        guard let workout else { return }
+        executionError = nil
+        let key = UUID().uuidString.lowercased()
+        if !(await model.recordExecutionChange(
+            workoutId: workout.workoutId,
+            afterItemIndex: afterItemIndex,
+            exerciseId: exerciseId,
+            repsLow: 8,
+            repsHigh: 12,
+            rirTarget: 2,
+            idempotencyKey: key
+        )) {
+            executionError = model.mutationError
         }
     }
 
@@ -833,38 +715,8 @@ struct ActiveWorkoutView: View {
     }
 }
 
-enum PlanPickerMode: Identifiable {
-    case swap(index: Int)
-    case add
-
-    var id: String {
-        switch self {
-        case .swap(let index): return "swap-\(index)"
-        case .add: return "add"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .swap: return "Swap exercise"
-        case .add: return "Add exercise"
-        }
-    }
-}
-
-struct PlanRemoval: Identifiable {
-    let index: Int
-    let exerciseId: String
-    let label: String
-
-    var id: String { "\(index)-\(exerciseId)" }
-}
-
-struct PlanSetState {
-    let attributed: Int
-    let ambiguous: Int
-
-    var logged: Int { attributed + ambiguous }
+struct ExecutionTarget: Identifiable {
+    let id: Int
 }
 
 private struct ExercisePickerSheet: View {

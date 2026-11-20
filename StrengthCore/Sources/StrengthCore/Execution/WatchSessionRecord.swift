@@ -52,6 +52,9 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
     /// local set id -> server set id, learned when the add-set is acknowledged. Used only to
     /// attach `set_id` to the matching telemetry event; a missing entry sends no set id.
     public var eventSetIDs: [String: Int]?
+    /// The latest server-confirmed execution view. The watch merges it by watermark and never
+    /// authors a substitution or addition (DEC-RESOLVER-23).
+    public var execution: ExecutionView?
 
     public init(
         sessionUUID: String,
@@ -64,7 +67,8 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         eventSetIDs: [String: Int]? = nil,
         selectedItemIndex: Int? = nil,
         exerciseItemIndex: Int? = nil,
-        offPlanNoted: Bool? = nil
+        offPlanNoted: Bool? = nil,
+        execution: ExecutionView? = nil
     ) {
         self.sessionUUID = sessionUUID
         self.startedAt = startedAt
@@ -77,6 +81,7 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         self.selectedItemIndex = selectedItemIndex
         self.exerciseItemIndex = exerciseItemIndex
         self.offPlanNoted = offPlanNoted
+        self.execution = execution
     }
 
     public var clock: ServerClock? {

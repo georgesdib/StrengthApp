@@ -5,6 +5,8 @@ struct ExerciseWorkoutView: View {
     @ObservedObject var model: AppModel
     let exerciseId: String
     let planIndex: Int?
+    /// Set when the phone substituted this plan slot, so the performed set is annotated.
+    var substitutesPlanItemIndex: Int? = nil
     @ObservedObject var drafts: WorkoutDraftStore
 
     @Environment(\.dismiss) private var dismiss
@@ -34,6 +36,30 @@ struct ExerciseWorkoutView: View {
     }
 
     private var plannedSets: Int { item?.sets ?? 0 }
+
+    private var executionRow: ExecutionRow? {
+        guard let planIndex else { return nil }
+        return model.executionRow(forPlanIndex: planIndex)
+    }
+
+    /// The next planned group by cumulative working sets; the last group holds beyond the plan.
+    private var nextGroup: SetGroup? {
+        guard let executionRow else { return nil }
+        return executionRow.group(forLoggedCount: performed.filter { $0.rir != 6 }.count)
+    }
+
+    private var targetLoadLabel: String {
+        nextGroup?.loadLabel ?? executionRow?.loadLabel ?? item?.loadLabel ?? "—"
+    }
+
+    private var targetRepsLabel: String {
+        nextGroup?.repsLabel ?? executionRow?.repsLabel ?? item?.repsLabel ?? "—"
+    }
+
+    private var targetEffortLabel: String {
+        if let rir = nextGroup?.rirTarget { return "RIR " + String(rir) }
+        return executionRow?.effortLabel ?? item?.effortLabel ?? "—"
+    }
 
     private var isExerciseActive: Bool {
         model.isExerciseActive(planItemIndex: planIdentity, exerciseId: exerciseId)
@@ -86,8 +112,14 @@ struct ExerciseWorkoutView: View {
             Section("Exercise") {
                 LabeledContent("Exercise", value: Self.label(exerciseId))
                 if let item {
-                    LabeledContent("Target", value: "\(item.sets ?? 0) × \(item.repsLabel) · \(item.loadLabel) · \(item.effortLabel)\(item.velocityTargetLabel.map { " · target \($0)" } ?? "")")
+                    LabeledContent("Target", value: String(item.sets ?? 0) + " × " + targetRepsLabel + " · " + targetLoadLabel + " · " + targetEffortLabel + (item.velocityTargetLabel.map { " · target " + $0 } ?? ""))
                         .accessibilityIdentifier("exercise-target")
+                    if let row = executionRow, row.kind == .substituted {
+                        Text("Changed on this phone" + (row.plannedExerciseId.map { " from " + $0 } ?? ""))
+                            .font(.footnote)
+                            .foregroundStyle(.blue)
+                            .accessibilityIdentifier("substitution-note")
+                    }
                     LabeledContent("Rest", value: "\(item.restS ?? 120)s")
                 } else {
                     Text("Not in the prescription. Sets are still recorded as performed work.")
@@ -176,7 +208,7 @@ struct ExerciseWorkoutView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 } else {
-                                    Text("Target \(item?.repsLabel ?? "—") · \(item?.loadLabel ?? "—") · \(item?.effortLabel ?? "—")\(item?.velocityTargetLabel.map { " · target \($0)" } ?? "")")
+                                    Text("Target " + targetRepsLabel + " · " + targetLoadLabel + " · " + targetEffortLabel + (item?.velocityTargetLabel.map { " · target " + $0 } ?? ""))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -402,6 +434,7 @@ struct ExerciseWorkoutView: View {
             velocityMps: velocity,
             setIndex: setIndex,
             planItemIndex: planIdentity,
+            substitutesPlanItemIndex: substitutesPlanItemIndex,
             repVelocities: repVelocities,
             performedAt: completedAt
         )

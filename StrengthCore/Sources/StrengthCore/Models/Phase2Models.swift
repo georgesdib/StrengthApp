@@ -156,9 +156,10 @@ public struct SetGroup: Codable, Sendable, Equatable {
 
     /// One unlabelled display row: sets x reps @ load, RIR.
     public var rowLabel: String {
-        var parts = [String(sets ?? 0) + " × " + repsLabel, "@ " + loadLabel]
-        if let rirTarget { parts.append("RIR " + String(rirTarget)) }
-        return parts.joined(separator: " · ")
+        var label = String(sets ?? 0) + " × " + repsLabel
+        if let loadKg, loadKg > 0 { label += " @ " + String(format: "%.1f kg", loadKg) }
+        if let rirTarget { label += " · RIR " + String(rirTarget) }
+        return label
     }
 }
 

@@ -204,10 +204,12 @@ final class WatchPairingCoordinator: ObservableObject {
         }
     }
 
-    /// Sends the plan revision the watch is missing after a phone edit. Queued rather than
-    /// latest-wins so a nudge is not dropped while the watch is unreachable; the watch ignores
-    /// anything not newer than its snapshot (contract §10.2, §10.5). Best effort: the watch also
-    /// refreshes on foreground and after each set, so a lost nudge is recoverable.
+    /// Sends the frozen plan snapshot and the phone-authored execution view to the watch. Queued
+    /// rather than latest-wins so a nudge is not dropped while the watch is unreachable; the watch
+    /// merges the execution view by watermark and ignores a plan that is not newer
+    /// (contract §10.2, §10.5; DEC-RESOLVER-23). A workout the server did not stamp with a
+    /// plan revision cannot be pushed coherently. Best effort: the watch also refreshes on
+    /// foreground and after each set, so a lost nudge is recoverable.
     @discardableResult
     func pushExecution(_ workout: WorkoutDetail, execution: ExecutionView? = nil) -> Bool {
         guard isActive,
@@ -215,9 +217,10 @@ final class WatchPairingCoordinator: ObservableObject {
               let connectivity,
               connectivity.activationState == .activated,
               connectivity.isWatchAppInstalled,
+              let revision = workout.planRevision,
               let payload = RemoteExecutionPayload(
                 workout: workout,
-                revision: workout.planRevision ?? 0,
+                revision: revision,
                 execution: execution
               ),
               let json = payload.encodedString() else {

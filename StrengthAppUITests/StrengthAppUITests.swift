@@ -150,12 +150,15 @@ final class StrengthAppUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 25))
         attachScreenshot(app, name: "11-workout")
 
-        // R8: the authenticated catalogue feeds the add-exercise picker; the server applies
-        // its own 3x8-12 @ RIR 2 defaults because the phone sends only the exercise id.
-        let addPlan = app.buttons["add-plan-exercise"]
-        XCTAssertTrue(addPlan.waitForExistence(timeout: 10))
-        addPlan.tap()
-        XCTAssertTrue(app.navigationBars["Add exercise"].waitForExistence(timeout: 10))
+        // WP2: the frozen plan has no edit menu. The phone authors an addition after a plan
+        // slot and the server solves the prefill; the authenticated catalogue feeds the picker.
+        let options = app.buttons["Exercise options"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 10))
+        options.tap()
+        let addExtra = app.buttons["Add extra work after…"]
+        XCTAssertTrue(addExtra.waitForExistence(timeout: 5))
+        addExtra.tap()
+        XCTAssertTrue(app.navigationBars["Add extra work after"].waitForExistence(timeout: 10))
         let exerciseSearch = app.searchFields.firstMatch
         XCTAssertTrue(exerciseSearch.waitForExistence(timeout: 5))
         exerciseSearch.tap()
@@ -166,7 +169,7 @@ final class StrengthAppUITests: XCTestCase {
         let latLabel = app.staticTexts["Lat Pulldown"]
         scrollTo(latLabel, in: app)
         XCTAssertTrue(latLabel.waitForExistence(timeout: 10))
-        attachScreenshot(app, name: "11b-plan-exercise-added")
+        attachScreenshot(app, name: "11b-extra-work-added")
 
         // Exercise-centric logging: open the first planned exercise and complete planned set 1.
         let openExercise = app.descendants(matching: .any)["open-exercise-0"]

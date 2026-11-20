@@ -58,7 +58,11 @@ final class WatchMirrorTests: XCTestCase {
         XCTAssertEqual(decoded.ownerDeviceId, "watch-1")
         XCTAssertEqual(decoded.plan.items.first?.loadKg, 140)
 
-        let futureSchema = json.replacingOccurrences(of: #""schema":1"#, with: #""schema":2"#)
+        let schemaVersion = RemoteExecutionPayload.schemaVersion
+        let futureSchema = json.replacingOccurrences(
+            of: "\"schema\":" + String(schemaVersion),
+            with: "\"schema\":" + String(schemaVersion + 1)
+        )
         XCTAssertNil(RemoteExecutionPayload.decode(futureSchema))
         XCTAssertNil(RemoteExecutionPayload.decode("not json"))
     }
@@ -84,6 +88,64 @@ final class WatchMirrorTests: XCTestCase {
             deviceID: "watch-1"
         ))
         XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 150)
+    }
+
+    func testApplyRemoteMergesTheExecutionViewByWatermark() async throws {
+        let engine = makeEngine()
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        XCTAssertEqual(engine.phase, .active)
+        XCTAssertTrue(engine.executionRows.allSatisfy { $0.kind == .planned })
+
+        func change(_ exerciseId: String, eventId: Int) -> ExecutionChange {
+            ExecutionChange(
+                eventId: eventId,
+                kind: "substitution",
+                planItemIndex: 0,
+                exerciseId: exerciseId,
+                repsLow: 3,
+                repsHigh: 5,
+                rirTarget: 2,
+                prefillLoadKg: 95
+            )
+        }
+        func push(watermark: Int, change: ExecutionChange) throws -> RemoteExecutionPayload {
+            RemoteExecutionPayload(
+                workoutId: "workout-1",
+                status: "in_progress",
+                planRevision: 2,
+                ownerDeviceId: "watch-1",
+                plan: try plan(loadKg: 140),
+                execution: ExecutionView(
+                    workoutId: "workout-1",
+                    watermark: watermark,
+                    substitutions: [change],
+                    additions: []
+                )
+            )
+        }
+
+        // A newer watermark replaces the rendered slot with the phone-authored substitute.
+        XCTAssertTrue(engine.applyRemote(
+            try push(watermark: 5, change: change("front_squat", eventId: 5)),
+            deviceID: "watch-1"
+        ))
+        XCTAssertEqual(engine.sessionRecord?.execution?.watermark, 5)
+        XCTAssertEqual(engine.executionRows.first?.kind, .substituted)
+        XCTAssertEqual(engine.executionRows.first?.exerciseId, "front_squat")
+        XCTAssertEqual(engine.executionRows.first?.loadKg, 95)
+
+        // A delayed replay with an older watermark never moves the view backwards.
+        XCTAssertFalse(engine.applyRemote(
+            try push(watermark: 4, change: change("back_squat", eventId: 4)),
+            deviceID: "watch-1"
+        ))
+        XCTAssertEqual(engine.executionRows.first?.exerciseId, "front_squat")
+
+        // The same view at the same watermark is a no-op, not a second write.
+        XCTAssertFalse(engine.applyRemote(
+            try push(watermark: 5, change: change("front_squat", eventId: 5)),
+            deviceID: "watch-1"
+        ))
     }
 
     func testPlanPushIsDeferredWhileASetIsInProgress() async throws {
@@ -134,7 +196,7 @@ final class WatchMirrorTests: XCTestCase {
 
     // MARK: - Push transport
 
-    func testPlanEditPayloadIsQueuedToTheWatch() throws {
+    func testExecutionPayloadIsQueuedToTheWatch() throws {
         let suite = "WatchMirrorTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }

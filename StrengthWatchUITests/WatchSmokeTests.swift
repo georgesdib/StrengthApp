@@ -57,7 +57,11 @@ final class WatchSmokeTests: XCTestCase {
             XCTFail("the exercise did not open")
         }
         startSet.tap()
-        app.tap()   // lets the interruption monitor fire
+        // A neutral tap lets the Health interruption monitor fire. Do not tap the app centre:
+        // once the running-set layout is on screen it can land on End set and open the RIR
+        // sheet, so the later end-set tap hits a RIR value instead.
+        let neutral = app.staticTexts["watch-total-time"]
+        if neutral.waitForExistence(timeout: 5) { neutral.tap() }
 
         // Log it: end the set and record RIR 5.
         let endSet = app.buttons["watch-end-set"]

@@ -57,7 +57,7 @@ struct PrescriptionPreviewView: View {
                 }
             }
 
-            if let topSet = issued.plan.topSet {
+            if let topSet = issued.plan.topSet, topSet.reasonCode != "intent_off" {
                 Section("Top set") {
                     LabeledContent("Outcome", value: topSet.statusLabel)
                     if let reason = topSet.reason, !reason.isEmpty {

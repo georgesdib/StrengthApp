@@ -1105,6 +1105,35 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertTrue(removalText.contains("\"set_id\":42"))
     }
 
+    func testTodayDecodesTheProgrammeHeader() throws {
+        let json = """
+        {
+          "date": "2026-11-20",
+          "programme_header": {
+            "trained_week": 3,
+            "dup": {
+              "enabled": true, "cycle_weeks": 4, "cycle_week": 3,
+              "main_scheme": "maximal", "accessory_scheme": "accessory"
+            },
+            "deload": {
+              "calendar_week": 3, "status": "none",
+              "trigger": null, "reason": null
+            },
+            "competition": {
+              "date": "2027-01-16", "days_until": 58, "window": "peak"
+            }
+          }
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let today = try decoder.decode(TodayResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(today.programmeHeader?.trainedWeek, 3)
+        XCTAssertEqual(today.programmeHeader?.dup?.cycleWeek, 3)
+        XCTAssertEqual(today.programmeHeader?.deload?.calendarWeek, 3)
+        XCTAssertEqual(today.programmeHeader?.competition?.daysUntil, 58)
+    }
+
     func testFrozenTopSetStatusDecodes() throws {
         let json = """
         {

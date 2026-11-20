@@ -78,7 +78,11 @@ raw 100.x address.
 
 ## 4. Daily workout flow
 
-1. Open **Today** and review readiness and the prescription.
+1. Open **Today** and review readiness and the prescription. The read-only **Programme** card
+   shows the trained week, the DUP cycle, the deload status with its calendar week, and the
+   competition date/countdown. Trained week and deload week are different definitions: trained
+   weeks count only weeks with a session, while the deload calendar counts every week since the
+   block anchor.
 2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
    is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
    The main-lift structure offers **Server default**, **Prefer top set + back-off**,

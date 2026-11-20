@@ -26,6 +26,9 @@ struct TodayView: View {
                     TodaySummarySection(model: model)
                         .id(model.chatModelChoice)
                 }
+                if let header = model.today?.programmeHeader {
+                    ProgrammeHeaderSection(header: header)
+                }
                 if let error = model.errorMessage {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -976,3 +979,86 @@ struct PlanSettingsView: View {
         }
     }
 }
+
+
+private struct ProgrammeHeaderSection: View {
+    let header: ProgrammeHeader
+
+    private var hasContent: Bool {
+        header.trainedWeek != nil
+            || header.dup != nil
+            || header.competition != nil
+            || header.deload?.calendarWeek != nil
+            || (header.deload?.status != nil && header.deload?.status != "none")
+    }
+
+    var body: some View {
+        if hasContent {
+            Section("Programme") {
+                if let week = header.trainedWeek {
+                    LabeledContent("Trained week", value: String(week))
+                }
+                if let dup = header.dup {
+                    LabeledContent("DUP", value: dupLabel(dup))
+                }
+                if let calendar = header.deload?.calendarWeek {
+                    LabeledContent("Deload week (calendar)", value: String(calendar))
+                }
+                if let status = header.deload?.status {
+                    LabeledContent("Deload", value: deloadLabel(status))
+                    if status != "none", let reason = header.deload?.reason, !reason.isEmpty {
+                        Text(reason)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let competition = header.competition {
+                    LabeledContent("Competition", value: competitionLabel(competition))
+                }
+            }
+            .accessibilityIdentifier("programme-header")
+        }
+    }
+
+    private func dupLabel(_ dup: ProgrammeHeaderDUP) -> String {
+        var parts: [String] = []
+        if let week = dup.cycleWeek, let weeks = dup.cycleWeeks {
+            parts.append("week \(week) of \(weeks)")
+        } else if let weeks = dup.cycleWeeks {
+            parts.append("\(weeks)-week cycle")
+        }
+        let schemes = [dup.mainScheme, dup.accessoryScheme]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        if !schemes.isEmpty {
+            parts.append(schemes.joined(separator: " / "))
+        }
+        return parts.isEmpty ? "on" : parts.joined(separator: " · ")
+    }
+
+    private func deloadLabel(_ status: String) -> String {
+        switch status {
+        case "active": return "Active"
+        case "suggested": return "Suggested"
+        case "none": return "None"
+        default: return status
+        }
+    }
+
+    private func competitionLabel(_ competition: ProgrammeHeaderCompetition) -> String {
+        var parts: [String] = []
+        if let date = competition.date, !date.isEmpty {
+            parts.append(date)
+        }
+        if let days = competition.daysUntil {
+            parts.append(days == 0 ? "today" : "\(days) days")
+        } else {
+            parts.append("past")
+        }
+        if let window = competition.window, window != "none" {
+            parts.append(window)
+        }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    }
+}
+

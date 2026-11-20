@@ -65,11 +65,42 @@ public struct Capabilities: Decodable, Equatable {
 
 // MARK: - Today
 
+/// Read-only programme context for Today (WP4). Every block is optional so an older server
+/// or a profile without an anchor still decodes.
+public struct ProgrammeHeader: Decodable, Equatable, Sendable {
+    public let trainedWeek: Int?
+    public let dup: ProgrammeHeaderDUP?
+    public let deload: ProgrammeHeaderDeload?
+    public let competition: ProgrammeHeaderCompetition?
+}
+
+public struct ProgrammeHeaderDUP: Decodable, Equatable, Sendable {
+    public let enabled: Bool?
+    public let cycleWeeks: Int?
+    public let cycleWeek: Int?
+    public let mainScheme: String?
+    public let accessoryScheme: String?
+}
+
+public struct ProgrammeHeaderDeload: Decodable, Equatable, Sendable {
+    public let calendarWeek: Int?
+    public let status: String?
+    public let trigger: String?
+    public let reason: String?
+}
+
+public struct ProgrammeHeaderCompetition: Decodable, Equatable, Sendable {
+    public let date: String?
+    public let daysUntil: Int?
+    public let window: String?
+}
+
 public struct TodayResponse: Decodable {
     public let date: String
     public let readiness: ReadinessPayload?
     public let readinessScore: ReadinessScore?
     public let activeWorkout: WorkoutDetail?
+    public let programmeHeader: ProgrammeHeader?
 }
 
 /// The existing server readiness payload is wider than Phase 1 shows; decode the fields this

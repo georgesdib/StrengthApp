@@ -8,7 +8,10 @@ import Foundation
 public struct ActiveSet: Codable, Equatable, Sendable {
     /// Also the idempotency key of the add-set request and the `local_set_id` of its events.
     public var localSetID: String
+    /// -1 for an addition, which has no plan slot.
     public var planItemIndex: Int
+    /// The performed exercise; nil in older records, where the plan item was the exercise.
+    public var exerciseId: String?
     public var setIndex: Int
     public var startedAt: Date
     /// The lifter's adjustments, persisted so a termination mid-set does not lose them.
@@ -18,6 +21,7 @@ public struct ActiveSet: Codable, Equatable, Sendable {
     public init(
         localSetID: String,
         planItemIndex: Int,
+        exerciseId: String? = nil,
         setIndex: Int,
         startedAt: Date,
         loadKg: Double? = nil,
@@ -25,6 +29,7 @@ public struct ActiveSet: Codable, Equatable, Sendable {
     ) {
         self.localSetID = localSetID
         self.planItemIndex = planItemIndex
+        self.exerciseId = exerciseId
         self.setIndex = setIndex
         self.startedAt = startedAt
         self.loadKg = loadKg

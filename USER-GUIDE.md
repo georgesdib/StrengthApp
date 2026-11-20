@@ -127,14 +127,19 @@ beyond the plan.
 The plan is frozen when the workout starts. The **⋯** menu on a plan row offers the two
 mid-session changes:
 
-- **Substitute exercise…** replaces that plan slot for this session. The performed sets stay
-  attributed to the slot, the phone and watch show the substitute, and the watch labels it
-  **Changed on phone**.
-- **Add extra work after…** adds work after that slot. It appears under **Extra work** and its
-  sets are recorded as extra work without a plan slot.
+- **Substitute exercise…** replaces that plan slot for this session. It is available only
+  before any set is recorded for the slot; after that the menu is disabled, because the
+  replacement never takes over a partly completed slot. The performed sets stay attributed to
+  the slot, the phone and watch show the substitute, and the watch labels it **Changed on
+  phone**.
+- **Add extra work after…** adds work after that slot. It appears under **Extra work**, is
+  selectable on the phone and watch, and its sets are recorded as extra work without a plan
+  slot.
 
-The server solves the substitute's prefill load; the phone never computes a load. An offline
-phone records the change without a prefill, and it is not solved later.
+The server solves the substitute's or addition's prefill, and that value fills the logging
+controls on both devices. The phone never computes a load. A null prefill stays blank and is
+never replaced by the original exercise's load. An offline phone records the change without a
+prefill, and it is not solved later.
 
 ![Frozen plan with per-exercise options](docs/images/workout-plan.png)
 

@@ -247,7 +247,7 @@ public struct ExecutionRow: Identifiable, Equatable, Sendable {
     }
 
     public var loadLabel: String {
-        guard let loadKg, loadKg > 0 else { return "load unknown" }
+        guard let loadKg else { return "load unknown" }
         return String(format: "%.1f kg", loadKg)
     }
 

@@ -400,6 +400,52 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 6), 1001)
     }
 
+    func testSetIndexIsUniquePerActualExerciseNotPerPlanSlot() async throws {
+        let transport = AsyncStubTransport { request in
+            if request.url?.path.hasSuffix("/sets") == true {
+                throw APIError.transport("offline")
+            }
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
+
+        // Extra work for the same exercise already used index 1, without a plan slot.
+        _ = await engine.logSet(
+            WatchExecutionEngine.SetEntry(
+                exerciseId: "competition_squat",
+                planItemIndex: nil,
+                setIndex: 1,
+                loadKg: 60,
+                reps: 8,
+                rir: 2
+            ),
+            session: session()
+        )
+        // A substitution for the same exercise must not reuse the extra set's identity.
+        XCTAssertEqual(engine.nextSetIndex(exerciseId: "competition_squat", rir: 2), 2)
+        XCTAssertEqual(engine.nextSetIndex(planItemIndex: 0, rir: 2), 2)
+        XCTAssertEqual(engine.setsDone(planItemIndex: 0), 0)
+    }
+
+    func testAnAdditionCanStartItsOwnSetWithoutAPlanSlot() async throws {
+        let transport = AsyncStubTransport { request in
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.beginSet(
+            exerciseId: "competition_squat",
+            planItemIndex: nil,
+            loadKg: 60,
+            reps: 8
+        )
+        XCTAssertEqual(engine.activeSet?.planItemIndex, -1)
+        XCTAssertEqual(engine.activeSet?.exerciseId, "competition_squat")
+        XCTAssertEqual(engine.activeSet?.setIndex, 1)
+    }
+
     func testSetCompletionCarriesTheAcknowledgedServerSetId() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/sets") == true {

@@ -317,7 +317,7 @@ public final class WatchExecutionEngine {
     /// An exercise is active from its first started set until it is ended, so the list cannot be
     /// re-entered in between.
     public var canLeaveExercise: Bool {
-        sessionRecord?.exerciseItemIndex == nil
+        sessionRecord?.exerciseItemIndex == nil && sessionRecord?.activeSet == nil
     }
 
     /// The exercise the lifter picked from the list. Nothing can be started or logged without
@@ -382,19 +382,33 @@ public final class WatchExecutionEngine {
     /// started as a warm-up can be logged as a working set and vice versa. Warm-ups sit above
     /// the planned range so they never take a planned slot; the server classifies them by RIR 6.
     public func nextSetIndex(planItemIndex: Int, rir: Int?) -> Int {
+        let row = executionRows.first {
+            $0.kind != .added && $0.planItemIndex == planItemIndex
+        }
+        let exerciseId = row?.exerciseId
+            ?? planItems.first { ($0.orderIndex ?? -1) == planItemIndex }?.exerciseId
+            ?? ""
+        return nextSetIndex(exerciseId: exerciseId, rir: rir)
+    }
+
+    /// The identity of a set is (exercise, index), not its plan slot: a substitute or an
+    /// addition must count every set already recorded for the performed exercise.
+    public func nextSetIndex(exerciseId: String, rir: Int?) -> Int {
+        let acknowledged = (workout?.sets ?? []).filter { $0.exerciseId == exerciseId }
+        let queued = pending.compactMap { operation -> AddSetRequest? in
+            guard case .addSet(let body) = operation.body,
+                  body.exerciseId == exerciseId else { return nil }
+            return body
+        }
         if rir == 6 {
             // Above every warm-up already logged, so undoing one cannot hand out a live index.
-            let acknowledged = (workout?.sets ?? []).filter {
-                ($0.planItemIndex ?? -1) == planItemIndex && $0.rir == 6
-            }.compactMap(\.setIndex)
-            let queued = pending.compactMap { operation -> Int? in
-                guard case .addSet(let body) = operation.body,
-                      body.planItemIndex == planItemIndex, body.rir == 6 else { return nil }
-                return body.setIndex
-            }
-            return max(1000, ((acknowledged + queued).max() ?? 999) + 1)
+            let warm = acknowledged.filter { $0.rir == 6 }.compactMap(\.setIndex)
+                + queued.filter { $0.rir == 6 }.compactMap(\.setIndex)
+            return max(1000, (warm.max() ?? 999) + 1)
         }
-        return setsDone(planItemIndex: planItemIndex) + 1
+        let working = acknowledged.filter { $0.rir != 6 }.compactMap(\.setIndex)
+            + queued.filter { $0.rir != 6 }.compactMap(\.setIndex)
+        return max(0, working.max() ?? 0) + 1
     }
 
     /// Now in the session's clock domain (server-adjusted when the offset is known).
@@ -744,18 +758,39 @@ public final class WatchExecutionEngine {
 
     /// The lifter began a set. This is an explicit observation, never inferred from a screen.
     public func beginSet(loadKg: Double? = nil, reps: Int? = nil) throws {
-        guard phase == .active, let item = selectedItem, let workout else { return }
-        let itemIndex = item.orderIndex ?? 0
-        let setIndex = setsDone(planItemIndex: itemIndex) + 1
+        guard let item = selectedItem else { return }
+        try beginSet(
+            exerciseId: item.exerciseId ?? "",
+            planItemIndex: item.orderIndex,
+            loadKg: loadKg,
+            reps: reps
+        )
+    }
+
+    /// Starts a set for an explicit exercise. An addition has no plan slot, so it passes nil and
+    /// is stored with the -1 sentinel only for the local active-set record.
+    public func beginSet(
+        exerciseId: String,
+        planItemIndex: Int?,
+        loadKg: Double? = nil,
+        reps: Int? = nil
+    ) throws {
+        guard phase == .active, let workout, !exerciseId.isEmpty else { return }
+        let setIndex = nextSetIndex(exerciseId: exerciseId, rir: nil)
         let stamp = stampedNow()
         let token = UUID().uuidString.lowercased()
         try mutate { capture in
             try self.closeRest(in: &capture, at: stamp, workout: workout)
-            try self.touchExercise(in: &capture, itemIndex: itemIndex, at: stamp, workout: workout)
+            if let planItemIndex {
+                try self.touchExercise(
+                    in: &capture, itemIndex: planItemIndex, at: stamp, workout: workout
+                )
+            }
             guard var record = capture.session else { return }
             record.activeSet = ActiveSet(
                 localSetID: token,
-                planItemIndex: itemIndex,
+                planItemIndex: planItemIndex ?? -1,
+                exerciseId: exerciseId,
                 setIndex: setIndex,
                 startedAt: stamp,
                 loadKg: loadKg,
@@ -766,7 +801,7 @@ public final class WatchExecutionEngine {
                 eventId: UUID().uuidString.lowercased(),
                 eventType: .setStarted,
                 occurredAt: ServerClock.encodedISO(stamp),
-                planItemIndex: itemIndex,
+                planItemIndex: planItemIndex,
                 localSetId: token,
                 payload: nil
             )], to: &capture, workout: workout)

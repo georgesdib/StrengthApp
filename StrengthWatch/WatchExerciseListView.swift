@@ -92,13 +92,26 @@ struct WatchExerciseListView: View {
                 }
 
                 ForEach(execution.executionRows.filter { $0.kind == .added }) { row in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(WatchExecutionController.displayName(forExercise: row.exerciseId))
-                            .font(.subheadline)
-                        Text("Extra work · " + row.repsLabel + " · " + row.loadLabel)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                    Button {
+                        execution.selectAddition(row)
+                    } label: {
+                        HStack(alignment: .center) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(WatchExecutionController.displayName(
+                                    forExercise: row.exerciseId
+                                ))
+                                .font(.subheadline)
+                                Text("Extra work · " + row.repsLabel + " · " + row.loadLabel)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("watch-addition-" + row.id)
                 }
 

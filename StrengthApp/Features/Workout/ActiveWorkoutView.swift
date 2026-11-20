@@ -162,7 +162,12 @@ struct ActiveWorkoutView: View {
                                             Button("Substitute exercise…") {
                                                 substituteTarget = ExecutionTarget(id: identity)
                                             }
-                                            .disabled(model.isSaving || exercise.isEmpty)
+                                            .disabled(
+                                                model.isSaving || exercise.isEmpty
+                                                    || (workout.sets ?? []).contains {
+                                                        $0.planItemIndex == identity
+                                                    }
+                                            )
                                             Button("Add extra work after…") {
                                                 additionTarget = ExecutionTarget(id: identity)
                                             }
@@ -231,6 +236,7 @@ struct ActiveWorkoutView: View {
                                             model: model,
                                             exerciseId: row?.exerciseId ?? exercise,
                                             planIndex: index,
+                                            row: row,
                                             substitutesPlanItemIndex: row?.substitutesPlanItemIndex,
                                             drafts: drafts
                                         )
@@ -260,6 +266,7 @@ struct ActiveWorkoutView: View {
                                             model: model,
                                             exerciseId: row.exerciseId,
                                             planIndex: nil,
+                                            row: row,
                                             drafts: drafts
                                         )
                                     } label: {

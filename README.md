@@ -276,11 +276,12 @@ Two failure modes that are environmental rather than code:
 - **A non-interactive shell has no pseudo-terminal**, which `xcodebuild test` needs. Wrap the
   command: `script -q /dev/null xcodebuild test …` (macOS). The build alone does not need it.
 
-The physical-device Phase 3A checklist and rollback steps are in
+The physical-device Phase 3A checklist and rollback steps are indexed in
 [`DEVICE-ACCEPTANCE.md`](DEVICE-ACCEPTANCE.md). The Phase 6.2 watch credential handshake,
-read-only Today and revocation script is in [`WATCH-ACCEPTANCE.md`](WATCH-ACCEPTANCE.md); it is
-owner-run and has not been performed. The server-side backup, migration and pairing-code runbook
-is in [the canonical iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.3.
+read-only Today and revocation script is indexed in
+[`WATCH-ACCEPTANCE.md`](WATCH-ACCEPTANCE.md); the 6.7 record is owner-confirmed 2026-11-14.
+The server-side backup, migration and pairing-code runbook is in
+[the canonical iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.3.
 
 ### Running the live UI tests
 
@@ -372,6 +373,6 @@ local gates build with a 27.0 minimum and execute on 27.2.
 
 ## Real-device acceptance
 
-Phase 1 and Phase 2 completed 2026-11-07; the records are in
+Phase 1 and Phase 2 completed 2026-11-07; their records are indexed in
 [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md). Phase 3 needs its own approved contract and has not
 started.

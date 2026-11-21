@@ -110,6 +110,6 @@ last workout.
 - `StrengthAppTests/HealthKitActivityTests.swift` — independent cursor advancement, persisted
   workout-interval association, partial-response handling and the `rejected`/`skipped` decoding.
 - The watch's active-energy scope and the saved workout's calorie statistic are physical-device
-  behaviour; the simulator cannot create a HealthKit workout session. The check lives in
-  `WATCH-ACCEPTANCE.md`.
+  behaviour; the simulator cannot create a HealthKit workout session. The check lives in the 6.5
+  record linked from `WATCH-ACCEPTANCE.md`.
 - The activity sync's contract is also enforced backend-side by `tests/test_ios_workflow.py`.

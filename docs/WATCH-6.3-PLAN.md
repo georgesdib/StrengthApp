@@ -98,7 +98,7 @@ after the matching add-set is acknowledged; a missing mapping sends no set id ra
 guess. Telemetry batches merge only into the newest queued operation, so a completion can never
 move ahead of the set it describes. "Pending" in the UI counts user work, not telemetry batches.
 
-`WATCH-ACCEPTANCE.md` gained the owner-run 6.3 section. The portfolio plan status update stays
+`WATCH-ACCEPTANCE.md` gained the owner-run 6.3 section (now `docs/acceptance/watch/02-execution-6.3.md`). The portfolio plan status update stays
 open until this slice is reviewed.
 
 ## 6.3 fixups — complete 2026-11-11

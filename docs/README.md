@@ -8,9 +8,12 @@ app presents and records that authority.
 
 - [README.md](../README.md) — project overview, requirements, build recipe and screens.
 - [USER-GUIDE.md](../USER-GUIDE.md) — owner-facing pairing, workout, HealthKit and troubleshooting guide.
-- [DEVICE-ACCEPTANCE.md](../DEVICE-ACCEPTANCE.md) — physical iPhone acceptance checklists and records.
-- [WATCH-ACCEPTANCE.md](../WATCH-ACCEPTANCE.md) — the owner-confirmed 6.7 acceptance record
-  (W1–W12 and R, 2026-11-14).
+- [DEVICE-ACCEPTANCE.md](../DEVICE-ACCEPTANCE.md) — index of physical iPhone acceptance records,
+  split by phase under `docs/acceptance/device/`.
+- [WATCH-ACCEPTANCE.md](../WATCH-ACCEPTANCE.md) — index of owner-run watch acceptance records
+  (6.2b–6.7) under `docs/acceptance/watch/`; the 6.7 record is owner-confirmed 2026-11-14
+  (W1–W12 and R).
+- `docs/acceptance/` — per-record files linked from those two indexes; read only the relevant record.
 
 ## HealthKit
 

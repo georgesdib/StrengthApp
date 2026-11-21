@@ -112,7 +112,8 @@ matching `private/quirks/` topic file in the same turn. Read the index
 
 - README.md — build/test/architecture.
 - USER-GUIDE.md — owner-facing iPhone use.
-- DEVICE-ACCEPTANCE.md — physical acceptance checklist.
+- DEVICE-ACCEPTANCE.md — index of physical acceptance records under `docs/acceptance/device/`.
+- WATCH-ACCEPTANCE.md — index of owner-run watch acceptance records under `docs/acceptance/watch/`.
 - docs/README.md — client documentation index and repository ownership.
 - https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md — phased client plan, invariants and rollback gates.
 - docs/AGENT-LIVE-TESTS.md — disposable live server/UI acceptance.

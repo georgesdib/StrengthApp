@@ -17,9 +17,14 @@ public struct RestActivityAttributes: ActivityAttributes {
     }
 
     public var workoutId: String
+    /// True when the rest belongs to a workout running on the Apple Watch: the countdown is
+    /// mirrored from the wrist, so the phone must not offer controls it cannot honour.
+    /// Optional so an activity started by an older build still decodes.
+    public var watchMirrored: Bool?
 
-    public init(workoutId: String) {
+    public init(workoutId: String, watchMirrored: Bool? = nil) {
         self.workoutId = workoutId
+        self.watchMirrored = watchMirrored
     }
 }
 #endif

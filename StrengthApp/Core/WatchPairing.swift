@@ -11,6 +11,12 @@ protocol WatchConnectivitySessionDelegate: AnyObject {
         _ message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     )
+    /// A queued user-info delivery from the watch: the rest mirror and the plan payloads.
+    func watchConnectivityDidReceiveUserInfo(_ userInfo: [String: Any])
+}
+
+extension WatchConnectivitySessionDelegate {
+    func watchConnectivityDidReceiveUserInfo(_ userInfo: [String: Any]) {}
 }
 
 @MainActor
@@ -126,6 +132,12 @@ final class LiveWatchConnectivitySession: NSObject, WatchConnectivitySession, WC
             )
         }
     }
+
+    nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        Task { @MainActor in
+            self.delegate?.watchConnectivityDidReceiveUserInfo(userInfo)
+        }
+    }
 }
 
 enum WatchConnectivityError: LocalizedError {
@@ -168,6 +180,8 @@ final class WatchPairingCoordinator: ObservableObject {
     private var autoMintAttempts = 0
     private var configRebaselineAttempts = 0
     private var isActive = false
+    /// The scene mapping last handed to WatchConnectivity in this launch.
+    private var sentSceneMapping: (start: String?, end: String?)?
 
     init(
         client: IOSAPIClient,
@@ -551,9 +565,28 @@ final class WatchPairingCoordinator: ObservableObject {
         }
     }
 
-    /// Re-sends the credential context so a changed scene choice reaches the watch.
+    /// Re-sends the credential context and pushes the scene mapping on its own channel, so a
+    /// changed choice reaches the watch even though the credential slot itself may be unchanged.
     func syncSceneMapping() async {
+        sendSceneMapping(force: true)
         await sendCredential()
+    }
+
+    /// The scene mapping as a queued user-info transfer. It survives an unreachable watch and is
+    /// re-delivered when the watch app next runs, which is what a preference needs.
+    func sendSceneMapping(force: Bool = false) {
+        guard let connectivity else { return }
+        guard connectivity.activationState == .activated else {
+            // The activation callback re-sends the mapping, so nothing is queued here.
+            connectivity.activate()
+            return
+        }
+        let start = WorkoutAutomation.shared.startScene?.jsonString
+        let end = WorkoutAutomation.shared.endScene?.jsonString
+        // A reachability change must not queue the same preference again and again.
+        if !force, let sent = sentSceneMapping, sent.start == start, sent.end == end { return }
+        sentSceneMapping = (start, end)
+        connectivity.transferUserInfo(WatchSceneMapping.message(start: start, end: end))
     }
 
     private func sendRevokedContext() async {
@@ -977,6 +1010,7 @@ extension WatchPairingCoordinator: WatchConnectivitySessionDelegate {
         refreshAvailability()
         updatePhase()
         if connectivity?.activationState == .activated {
+            sendSceneMapping()
             if let context = connectivity?.receivedApplicationContext, !context.isEmpty {
                 handle(context)
             }
@@ -992,5 +1026,10 @@ extension WatchPairingCoordinator: WatchConnectivitySessionDelegate {
 
     func watchConnectivityDidReceive(_ context: [String: Any]) {
         handle(context)
+    }
+
+    func watchConnectivityDidReceiveUserInfo(_ userInfo: [String: Any]) {
+        // A rest the wrist started, mirrored as the phone's Live Activity.
+        if WatchRestMirror.shared.handle(userInfo) { return }
     }
 }

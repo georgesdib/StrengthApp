@@ -631,3 +631,45 @@ Device behaviour therefore remains unverified on hardware: paired-server answers
 links, copyable private-doc citations, and the offline and index-not-ready states.
 
 Owner confirmation: closed by owner decision 2026-11-17; no device run.
+
+
+---
+
+# Watch rest mirror and Home scene diagnostics — implemented, device run pending (2026-11-21)
+
+**Status 2026-11-21:** implemented. The phone now mirrors a rest that starts on the Apple Watch as
+its Live Activity, and the watch reports what it knows about the phone's Home scenes so a scene that
+does not run is no longer silent. Fourteen automated tests cover the payload and the mirror
+decisions; the watch and phone device behaviour below has **not** been verified on hardware yet, and
+the Home scene failure reported on 2026-11-21 is not yet explained.
+
+## Automated
+
+- [x] `WatchRestSnapshot` survives the user-info round trip, including a rest with no end date.
+- [x] A foreign or malformed message is ignored, never decoded into a rest.
+- [x] A rest shows when the phone is idle, defaults its label to **Rest**, and carries the watch's end date.
+- [x] A phone-started rest wins: a watch rest never replaces it.
+- [x] A duplicate or reordered delivery is ignored; a relaunched watch is never treated as stale.
+- [x] A rest with no end date dismisses only a mirrored activity, and a rest that ended before the
+      delivery arrives never appears.
+- [x] `WatchSceneMapping` round-trips and treats an empty field as "no scene".
+- [x] The focused suites (`WatchRestMirrorTests`, `WorkoutAutomationTests`, `WatchPairingTests`,
+      `WatchMirrorTests`) pass on the iPhone 18 Pro simulator: 55 tests, 0 failures.
+
+## Physical device — not run
+
+- [ ] Start a set on the Apple Watch; within a few seconds the phone's Lock Screen shows the rest
+      countdown with **Rest on Apple Watch** and no **+15 s** / **Skip**.
+- [ ] With the phone locked and the app backgrounded, the mirror still appears and counts down
+      correctly.
+- [ ] Extending or skipping the rest on the watch updates or dismisses the phone's activity.
+- [ ] A rest started on the phone is not replaced by a watch rest, and vice versa.
+- [ ] On the watch Today screen, **Home scenes** shows the start and end scene chosen on the phone.
+- [ ] Changing the scene on the phone reaches the watch within a few seconds without re-pairing.
+- [ ] **Test start scene** runs the scene from the watch alone.
+- [ ] Starting a workout on the watch runs the start scene; finishing or discarding runs the end scene.
+- [ ] If a scene does not run, the watch shows which case it is: **No scenes from iPhone**,
+      **No Home access on Apple Watch**, or **Scene did not run**.
+
+Owner confirmation: pending.
+

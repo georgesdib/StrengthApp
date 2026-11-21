@@ -27,6 +27,15 @@ final class WatchExecutionController: ObservableObject {
     /// The rest end the pending notification was scheduled for, so sync() only re-schedules
     /// when the interval actually changes.
     private var scheduledRestEnd: Date?
+
+    /// Called whenever the open rest changes, so the phone can mirror it as a Live Activity.
+    var onRestChanged: ((WatchRestSnapshot) -> Void)?
+    /// The last rest state sent, so a sync that changed nothing does not re-send it.
+    private var sentRest: (sessionId: String, endsAt: Date?)?
+    private var restSequence = 0
+    /// Identifies this launch: a relaunched watch restarts its sequence numbering, and the phone
+    /// must not treat the new numbers as stale.
+    private static let restLaunchId = UUID().uuidString.lowercased()
     @Published private(set) var lastError: String?
     @Published private(set) var isOffline = false
     @Published private(set) var isWorking = false
@@ -264,7 +273,7 @@ final class WatchExecutionController: ObservableObject {
         if !started {
             await endLiveness()
         } else if let sessionID = engine.sessionRecord?.sessionUUID {
-            await WatchSceneAutomation.run(event: "started", sessionID: sessionID)
+            await WatchSceneAutomation.shared.run(event: "started", sessionID: sessionID)
             // The Action button's next press should bring the session forward for sRPE.
             _ = try? await ActionButtonOpenFinishIntent().donate()
         }
@@ -563,7 +572,7 @@ final class WatchExecutionController: ObservableObject {
         #endif
         await handle(stop)
         if engine.sessionRecord?.finish != nil, let sessionID = engine.sessionRecord?.sessionUUID {
-            await WatchSceneAutomation.run(event: "ended", sessionID: sessionID)
+            await WatchSceneAutomation.shared.run(event: "ended", sessionID: sessionID)
         }
         // The HealthKit save ends the live session itself, so liveness is not ended here.
         if !WatchSmokeMode.isEnabled {
@@ -584,7 +593,7 @@ final class WatchExecutionController: ObservableObject {
         let sessionID = engine.sessionRecord?.sessionUUID
         await engine.discard(session: session)
         if let sessionID {
-            await WatchSceneAutomation.run(event: "ended", sessionID: sessionID)
+            await WatchSceneAutomation.shared.run(event: "ended", sessionID: sessionID)
         }
         await endLiveness()
         sync()
@@ -799,6 +808,39 @@ final class WatchExecutionController: ObservableObject {
         finishAcknowledged = engine.sessionRecord?.finish?.serverAcked ?? false
         lastError = engine.lastError
         syncRestNotification()
+        syncRestRelay()
+    }
+
+    /// Publishes the open rest to the phone. The end date is absolute, so a late delivery still
+    /// renders the right countdown; the phone never ticks on the watch's behalf.
+    private func syncRestRelay() {
+        let sessionId = engine.sessionRecord?.sessionUUID ?? ""
+        let open = engine.sessionRecord?.rest
+        let endsAt = open.map { $0.isOpen && $0.endsAt > Date() ? $0.endsAt : nil } ?? nil
+        if sentRest?.sessionId == sessionId, sentRest?.endsAt == endsAt { return }
+        sentRest = (sessionId, endsAt)
+        restSequence += 1
+        let label = open.flatMap { restLabel(for: $0) }
+        onRestChanged?(
+            WatchRestSnapshot(
+                launchId: Self.restLaunchId,
+                sequence: restSequence,
+                sessionId: sessionId,
+                endsAt: endsAt,
+                exerciseLabel: label,
+                workoutId: sessionId.isEmpty ? nil : sessionId
+            )
+        )
+    }
+
+    private func restLabel(for rest: RestInterval) -> String? {
+        guard let index = rest.planItemIndex,
+              let item = engine.planItems.first(where: { $0.orderIndex == index }),
+              let exerciseId = item.exerciseId,
+              !exerciseId.isEmpty else {
+            return nil
+        }
+        return Self.displayName(forExercise: exerciseId)
     }
 
     /// Keeps one pending notification pointed at the open rest's end, and none otherwise.

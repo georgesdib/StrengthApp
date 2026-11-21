@@ -27,6 +27,9 @@ final class WatchSessionController: NSObject, ObservableObject {
     private var deferredContext: [String: Any]?
     private var retryTask: Task<Void, Never>?
     private var retryAttempts = 0
+    /// The latest rest the phone has not been told about yet, kept while WatchConnectivity is
+    /// still activating.
+    private var pendingRest: WatchRestSnapshot?
 
     init(store: WatchCredentialStore = WatchCredentialStore()) {
         self.store = store
@@ -55,6 +58,30 @@ final class WatchSessionController: NSObject, ObservableObject {
             sendAcknowledgement()
         }
         retryDeferredConfig()
+        flushPendingRest()
+    }
+
+    /// Sends the open rest to the phone, which mirrors it as a Live Activity. A queued user-info
+    /// transfer survives an unreachable or sleeping phone; the latest state is kept and re-sent
+    /// once the session is active.
+    func sendRest(_ snapshot: WatchRestSnapshot) {
+        guard let session, session.activationState == .activated else {
+            pendingRest = snapshot
+            return
+        }
+        pendingRest = nil
+        if let message = snapshot.message {
+            session.transferUserInfo(message)
+        }
+    }
+
+    private func flushPendingRest() {
+        guard let snapshot = pendingRest,
+              let session, session.activationState == .activated else { return }
+        pendingRest = nil
+        if let message = snapshot.message {
+            session.transferUserInfo(message)
+        }
     }
 
     /// Applies a configuration change that was deferred while the session was busy.
@@ -108,6 +135,9 @@ final class WatchSessionController: NSObject, ObservableObject {
               (try? credential.validated()) != nil else {
             return
         }
+        // The scene mapping is independent of the credential policy: it must land even while a
+        // home-server change is deferred until the running session is finished and synced.
+        WatchSceneAutomation.shared.store(start: credential.startScene, end: credential.endScene)
         // Defer a home-server change while this watch has a session to finish and sync.
         if let stored = store.stored,
            stored.homeBaseURL != credential.homeBaseURL,
@@ -118,7 +148,6 @@ final class WatchSessionController: NSObject, ObservableObject {
         deferredContext = nil
         do {
             _ = try store.apply(credential)
-            WatchSceneAutomation.store(start: credential.startScene, end: credential.endScene)
             lastError = nil
             refreshState()
         } catch {
@@ -243,6 +272,7 @@ extension WatchSessionController: WCSessionDelegate {
             if activationState == .activated {
                 self.process(session.receivedApplicationContext)
                 self.sendAcknowledgement()
+                self.flushPendingRest()
             }
             self.refreshState()
         }
@@ -263,6 +293,12 @@ extension WatchSessionController: WCSessionDelegate {
         didReceiveUserInfo userInfo: [String: Any] = [:]
     ) {
         Task { @MainActor [weak self] in
+            if let mapping = WatchSceneMapping.decode(userInfo) {
+                // The phone's scene choice has its own channel, so it lands even when the
+                // credential context has not changed.
+                WatchSceneAutomation.shared.store(start: mapping.start, end: mapping.end)
+                return
+            }
             self?.onExecutionPayload?(userInfo)
         }
     }

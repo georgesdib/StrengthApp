@@ -168,6 +168,10 @@ The timer uses the prescription's rest seconds when available.
 
 ### Lock Screen and Control Center
 
+A rest that starts on the Apple Watch is mirrored to the phone: the same countdown appears on the
+Lock Screen and in the Dynamic Island, with **Rest on Apple Watch** instead of the buttons, because
+the wrist owns the interval and ends it.
+
 While a rest is running, the phone shows a Live Activity countdown on the Lock Screen and in the
 Dynamic Island. The countdown is drawn by the system from the rest's end time, so it stays correct
 with the app closed. **+15 s** and **Skip** are buttons on the Lock Screen card and in the expanded
@@ -373,6 +377,12 @@ network the sets queue on the watch and sync when it reconnects.
 
 Requested a workout for the wrong target? The ready card on Today offers **Request another
 workout**, which supersedes the pending plan; a watch only drops the old plan at its next refresh.
+
+**Home scenes on the watch.** The watch runs the start and end Home scene you chose under
+**Settings → Workout automation**. The choice reaches the watch shortly after you pick it; the watch
+Today screen shows **Home scenes** with the chosen start and end scene, a **Test start scene** button
+and the result of the last run. If it says **No Home access on Apple Watch**, allow Home access when
+the watch asks, or check the watch app's HomeKit entitlement.
 
 While the watch owns the session the phone shows **Logged on Apple Watch** and does not accept sets,
 form ratings or velocity. Use the phone to edit the plan; an edit reaches the watch at its next idle

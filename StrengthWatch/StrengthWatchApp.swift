@@ -31,6 +31,10 @@ struct StrengthWatchApp: App {
         session.onExecutionPayload = { [weak execution] in
             execution?.applyRemotePayload($0)
         }
+        // A rest that starts on the wrist is mirrored on the phone as a Live Activity.
+        execution.onRestChanged = { [weak session] snapshot in
+            session?.sendRest(snapshot)
+        }
         session.canApplyConfig = { [weak execution] in
             guard let execution else { return false }
             return execution.phase == .ready && execution.pendingCount == 0

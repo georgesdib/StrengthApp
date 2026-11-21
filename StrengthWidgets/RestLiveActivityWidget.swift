@@ -25,7 +25,7 @@ struct RestLiveActivityWidget: Widget {
                         .font(.title3.monospacedDigit())
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    RestControls()
+                    RestFooterView(watchMirrored: context.attributes.watchMirrored == true)
                 }
             } compactLeading: {
                 Image(systemName: "timer")
@@ -36,6 +36,23 @@ struct RestLiveActivityWidget: Widget {
                 Image(systemName: "timer")
             }
             .keylineTint(.orange)
+        }
+    }
+}
+
+/// A rest that belongs to a workout running on the Apple Watch is rendered, not controlled: the
+/// wrist owns the interval, so the phone shows where it comes from instead of offering buttons
+/// it cannot honour.
+private struct RestFooterView: View {
+    let watchMirrored: Bool
+
+    var body: some View {
+        if watchMirrored {
+            Label("Rest on Apple Watch", systemImage: "applewatch")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } else {
+            RestControls()
         }
     }
 }
@@ -74,7 +91,7 @@ private struct RestLockScreenView: View {
                 RestCountdown(endDate: context.state.endDate)
                     .font(.title2.monospacedDigit())
             }
-            RestControls()
+            RestFooterView(watchMirrored: context.attributes.watchMirrored == true)
         }
         .padding()
     }

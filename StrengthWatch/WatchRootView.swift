@@ -21,6 +21,8 @@ struct WatchRootView: View {
             session.start()
             execution.load()
             await today.refresh()
+            // Ask for Home access while the owner is looking at the app, not mid-set.
+            await WatchSceneAutomation.shared.preload()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

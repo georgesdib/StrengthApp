@@ -5,6 +5,7 @@ struct WatchTodayView: View {
     @ObservedObject var today: WatchTodayController
     @ObservedObject var execution: WatchExecutionController
     @ObservedObject var session: WatchSessionController
+    @ObservedObject private var scenes = WatchSceneAutomation.shared
 
     var body: some View {
         ScrollView {
@@ -72,8 +73,43 @@ struct WatchTodayView: View {
                 case .unavailable(let text):
                     message(text)
                 }
+
+                sceneStatus
             }
         }
+    }
+
+    /// What the watch knows about the phone's Home scenes. This is the only way to tell "the
+    /// mapping never arrived" from "HomeKit refused on the watch" without a Mac.
+    private var sceneStatus: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: "house")
+                    .font(.caption2)
+                Text("Home scenes")
+                    .font(.caption2)
+                Spacer()
+                if scenes.status.isRunning {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+            }
+            Text(scenes.status.summary)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+                .accessibilityIdentifier("watch-scene-status")
+            if scenes.status.startLabel != nil {
+                Button {
+                    Task { await scenes.testStartScene() }
+                } label: {
+                    Text("Test start scene")
+                        .font(.caption2)
+                }
+                .accessibilityIdentifier("watch-test-scene")
+            }
+        }
+        .padding(.top, 4)
     }
 
     private func offlineReason(_ detail: String) -> some View {

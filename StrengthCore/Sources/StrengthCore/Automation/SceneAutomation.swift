@@ -27,11 +27,42 @@ public struct SceneSelection: Codable, Equatable, Sendable {
     }
 }
 
+/// The scene mapping as its own WatchConnectivity message, so a changed choice reaches the watch
+/// even when the credential context itself is unchanged (that slot is shared with the handshake).
+public enum WatchSceneMapping {
+    public static let kind = "scenes"
+
+    /// An empty string means "the phone has no scene for this event", which is different from a
+    /// field that is absent because no mapping was ever sent.
+    public static func message(start: String?, end: String?) -> [String: Any] {
+        [
+            "kind": kind,
+            "start": start ?? "",
+            "end": end ?? "",
+        ]
+    }
+
+    /// nil when the message is not a scene mapping.
+    public static func decode(_ message: [String: Any]) -> (start: String?, end: String?)? {
+        guard (message["kind"] as? String) == kind,
+              let start = message["start"] as? String,
+              let end = message["end"] as? String else { return nil }
+        return (start.isEmpty ? nil : start, end.isEmpty ? nil : end)
+    }
+}
+
 /// Runs HomeKit scenes. Behind a protocol so the automation is testable without a home.
 @MainActor
 public protocol SceneRunning: AnyObject {
     func scenes() async -> [SceneSelection]
     func run(_ selection: SceneSelection) async -> Bool
+    /// The number of homes HomeKit returned the last time it loaded, or nil when unknown. This is
+    /// the only signal HomeKit gives for "access refused" versus "no home configured".
+    var homeCount: Int? { get }
+}
+
+public extension SceneRunning {
+    var homeCount: Int? { nil }
 }
 
 /// Live HomeKit executor. Best-effort: a denied authorisation, a deleted home or a missing scene
@@ -73,7 +104,9 @@ public final class HomeKitSceneRunner: NSObject, SceneRunning, HMHomeManagerDele
         guard let home = manager.homes.first(where: {
             $0.uniqueIdentifier.uuidString == selection.homeID
         }) else {
-            logger.error("scene home not found; skipping")
+            logger.error(
+                "scene home not found; skipping (homes: \(self.manager.homes.count, privacy: .public))"
+            )
             return false
         }
         guard let set = home.actionSets.first(where: {
@@ -93,10 +126,22 @@ public final class HomeKitSceneRunner: NSObject, SceneRunning, HMHomeManagerDele
         return executed
     }
 
-    /// HomeKit loads homes asynchronously; wait for the first update instead of returning an empty list.
+    /// Loads HomeKit once, early, so the system's Home access prompt appears when the app opens
+    /// rather than in the middle of a set. Never throws and never blocks the caller for long.
+    public func preload() async {
+        await waitForHomes()
+        logger.log("home preload: \(self.manager.homes.count, privacy: .public) home(s)")
+    }
+
+    /// How many homes HomeKit returned. Zero means access was refused, the entitlement is missing,
+    /// or the owner has no home on this device — the only signal HomeKit offers.
+    public var homeCount: Int? { manager.homes.count }
+
+    /// HomeKit loads homes asynchronously; wait for the first update instead of returning an empty
+    /// list. The wait is bounded: a scene must never hang the workout that triggered it.
     private func waitForHomes() async {
         if homes.loaded || !manager.homes.isEmpty { return }
-        await homes.wait()
+        await homes.wait(timeout: 4)
     }
 
     @objc nonisolated public func homeManagerDidUpdateHomes(_ manager: HMHomeManager) {
@@ -118,13 +163,22 @@ final class HomesWaiters {
     private(set) var loaded = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    func wait() async {
+    /// Waits for the first HomeKit update, or `timeout` seconds, whichever comes first. A manager
+    /// that never calls back — a missing HomeKit entitlement, for instance — must not suspend the
+    /// caller forever.
+    func wait(timeout: TimeInterval) async {
         if loaded { return }
         await withCheckedContinuation { continuation in
             if loaded {
                 continuation.resume()
-            } else {
-                waiters.append(continuation)
+                return
+            }
+            waiters.append(continuation)
+            Task { @MainActor in
+                try? await Task.sleep(
+                    nanoseconds: UInt64(max(0, timeout) * 1_000_000_000)
+                )
+                self.markLoaded()
             }
         }
     }

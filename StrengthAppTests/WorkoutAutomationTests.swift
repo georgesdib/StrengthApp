@@ -128,6 +128,18 @@ final class WorkoutAutomationTests: XCTestCase {
         XCTAssertNil(SceneSelection.decode("not json"))
     }
 
+    func testSceneMappingMessageTreatsEmptyAsNone() throws {
+        let start = "{\"homeID\":\"h1\",\"label\":\"Home — Gym\"}"
+        let message = WatchSceneMapping.message(start: start, end: nil)
+        let decoded = try XCTUnwrap(WatchSceneMapping.decode(message))
+        XCTAssertEqual(decoded.start, start)
+        XCTAssertNil(decoded.end)
+
+        XCTAssertNotNil(WatchSceneMapping.decode(WatchSceneMapping.message(start: nil, end: start)))
+        XCTAssertNil(WatchSceneMapping.decode(["kind": "relay"]))
+        XCTAssertNil(WatchSceneMapping.decode(["kind": WatchSceneMapping.kind, "start": "x"]))
+    }
+
     func testURLShape() {
         let url = WorkoutAutomation.url(forShortcutNamed: "Lights & fan")
         XCTAssertEqual(url?.scheme, "shortcuts")
@@ -139,8 +151,8 @@ final class WorkoutAutomationTests: XCTestCase {
     @MainActor
     func testHomesWaitersWakeEveryCallerAndAllowEarlyLoad() async {
         let waiters = HomesWaiters()
-        async let first: Void = waiters.wait()
-        async let second: Void = waiters.wait()
+        async let first: Void = waiters.wait(timeout: 5)
+        async let second: Void = waiters.wait(timeout: 5)
         await Task.yield()
         waiters.markLoaded()
         _ = await (first, second)
@@ -148,7 +160,7 @@ final class WorkoutAutomationTests: XCTestCase {
 
         let alreadyLoaded = HomesWaiters()
         alreadyLoaded.markLoaded()
-        await alreadyLoaded.wait()
+        await alreadyLoaded.wait(timeout: 5)
         XCTAssertTrue(alreadyLoaded.loaded)
     }
 }

@@ -8,7 +8,8 @@ final class WatchTodayTests: XCTestCase {
         status: String = "ready",
         target: String? = "watch",
         withPlan: Bool = true,
-        elapsed: Int? = nil
+        elapsed: Int? = nil,
+        readiness: [String: Any]? = nil
     ) throws -> PlansStateResponse {
         var object: [String: Any] = [
             "status": status,
@@ -21,6 +22,9 @@ final class WatchTodayTests: XCTestCase {
         ]
         if let elapsed {
             object["elapsed_seconds"] = elapsed
+        }
+        if let readiness {
+            object["readiness"] = readiness
         }
         if withPlan {
             object["plan"] = [
@@ -208,6 +212,81 @@ final class WatchTodayTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+    }
+
+    // MARK: - Readiness and the empty state
+
+    func testReadinessSummaryCarriesTheServersScoreAndTwoDrivers() throws {
+        let state = try planState(readiness: [
+            "status": "ready",
+            "score": 0.82,
+            "components": [
+                ["field": "hrv_ms", "value": 62, "normalised": 0.8, "weight": 0.3],
+                ["field": "sleep_hours", "value": 7.4, "normalised": 0.9, "weight": 0.5],
+                ["field": "rhr_bpm", "value": 48, "normalised": 0.7, "weight": 0.2],
+            ],
+        ])
+        let summary = try XCTUnwrap(WatchReadinessSummary.make(state.readiness))
+        XCTAssertEqual(summary.statusWord, "Ready")
+        XCTAssertEqual(summary.scoreText, "82%")
+        XCTAssertEqual(summary.drivers, ["Sleep 7.4 h", "HRV 62 ms"])
+    }
+
+    func testInsufficientReadinessSaysNotScoredYet() throws {
+        let state = try planState(readiness: ["status": "insufficient"])
+        let summary = try XCTUnwrap(WatchReadinessSummary.make(state.readiness))
+        XCTAssertEqual(summary.statusWord, "Not scored yet")
+        XCTAssertNil(summary.scoreText)
+        XCTAssertTrue(summary.drivers.isEmpty)
+    }
+
+    func testReadinessSummaryIsAbsentWithoutAScore() {
+        XCTAssertNil(WatchReadinessSummary.make(nil))
+    }
+
+    func testEmptyCopyAnswersWhyAndWhatNext() throws {
+        XCTAssertEqual(WatchTodayCopy.empty(for: .noPlan)?.identifier, "no-plan")
+        XCTAssertEqual(
+            WatchTodayCopy.empty(for: .noPlan)?.action,
+            "Request one on your iPhone."
+        )
+        XCTAssertEqual(WatchTodayCopy.empty(for: .phonePlan)?.identifier, "phone-plan")
+        XCTAssertEqual(WatchTodayCopy.empty(for: .missingCredentials)?.identifier, "unpaired")
+        XCTAssertNil(WatchTodayCopy.empty(for: .loading))
+        XCTAssertNil(WatchTodayCopy.empty(for: .generating(elapsedSeconds: 3)))
+        XCTAssertNil(WatchTodayCopy.empty(for: WatchTodayMapper.map(try planState())))
+
+        let offline = WatchTodayCopy.empty(for: .offline(nil, detail: "home.local — timed out"))
+        XCTAssertEqual(offline?.identifier, "offline")
+        XCTAssertTrue(offline?.detail?.contains("home.local") == true)
+    }
+
+    func testServiceCarriesReadinessFromTheSamePlanRead() async throws {
+        let body = """
+        {
+          "status": "none",
+          "readiness": { "status": "ready", "score": 0.64 }
+        }
+        """
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(body.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let service = WatchTodayService(client: IOSAPIClient(transport: transport))
+        let snapshot = try await service.fetch(session: IOSSession(
+            baseURL: URL(string: "http://home.local:8000")!,
+            token: "watch-token",
+            deviceID: "watch-1"
+        ))
+        XCTAssertEqual(snapshot.state, .noPlan)
+        XCTAssertEqual(snapshot.readiness?.scoreText, "64%")
+        XCTAssertEqual(transport.requests.count, 2)
     }
 
     private func planJSON() -> String {

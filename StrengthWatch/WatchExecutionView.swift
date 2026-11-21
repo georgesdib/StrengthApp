@@ -128,6 +128,7 @@ struct WatchSessionSheet: View {
                         .font(.caption2)
                         .foregroundStyle(.red)
                 }
+                WatchSceneNotice(execution: execution)
                 Button("Refresh") {
                     Task { await execution.reconcileNow() }
                 }
@@ -161,6 +162,27 @@ struct WatchSessionSheet: View {
     }
 }
 
+/// A Home scene that did not run, shown where the transition happened instead of failing
+/// silently. The detail says which case it was: no home, no scene, or HomeKit refusing.
+struct WatchSceneNotice: View {
+    @ObservedObject var execution: WatchExecutionController
+
+    var body: some View {
+        if let notice = execution.sceneNotice {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Home scene: \(notice)")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.leading)
+                Button("Dismiss") { execution.dismissSceneNotice() }
+                    .font(.caption2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("watch-scene-notice")
+        }
+    }
+}
+
 // MARK: - Finish states
 
 struct WatchFinishProgressView: View {
@@ -188,6 +210,7 @@ struct WatchFinishProgressView: View {
                         .font(.caption2)
                         .foregroundStyle(.red)
                 }
+                WatchSceneNotice(execution: execution)
                 WatchHealthKitStatus(execution: execution)
                 Button("Retry sync") {
                     Task { await execution.flushNow() }

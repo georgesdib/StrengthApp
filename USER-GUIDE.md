@@ -378,11 +378,23 @@ network the sets queue on the watch and sync when it reconnects.
 Requested a workout for the wrong target? The ready card on Today offers **Request another
 workout**, which supersedes the pending plan; a watch only drops the old plan at its next refresh.
 
+**Today on the watch.** The top line answers how you are: the date, the server's readiness status
+and score, and up to two of the drivers it reports (sleep, HRV, resting heart rate). The watch shows
+those numbers; it never computes them. **Not scored yet** means the day has no score — log readiness
+on the iPhone.
+
+When there is nothing to start, the screen says why and what fixes it: **No workout today** (request
+one on the iPhone), **Planned for iPhone** (start it there), **Not for Apple Watch**, **Not paired**
+(open Strength on the iPhone to pair), or **Can't reach your Home Server** with the host that was
+tried. The gear opens **Settings**.
+
 **Home scenes on the watch.** The watch runs the start and end Home scene you chose under
-**Settings → Workout automation**. The choice reaches the watch shortly after you pick it; the watch
-Today screen shows **Home scenes** with the chosen start and end scene, a **Test start scene** button
-and the result of the last run. If it says **No Home access on Apple Watch**, allow Home access when
-the watch asks, or check the watch app's HomeKit entitlement.
+**Settings → Workout automation** on the iPhone. The choice reaches the watch shortly after you pick
+it. **Watch Settings** (the gear on Today) lists the chosen start and end scene, the result of the
+last run, and a **Test start scene** button. If a scene fails when a session starts, finishes or is
+discarded, the watch names the case on that screen instead of failing silently: **No Home access on
+Apple Watch** (allow Home access when the watch asks, or check the app's HomeKit entitlement),
+**Home … not on watch**, **Scene … not in …**, or **HomeKit: …** with the system error.
 
 While the watch owns the session the phone shows **Logged on Apple Watch** and does not accept sets,
 form ratings or velocity. Use the phone to edit the plan; an edit reaches the watch at its next idle

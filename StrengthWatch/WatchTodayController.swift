@@ -6,6 +6,9 @@ import StrengthCore
 final class WatchTodayController: ObservableObject {
     @Published private(set) var state: WatchTodayState = .loading
     @Published private(set) var serverDate: String?
+    /// Today's readiness, carried by the same plan read. Kept through an offline failure so the
+    /// screen still answers "how am I today"; cleared only when the watch loses its credential.
+    @Published private(set) var readiness: WatchReadinessSummary?
     @Published private(set) var isRefreshing = false
 
     /// Backstop, not the primary timeout: the client cancels a request at 10 s and retries a
@@ -39,6 +42,7 @@ final class WatchTodayController: ObservableObject {
 
     func credentialsUnavailable() {
         lastPlan = nil
+        readiness = nil
         state = .missingCredentials
     }
 
@@ -65,6 +69,7 @@ final class WatchTodayController: ObservableObject {
                 try await self.service.fetch(session: session)
             }
             serverDate = snapshot.serverDate
+            readiness = snapshot.readiness
             if case .ready(let plan) = snapshot.state {
                 lastPlan = plan
             } else {

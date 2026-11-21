@@ -81,7 +81,10 @@ final class WatchSceneAutomation: ObservableObject {
         refresh()
     }
 
-    func run(event: String, sessionID: String) async {
+    /// Runs the scene for one session transition. nil means there was nothing to do — no scene
+    /// chosen, or this session and event already ran — so there is nothing to tell the athlete.
+    @discardableResult
+    func run(event: String, sessionID: String) async -> SceneRunOutcome? {
         let key = event == "started" ? Self.startKey : Self.endKey
         guard let json = defaults.string(forKey: key),
               let scene = SceneSelection.decode(json) else {
@@ -89,12 +92,12 @@ final class WatchSceneAutomation: ObservableObject {
             status.lastEvent = event
             status.lastResult = "No scene for \(event)"
             status.lastRunAt = Date()
-            return
+            return nil
         }
 
         let fired = sessionID + ":" + event
         var keys = defaults.stringArray(forKey: Self.firedKey) ?? []
-        guard !keys.contains(fired) else { return }
+        guard !keys.contains(fired) else { return nil }
         keys.append(fired)
         if keys.count > Self.firedLimit {
             keys.removeFirst(keys.count - Self.firedLimit)
@@ -115,6 +118,7 @@ final class WatchSceneAutomation: ObservableObject {
             defaults.set(keys.filter { $0 != fired }, forKey: Self.firedKey)
             logger.error("scene \(event, privacy: .public) failed: \(outcome.detail, privacy: .public)")
         }
+        return outcome
     }
 
     /// Runs the start scene now, without a session, so the owner can tell a HomeKit problem from a

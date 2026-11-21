@@ -37,9 +37,10 @@ build installed, Test start scene ran the scene from the watch alone.
       correctly.
 - [ ] Extending or skipping the rest on the watch updates or dismisses the phone's activity.
 - [ ] A rest started on the phone is not replaced by a watch rest, and vice versa.
-- [x] On the watch Today screen, **Home scenes** shows the start and end scene chosen on the phone.
+- [x] The watch shows the Home scene mapping the phone chose (now under watch **Settings**, after
+      the Today screen was returned to training).
 - [ ] Changing the scene on the phone reaches the watch within a few seconds without re-pairing.
-- [x] **Test start scene** runs the scene from the watch alone.
+- [x] **Test start scene** runs the scene from the watch alone (watch **Settings** → Test start scene).
 - [ ] Starting a workout on the watch runs the start scene; finishing or discarding runs the end scene.
 - [x] If a scene does not run, the watch names the case instead of failing silently.
 

@@ -37,6 +37,9 @@ final class WatchExecutionController: ObservableObject {
     /// must not treat the new numbers as stale.
     private static let restLaunchId = UUID().uuidString.lowercased()
     @Published private(set) var lastError: String?
+    /// A Home scene that did not run at a session transition. Shown once, where the transition
+    /// happened, instead of failing silently.
+    @Published private(set) var sceneNotice: String?
     @Published private(set) var isOffline = false
     @Published private(set) var isWorking = false
     @Published private(set) var authorization: LivenessAuthorization = .notDetermined
@@ -274,7 +277,11 @@ final class WatchExecutionController: ObservableObject {
         if !started {
             await endLiveness()
         } else if let sessionID = engine.sessionRecord?.sessionUUID {
-            await WatchSceneAutomation.shared.run(event: "started", sessionID: sessionID)
+            if let outcome = await WatchSceneAutomation.shared.run(
+                event: "started", sessionID: sessionID
+            ), !outcome.succeeded {
+                sceneNotice = outcome.detail
+            }
             // The Action button's next press should bring the session forward for sRPE.
             _ = try? await ActionButtonOpenFinishIntent().donate()
         }
@@ -573,7 +580,11 @@ final class WatchExecutionController: ObservableObject {
         #endif
         await handle(stop)
         if engine.sessionRecord?.finish != nil, let sessionID = engine.sessionRecord?.sessionUUID {
-            await WatchSceneAutomation.shared.run(event: "ended", sessionID: sessionID)
+            if let outcome = await WatchSceneAutomation.shared.run(
+                event: "ended", sessionID: sessionID
+            ), !outcome.succeeded {
+                sceneNotice = outcome.detail
+            }
         }
         // The HealthKit save ends the live session itself, so liveness is not ended here.
         if !WatchSmokeMode.isEnabled {
@@ -594,10 +605,18 @@ final class WatchExecutionController: ObservableObject {
         let sessionID = engine.sessionRecord?.sessionUUID
         await engine.discard(session: session)
         if let sessionID {
-            await WatchSceneAutomation.shared.run(event: "ended", sessionID: sessionID)
+            if let outcome = await WatchSceneAutomation.shared.run(
+                event: "ended", sessionID: sessionID
+            ), !outcome.succeeded {
+                sceneNotice = outcome.detail
+            }
         }
         await endLiveness()
         sync()
+    }
+
+    func dismissSceneNotice() {
+        sceneNotice = nil
     }
 
     func dismissSummary() {

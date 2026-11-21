@@ -10,7 +10,7 @@ enum HealthKitActivityError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable: return "Health data is not available on this device."
-        case .denied: return "Health access was not granted for workouts and heart rate."
+        case .denied: return "Health access was not granted for workouts, heart rate and active energy."
         case .query(let message): return message
         }
     }
@@ -229,6 +229,10 @@ final class HealthKitActivityService: HealthKitActivityProviding {
             throw HealthKitActivityError.unavailable
         }
         var read: Set<HKObjectType> = [HKObjectType.workoutType(), heartRate]
+        // Workout statistics for active energy are only returned when the app may read the type.
+        if let activeEnergy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
+            read.insert(activeEnergy)
+        }
         if let vo2max = HKObjectType.quantityType(forIdentifier: .vo2Max) { read.insert(vo2max) }
         if let effort = HKObjectType.quantityType(forIdentifier: .workoutEffortScore) {
             read.insert(effort)

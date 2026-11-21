@@ -1,6 +1,7 @@
 # HEALTHKIT — CURRENT STATE
 
-**Status:** describes shipped behaviour on 2026-11-18 (backend 1.7.1). The cardio stage is
+**Status:** describes the development behaviour on 2026-11-21 (backend 1.7.1); the active-energy
+read scope and the saved workout's calories await physical-device acceptance. The cardio stage is
 **implemented and deployed**, not proposed. This is a client-owned document: it describes what the
 phone and watch do with HealthKit. Server behaviour is owned by the backend and the shared contract
 in the [Phase 3A contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-3A-CONTRACT.md).
@@ -12,8 +13,12 @@ Read this before changing any HealthKit code.
 | Surface | Reads | Writes |
 |---|---|---|
 | iPhone — readiness | HRV (SDNN), resting heart rate, body mass | Nothing |
-| iPhone — recorded activity | Workouts, heart rate, VO₂max, workout effort score, Apple's average METs | Nothing |
-| Watch — workout execution | Heart rate, during a running workout session | One strength-training workout, one workout effort score |
+| iPhone — recorded activity | Workouts, heart rate, active energy, VO₂max, workout effort score, Apple's average METs | Nothing |
+| Watch — workout execution | Heart rate and active energy, during a running workout session | One strength-training workout, one workout effort score |
+
+Because read authorisation cannot be queried per type, the watch requests its full read scope at
+every session start; HealthKit prompts only for types that are still undetermined. That is how a
+newly added scope (active energy) reaches someone who already granted workout access.
 
 There is still no write path from the phone to HealthKit beyond the watch's single saved workout.
 
@@ -37,6 +42,8 @@ There is still no write path from the phone to HealthKit beyond the watch's sing
   advances after the server answers. A rejected workout key is quarantined and skipped, so one
   immutable conflict cannot stall every later workout. An older server that returns only a count
   keeps the conservative behaviour: hold the cursor and defer samples.
+- **Active energy** is read from each uploaded workout's statistics and sent as
+  `active_energy_kj`; absence is recorded as absence, never zero.
 - **Uploaded workout intervals** are persisted (HealthKit UUID, start, end, ten-minute tail) so a
   sample that arrives after its workout has left the 24-hour workout query can still be attached.
   The first run after this build backfills the interval store from the sample window once.
@@ -79,8 +86,9 @@ last workout.
 - `StrengthWatch.entitlements`: `com.apple.developer.healthkit` only.
 - Both extra capabilities are owner-confirmed as intentional; no code uses background delivery or
   clinical records yet. Verify both still validate at submission when something depends on them.
-- `NSHealthShareUsageDescription` covers the full read scope (HRV, resting HR, bodyweight, workouts
-  and heart rate). The watch string covers heart rate during a workout and one saved workout.
+- `NSHealthShareUsageDescription` covers the full read scope (HRV, resting HR, bodyweight, workouts,
+  heart rate and active energy). The watch string covers heart rate and active energy during a
+  workout, and one saved workout.
 
 ## 6. What is not implemented
 
@@ -101,4 +109,7 @@ last workout.
 - `StrengthAppTests/WatchHealthKitFinalizerTests.swift` — the exactly-once workout save.
 - `StrengthAppTests/HealthKitActivityTests.swift` — independent cursor advancement, persisted
   workout-interval association, partial-response handling and the `rejected`/`skipped` decoding.
+- The watch's active-energy scope and the saved workout's calorie statistic are physical-device
+  behaviour; the simulator cannot create a HealthKit workout session. The check lives in
+  `WATCH-ACCEPTANCE.md`.
 - The activity sync's contract is also enforced backend-side by `tests/test_ios_workflow.py`.

@@ -241,10 +241,11 @@ final class WatchExecutionController: ObservableObject {
             // Simulator smoke: no HealthKit workout session exists there.
             authorization = .authorized
         } else {
-            var status = await anchor.authorizationStatus()
-            if status != .authorized {
-                status = await anchor.requestAuthorization()
-            }
+            // Read authorisation cannot be queried per type, so always ask. Gating on the
+            // workout-write status would hide a newly added read scope (active energy) from
+            // someone who already granted workout access. HealthKit only prompts for types
+            // that are still undetermined.
+            let status = await anchor.requestAuthorization()
             authorization = status
             guard status == .authorized else {
                 lastError = "Enable Health access on the watch to log here, or log this workout on the iPhone."

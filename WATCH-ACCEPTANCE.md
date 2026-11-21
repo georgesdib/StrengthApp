@@ -228,6 +228,8 @@ suspension or the Digital Crown.
 - [ ] Log a couple of sets, finish with an sRPE, and confirm Health holds **exactly one**
       strength-training workout with the real start and end, the session's effort, and HR samples.
 - [ ] Repeat with HR read **denied**: the workout still saves, with no HR.
+- [ ] With active-energy read allowed, the saved workout shows a non-zero **Active Energy**
+      total in Health; if it is denied, the workout still saves without calories.
 - [ ] Finish, then force-quit before the watch syncs. Relaunch: the summary returns, Health still
       shows exactly one workout, and the server finish replays once.
 - [ ] Mid-session, force-quit and relaunch, then finish: Health holds one workout with the original

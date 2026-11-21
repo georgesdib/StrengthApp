@@ -128,6 +128,36 @@ final class WorkoutAutomationTests: XCTestCase {
         XCTAssertNil(SceneSelection.decode("not json"))
     }
 
+    func testSceneSelectionDerivesNamesFromTheLabel() {
+        let scene = SceneSelection(homeID: "h1", sceneID: "s1", label: "Home — Gym")
+        XCTAssertEqual(scene.homeName, "Home")
+        XCTAssertEqual(scene.sceneName, "Gym")
+
+        let plain = SceneSelection(homeID: "h1", sceneID: "s1", label: "Gym")
+        XCTAssertEqual(plain.homeName, "Gym")
+        XCTAssertEqual(plain.sceneName, "Gym")
+
+        let nested = SceneSelection(homeID: "h1", sceneID: "s1", label: "Home — Gym — Evening")
+        XCTAssertEqual(nested.homeName, "Home")
+        XCTAssertEqual(nested.sceneName, "Gym — Evening")
+    }
+
+    func testRunnerReportsWhyASceneDidNotRun() async {
+        sceneRunner.result = false
+        let outcome = await sceneRunner.runDetailed(
+            SceneSelection(homeID: "h1", sceneID: "s1", label: "Home — Gym")
+        )
+        XCTAssertEqual(outcome.kind, .failed)
+        XCTAssertFalse(outcome.succeeded)
+
+        sceneRunner.result = true
+        let ran = await sceneRunner.runDetailed(
+            SceneSelection(homeID: "h1", sceneID: "s1", label: "Home — Gym")
+        )
+        XCTAssertEqual(ran.kind, .ran)
+        XCTAssertTrue(ran.succeeded)
+    }
+
     func testSceneMappingMessageTreatsEmptyAsNone() throws {
         let start = "{\"homeID\":\"h1\",\"label\":\"Home — Gym\"}"
         let message = WatchSceneMapping.message(start: start, end: nil)

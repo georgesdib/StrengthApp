@@ -16,6 +16,17 @@ public struct SceneSelection: Codable, Equatable, Sendable {
         self.label = label
     }
 
+    /// The label is "Home — Scene". HomeKit's identifiers are normally stable across the owner's
+    /// devices, but when they are not, the names are the only way to find the same scene again.
+    public var homeName: String {
+        label.components(separatedBy: " — ").first ?? label
+    }
+
+    public var sceneName: String {
+        let parts = label.components(separatedBy: " — ")
+        return parts.count > 1 ? parts.dropFirst().joined(separator: " — ") : label
+    }
+
     public var jsonString: String? {
         guard let data = try? JSONEncoder().encode(self) else { return nil }
         return String(data: data, encoding: .utf8)
@@ -51,11 +62,34 @@ public enum WatchSceneMapping {
     }
 }
 
+/// What one attempt produced, in words the wrist can show. A bare Bool is not enough: "did not
+/// run" hides whether there was no home, no scene, or HomeKit refused the execution.
+public struct SceneRunOutcome: Equatable, Sendable {
+    public enum Kind: String, Sendable {
+        case ran
+        case homeMissing
+        case sceneMissing
+        case failed
+    }
+
+    public let kind: Kind
+    public let detail: String
+
+    public init(kind: Kind, detail: String) {
+        self.kind = kind
+        self.detail = detail
+    }
+
+    public var succeeded: Bool { kind == .ran }
+}
+
 /// Runs HomeKit scenes. Behind a protocol so the automation is testable without a home.
 @MainActor
 public protocol SceneRunning: AnyObject {
     func scenes() async -> [SceneSelection]
     func run(_ selection: SceneSelection) async -> Bool
+    /// The same attempt, with the reason it did not run.
+    func runDetailed(_ selection: SceneSelection) async -> SceneRunOutcome
     /// The number of homes HomeKit returned the last time it loaded, or nil when unknown. This is
     /// the only signal HomeKit gives for "access refused" versus "no home configured".
     var homeCount: Int? { get }
@@ -63,6 +97,13 @@ public protocol SceneRunning: AnyObject {
 
 public extension SceneRunning {
     var homeCount: Int? { nil }
+
+    func runDetailed(_ selection: SceneSelection) async -> SceneRunOutcome {
+        if await run(selection) {
+            return SceneRunOutcome(kind: .ran, detail: "Scene ran")
+        }
+        return SceneRunOutcome(kind: .failed, detail: "Scene did not run")
+    }
 }
 
 /// Live HomeKit executor. Best-effort: a denied authorisation, a deleted home or a missing scene
@@ -100,30 +141,75 @@ public final class HomeKitSceneRunner: NSObject, SceneRunning, HMHomeManagerDele
     }
 
     public func run(_ selection: SceneSelection) async -> Bool {
+        await runDetailed(selection).succeeded
+    }
+
+    public func runDetailed(_ selection: SceneSelection) async -> SceneRunOutcome {
         await waitForHomes()
-        guard let home = manager.homes.first(where: {
-            $0.uniqueIdentifier.uuidString == selection.homeID
-        }) else {
-            logger.error(
-                "scene home not found; skipping (homes: \(self.manager.homes.count, privacy: .public))"
+        let homes = manager.homes
+        guard !homes.isEmpty else {
+            logger.error("no homes: Home access refused, or no home on this device")
+            return SceneRunOutcome(
+                kind: .homeMissing,
+                detail: "No Home access on Apple Watch"
             )
-            return false
         }
-        guard let set = home.actionSets.first(where: {
-            $0.uniqueIdentifier.uuidString == selection.sceneID
-        }) else {
-            logger.error("scene not found; skipping")
-            return false
+        guard let home = resolveHome(selection, in: homes) else {
+            logger.error("home not found (homes: \(homes.count, privacy: .public))")
+            return SceneRunOutcome(
+                kind: .homeMissing,
+                detail: "Home \(selection.homeName) not on watch (\(homes.count) homes)"
+            )
         }
-        let executed = await withCheckedContinuation { continuation in
+        guard let set = resolveScene(selection, in: home) else {
+            logger.error("scene not found in \(home.name, privacy: .public)")
+            return SceneRunOutcome(
+                kind: .sceneMissing,
+                detail: "Scene \(selection.sceneName) not in \(home.name)"
+            )
+        }
+        let failure: Error? = await withCheckedContinuation { continuation in
             home.executeActionSet(set) { error in
-                if let error {
-                    self.logger.error("scene failed: \(error.localizedDescription, privacy: .public)")
-                }
-                continuation.resume(returning: error == nil)
+                continuation.resume(returning: error)
             }
         }
-        return executed
+        if let failure {
+            logger.error("scene failed: \(failure.localizedDescription, privacy: .public)")
+            return SceneRunOutcome(
+                kind: .failed,
+                detail: "HomeKit: \(failure.localizedDescription)"
+            )
+        }
+        logger.log("scene ran: \(set.name, privacy: .public)")
+        return SceneRunOutcome(kind: .ran, detail: "Ran \(set.name)")
+    }
+
+    /// Identifiers first, names second. Both are the owner's own scene in the owner's own home;
+    /// the names only break a tie when HomeKit reports different identifiers to this device.
+    private func resolveHome(_ selection: SceneSelection, in homes: [HMHome]) -> HMHome? {
+        if let home = homes.first(where: {
+            $0.uniqueIdentifier.uuidString == selection.homeID
+        }) {
+            return home
+        }
+        if let home = homes.first(where: { $0.name == selection.homeName }) {
+            return home
+        }
+        return homes.first { home in
+            home.actionSets.contains {
+                $0.uniqueIdentifier.uuidString == selection.sceneID
+                    || $0.name == selection.sceneName
+            }
+        }
+    }
+
+    private func resolveScene(_ selection: SceneSelection, in home: HMHome) -> HMActionSet? {
+        if let set = home.actionSets.first(where: {
+            $0.uniqueIdentifier.uuidString == selection.sceneID
+        }) {
+            return set
+        }
+        return home.actionSets.first { $0.name == selection.sceneName }
     }
 
     /// Loads HomeKit once, early, so the system's Home access prompt appears when the app opens

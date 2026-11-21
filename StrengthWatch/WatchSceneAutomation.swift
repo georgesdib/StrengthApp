@@ -26,13 +26,12 @@ final class WatchSceneAutomation: ObservableObject {
 
         var hasMapping: Bool { startLabel != nil || endLabel != nil }
 
-        /// One line for the watch screen: the mapping, then what happened last.
+        /// The mapping, for the first line of the watch row.
         var summary: String {
             guard hasMapping else { return "No scenes from iPhone" }
             var parts: [String] = []
             if let startLabel { parts.append("Start: \(startLabel)") }
             if let endLabel { parts.append("End: \(endLabel)") }
-            if let lastResult { parts.append(lastResult) }
             return parts.joined(separator: " · ")
         }
     }
@@ -103,19 +102,18 @@ final class WatchSceneAutomation: ObservableObject {
         defaults.set(keys, forKey: Self.firedKey)
 
         status.isRunning = true
-        let ran = await runner.run(scene)
+        let outcome = await runner.runDetailed(scene)
         status.isRunning = false
         status.lastEvent = event
         status.lastRunAt = Date()
         refresh()
-        if ran {
-            status.lastResult = "\(event == "started" ? "Start" : "End") scene ran"
+        status.lastResult = outcome.detail
+        if outcome.succeeded {
             logger.log("scene \(event, privacy: .public) ran")
         } else {
             // A refused or missing scene is retried on a later transition only.
             defaults.set(keys.filter { $0 != fired }, forKey: Self.firedKey)
-            status.lastResult = failureText()
-            logger.error("scene \(event, privacy: .public) failed: \(self.status.lastResult ?? "-", privacy: .public)")
+            logger.error("scene \(event, privacy: .public) failed: \(outcome.detail, privacy: .public)")
         }
     }
 
@@ -129,18 +127,11 @@ final class WatchSceneAutomation: ObservableObject {
             return
         }
         status.isRunning = true
-        let ran = await runner.run(scene)
+        let outcome = await runner.runDetailed(scene)
         status.isRunning = false
         refresh()
         status.lastRunAt = Date()
-        status.lastResult = ran ? "Test ran" : failureText()
-    }
-
-    private func failureText() -> String {
-        if let homes = status.homes, homes == 0 {
-            return "No Home access on Apple Watch"
-        }
-        return "Scene did not run"
+        status.lastResult = "Test: " + outcome.detail
     }
 
     private static func mappingExists(in defaults: UserDefaults) -> Bool {

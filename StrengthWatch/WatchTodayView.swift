@@ -99,6 +99,13 @@ struct WatchTodayView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
                 .accessibilityIdentifier("watch-scene-status")
+            if let result = scenes.status.lastResult {
+                Text(result)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.leading)
+                    .accessibilityIdentifier("watch-scene-result")
+            }
             if scenes.status.startLabel != nil {
                 Button {
                     Task { await scenes.testStartScene() }

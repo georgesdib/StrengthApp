@@ -71,6 +71,45 @@ public enum JSONValue: Codable, Equatable, Sendable {
 
 // MARK: - Prescription
 
+/// The frozen top-set outcome from the plan. Status is applied, not_applicable, fallback or
+/// unsatisfied; reason_code names the blocker and reason is the human text (DEC-RESOLVER-24).
+public struct TopSetStatus: Codable, Equatable, Sendable {
+    public let status: String?
+    public let reasonCode: String?
+    public let reason: String?
+    public let topSetLoadKg: Double?
+    public let topSetRir: Int?
+    public let backoffLoadKg: Double?
+
+    public init(
+        status: String? = nil,
+        reasonCode: String? = nil,
+        reason: String? = nil,
+        topSetLoadKg: Double? = nil,
+        topSetRir: Int? = nil,
+        backoffLoadKg: Double? = nil
+    ) {
+        self.status = status
+        self.reasonCode = reasonCode
+        self.reason = reason
+        self.topSetLoadKg = topSetLoadKg
+        self.topSetRir = topSetRir
+        self.backoffLoadKg = backoffLoadKg
+    }
+
+    public var isApplied: Bool { status == "applied" }
+
+    public var statusLabel: String {
+        switch status {
+        case "applied": return "Applied"
+        case "not_applicable": return "Not applicable"
+        case "fallback": return "Fell back to straight sets"
+        case "unsatisfied": return "Required but unavailable"
+        default: return status ?? "Unknown"
+        }
+    }
+}
+
 public struct PrescriptionPlan: Codable, Sendable {
     public let forDate: String?
     public let sessionType: String?
@@ -78,6 +117,8 @@ public struct PrescriptionPlan: Codable, Sendable {
     public let items: [PrescriptionItem]
     public let warnings: [String]?
     public let issues: [String]?
+    /// Frozen top-set outcome; nil for plans issued before the tri-state.
+    public let topSet: TopSetStatus?
 
     public init(
         forDate: String?,
@@ -85,7 +126,8 @@ public struct PrescriptionPlan: Codable, Sendable {
         sessionLabel: String?,
         items: [PrescriptionItem],
         warnings: [String]?,
-        issues: [String]?
+        issues: [String]?,
+        topSet: TopSetStatus? = nil
     ) {
         self.forDate = forDate
         self.sessionType = sessionType
@@ -93,6 +135,7 @@ public struct PrescriptionPlan: Codable, Sendable {
         self.items = items
         self.warnings = warnings
         self.issues = issues
+        self.topSet = topSet
     }
 }
 
@@ -111,6 +154,55 @@ public struct WarmupSet: Codable, Equatable, Sendable, Identifiable {
 
     public var loadLabel: String {
         loadKg > 0 ? String(format: "%.1f kg", loadKg) : "bodyweight"
+    }
+}
+
+/// One planned set group inside a prescription item. Order is the only identity: the server
+/// sends group_index and no role, so the client renders the list in order (DEC-RESOLVER-18).
+public struct SetGroup: Codable, Sendable, Equatable {
+    public let groupIndex: Int?
+    public let sets: Int?
+    public let loadKg: Double?
+    public let repsLow: Int?
+    public let repsHigh: Int?
+    public let rirTarget: Int?
+
+    public init(
+        groupIndex: Int? = nil,
+        sets: Int? = nil,
+        loadKg: Double? = nil,
+        repsLow: Int? = nil,
+        repsHigh: Int? = nil,
+        rirTarget: Int? = nil
+    ) {
+        self.groupIndex = groupIndex
+        self.sets = sets
+        self.loadKg = loadKg
+        self.repsLow = repsLow
+        self.repsHigh = repsHigh
+        self.rirTarget = rirTarget
+    }
+
+    public var repsLabel: String {
+        switch (repsLow, repsHigh) {
+        case let (low?, high?) where low == high: return String(low)
+        case let (low?, high?): return String(low) + "-" + String(high)
+        case let (low?, nil): return String(low) + "+"
+        default: return "—"
+        }
+    }
+
+    public var loadLabel: String {
+        guard let loadKg, loadKg > 0 else { return "load unknown" }
+        return String(format: "%.1f kg", loadKg)
+    }
+
+    /// One unlabelled display row: sets x reps @ load, RIR.
+    public var rowLabel: String {
+        var label = String(sets ?? 0) + " × " + repsLabel
+        if let loadKg, loadKg > 0 { label += " @ " + String(format: "%.1f kg", loadKg) }
+        if let rirTarget { label += " · RIR " + String(rirTarget) }
+        return label
     }
 }
 
@@ -136,6 +228,8 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
     /// Present only for lifts with a velocity calibration; nil means the plan asks for no
     /// bar speed, so the client must not offer the field.
     public let velocityTarget: Double?
+    /// Ordered planned set groups; nil or empty is straight sets (DEC-RESOLVER-18).
+    public let setGroups: [SetGroup]?
 
     public init(
         orderIndex: Int?,
@@ -153,7 +247,8 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         restS: Int?,
         essential: Bool?,
         warmup: [WarmupSet]? = nil,
-        velocityTarget: Double? = nil
+        velocityTarget: Double? = nil,
+        setGroups: [SetGroup]? = nil
     ) {
         self.orderIndex = orderIndex
         self.exerciseId = exerciseId
@@ -171,6 +266,7 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         self.essential = essential
         self.warmup = warmup
         self.velocityTarget = velocityTarget
+        self.setGroups = setGroups
     }
 
     public var id: String { "\(orderIndex ?? 0)-\(exerciseId ?? "")" }
@@ -212,25 +308,40 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
 
 // MARK: - Plan request (R7)
 
+/// One request-time top-set choice. Nil follows the settings profile; the server still owns
+/// eligibility, structure, loads and every training decision (DEC-RESOLVER-24).
+public enum PrescriptionTopSetIntent: String, Codable, CaseIterable, Sendable {
+    case off
+    case preferred
+    case required
+
+    public var label: String {
+        switch self {
+        case .off: return "Straight sets"
+        case .preferred: return "Prefer top set + back-off"
+        case .required: return "Require top set + back-off"
+        }
+    }
+}
+
 /// Workout settings sent with a request. The phone chooses an input; the server owns the plan.
 public struct PlanSettings: Codable, Equatable {
     public var sessionType: String = "auto"
     public var minimumSession: Bool = false
     public var minimumTargetMinutes: Int?
-    /// nil lets the server/resolver decide; true asks for top set/back-off; false asks for
-    /// straight sets. The server still owns eligibility and every load/repetition decision.
-    public var topSet: Bool? = nil
+    /// nil follows the settings profile; otherwise this request overrides it.
+    public var topSetIntent: PrescriptionTopSetIntent? = nil
 
     public init(
         sessionType: String = "auto",
         minimumSession: Bool = false,
         minimumTargetMinutes: Int? = nil,
-        topSet: Bool? = nil
+        topSetIntent: PrescriptionTopSetIntent? = nil
     ) {
         self.sessionType = sessionType
         self.minimumSession = minimumSession
         self.minimumTargetMinutes = minimumTargetMinutes
-        self.topSet = topSet
+        self.topSetIntent = topSetIntent
     }
 }
 
@@ -417,6 +528,9 @@ public struct WorkoutSet: Codable, Identifiable {
     public let source: String?
     public let repsDetail: WorkoutRepDetail?
     public let repSummary: WorkoutRepSummary?
+    /// The frozen plan slot this set replaced; set only for an annotated substitution
+    /// (DEC-RESOLVER-23). Nil for ordinary and extra work.
+    public let substitutesPlanItemIndex: Int?
 
     public init(
         setId: Int?,
@@ -429,7 +543,8 @@ public struct WorkoutSet: Codable, Identifiable {
         velocity: Double?,
         source: String?,
         repsDetail: WorkoutRepDetail?,
-        repSummary: WorkoutRepSummary?
+        repSummary: WorkoutRepSummary?,
+        substitutesPlanItemIndex: Int? = nil
     ) {
         self.setId = setId
         self.exerciseId = exerciseId
@@ -442,6 +557,7 @@ public struct WorkoutSet: Codable, Identifiable {
         self.source = source
         self.repsDetail = repsDetail
         self.repSummary = repSummary
+        self.substitutesPlanItemIndex = substitutesPlanItemIndex
     }
 
     public var id: String { "\(setId ?? 0)-\(exerciseId)-\(setIndex ?? 0)" }
@@ -675,6 +791,7 @@ public struct AddSetRequest: Codable, Equatable {
     public let velocityMps: Double?
     public let setIndex: Int?
     public let planItemIndex: Int?
+    public let substitutesPlanItemIndex: Int?
     public let repVelocities: [RepVelocity]?
     public let performedAt: String?
 
@@ -686,6 +803,7 @@ public struct AddSetRequest: Codable, Equatable {
         velocityMps: Double?,
         setIndex: Int?,
         planItemIndex: Int?,
+        substitutesPlanItemIndex: Int? = nil,
         repVelocities: [RepVelocity]? = nil,
         performedAt: String? = nil
     ) {
@@ -696,6 +814,7 @@ public struct AddSetRequest: Codable, Equatable {
         self.velocityMps = velocityMps
         self.setIndex = setIndex
         self.planItemIndex = planItemIndex
+        self.substitutesPlanItemIndex = substitutesPlanItemIndex
         self.repVelocities = repVelocities
         self.performedAt = performedAt
     }
@@ -766,52 +885,6 @@ public struct ExerciseOption: Codable, Identifiable, Equatable {
 
 public struct ExerciseCatalogueResponse: Decodable {
     public let exercises: [ExerciseOption]
-}
-
-public struct PlanSwapRequest: Encodable, Equatable {
-    public let exerciseId: String
-    public let expectedExerciseId: String
-
-    public init(exerciseId: String, expectedExerciseId: String) {
-        self.exerciseId = exerciseId
-        self.expectedExerciseId = expectedExerciseId
-    }
-}
-
-public struct PlanRemoveRequest: Encodable, Equatable {
-    public let expectedExerciseId: String
-
-    public init(expectedExerciseId: String) {
-        self.expectedExerciseId = expectedExerciseId
-    }
-}
-
-public struct PlanSetsRequest: Encodable, Equatable {
-    public let delta: Int
-    public let expectedExerciseId: String
-
-    public init(delta: Int, expectedExerciseId: String) {
-        self.delta = delta
-        self.expectedExerciseId = expectedExerciseId
-    }
-}
-
-public struct PlanMoveRequest: Encodable, Equatable {
-    public let toIndex: Int
-    public let expectedExerciseId: String
-
-    public init(toIndex: Int, expectedExerciseId: String) {
-        self.toIndex = toIndex
-        self.expectedExerciseId = expectedExerciseId
-    }
-}
-
-public struct PlanAddRequest: Encodable, Equatable {
-    public let exerciseId: String
-
-    public init(exerciseId: String) {
-        self.exerciseId = exerciseId
-    }
 }
 
 public struct PlanItemChoice: Identifiable {

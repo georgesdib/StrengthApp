@@ -5,6 +5,10 @@ struct ExerciseWorkoutView: View {
     @ObservedObject var model: AppModel
     let exerciseId: String
     let planIndex: Int?
+    /// The execution row when the caller already has it (a substitution or an addition).
+    var row: ExecutionRow? = nil
+    /// Set when the phone substituted this plan slot, so the performed set is annotated.
+    var substitutesPlanItemIndex: Int? = nil
     @ObservedObject var drafts: WorkoutDraftStore
 
     @Environment(\.dismiss) private var dismiss
@@ -33,7 +37,65 @@ struct ExerciseWorkoutView: View {
         return item.orderIndex ?? planIndex
     }
 
-    private var plannedSets: Int { item?.sets ?? 0 }
+    private var plannedSets: Int { executionRow?.sets ?? item?.sets ?? 0 }
+
+    private var executionRow: ExecutionRow? {
+        if let row { return row }
+        guard let planIndex else { return nil }
+        return model.executionRow(forPlanIndex: planIndex)
+    }
+
+    /// The next planned group by cumulative working sets; the last group holds beyond the plan.
+    private var nextGroup: SetGroup? {
+        guard let executionRow, executionRow.kind == .planned else { return nil }
+        return executionRow.group(forLoggedCount: performed.filter { $0.rir != 6 }.count)
+    }
+
+    private var isChangedRow: Bool {
+        guard let executionRow else { return false }
+        return executionRow.kind != .planned
+    }
+
+    /// The execution row is authoritative for the active target, including a null prefill.
+    private var targetLoad: Double? {
+        if isChangedRow { return executionRow?.loadKg }
+        if let load = nextGroup?.loadKg { return load }
+        if let load = executionRow?.loadKg { return load }
+        return item?.loadKg
+    }
+
+    private var targetRepsLow: Int? {
+        if isChangedRow { return executionRow?.repsLow }
+        return nextGroup?.repsLow ?? executionRow?.repsLow ?? item?.repsLow
+    }
+
+    private var targetRepsHigh: Int? {
+        if isChangedRow { return executionRow?.repsHigh }
+        return nextGroup?.repsHigh ?? executionRow?.repsHigh ?? item?.repsHigh
+    }
+
+    private var targetRir: Int? {
+        if isChangedRow { return executionRow?.rirTarget }
+        return nextGroup?.rirTarget ?? executionRow?.rirTarget ?? item?.rirTarget
+    }
+
+    private var targetLoadLabel: String {
+        guard let targetLoad else { return "load unknown" }
+        return String(format: "%.1f kg", targetLoad)
+    }
+
+    private var targetRepsLabel: String {
+        switch (targetRepsLow, targetRepsHigh) {
+        case let (low?, high?) where low == high: return "\(low)"
+        case let (low?, high?): return "\(low)-\(high)"
+        case let (low?, nil): return "\(low)+"
+        default: return "—"
+        }
+    }
+
+    private var targetEffortLabel: String {
+        targetRir.map { "RIR " + String($0) } ?? "—"
+    }
 
     private var isExerciseActive: Bool {
         model.isExerciseActive(planItemIndex: planIdentity, exerciseId: exerciseId)
@@ -46,11 +108,15 @@ struct ExerciseWorkoutView: View {
     }
 
     private var performed: [WorkoutSet] {
-        (workout?.sets ?? []).filter { $0.exerciseId == exerciseId }
+        (workout?.sets ?? []).filter { set in
+            guard set.exerciseId == exerciseId else { return false }
+            if let planIdentity { return set.planItemIndex == planIdentity }
+            return set.planItemIndex == nil
+        }
     }
 
     private var draftKey: String {
-        drafts.key(exerciseId: exerciseId, planIndex: planIndex)
+        executionRow?.id ?? drafts.key(exerciseId: exerciseId, planIndex: planIndex)
     }
 
     private var draft: Binding<WorkoutDraftStore.Draft> {
@@ -62,9 +128,9 @@ struct ExerciseWorkoutView: View {
 
     private var initialDraft: WorkoutDraftStore.Draft {
         WorkoutDraftStore.Draft(
-            loadText: item?.loadKg.map { String(format: "%.1f", $0) } ?? "",
-            repsText: item?.repsLow.map(String.init) ?? "",
-            rirText: item?.rirTarget.map(String.init) ?? "",
+            loadText: targetLoad.map { String(format: "%.1f", $0) } ?? "",
+            repsText: targetRepsLow.map(String.init) ?? "",
+            rirText: targetRir.map(String.init) ?? "",
             velocityText: "",
             repVelocityText: "",
             showingRepVelocity: false
@@ -86,9 +152,24 @@ struct ExerciseWorkoutView: View {
             Section("Exercise") {
                 LabeledContent("Exercise", value: Self.label(exerciseId))
                 if let item {
-                    LabeledContent("Target", value: "\(item.sets ?? 0) × \(item.repsLabel) · \(item.loadLabel) · \(item.effortLabel)\(item.velocityTargetLabel.map { " · target \($0)" } ?? "")")
+                    LabeledContent("Target", value: String(plannedSets) + " × " + targetRepsLabel + " · " + targetLoadLabel + " · " + targetEffortLabel + (isChangedRow ? "" : (item.velocityTargetLabel.map { " · target " + $0 } ?? "")))
                         .accessibilityIdentifier("exercise-target")
+                    if let row = executionRow, row.kind == .substituted {
+                        Text("Changed on this phone" + (row.plannedExerciseId.map { " from " + $0 } ?? ""))
+                            .font(.footnote)
+                            .foregroundStyle(.blue)
+                            .accessibilityIdentifier("substitution-note")
+                    }
                     LabeledContent("Rest", value: "\(item.restS ?? 120)s")
+                } else if let row = executionRow {
+                    LabeledContent("Target", value: targetRepsLabel + " · " + targetLoadLabel + " · " + targetEffortLabel)
+                        .accessibilityIdentifier("exercise-target")
+                    if row.kind == .added {
+                        Text("Extra work after the plan. Sets are recorded without a plan slot.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("addition-note")
+                    }
                 } else {
                     Text("Not in the prescription. Sets are still recorded as performed work.")
                         .font(.footnote)
@@ -176,7 +257,7 @@ struct ExerciseWorkoutView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 } else {
-                                    Text("Target \(item?.repsLabel ?? "—") · \(item?.loadLabel ?? "—") · \(item?.effortLabel ?? "—")\(item?.velocityTargetLabel.map { " · target \($0)" } ?? "")")
+                                    Text("Target " + targetRepsLabel + " · " + targetLoadLabel + " · " + targetEffortLabel + (item?.velocityTargetLabel.map { " · target " + $0 } ?? ""))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -270,9 +351,10 @@ struct ExerciseWorkoutView: View {
                 draft: draft,
                 exerciseLabel: Self.label(exerciseId),
                 target: logWarmupLabel ?? logSetIndex.map { "Planned set \($0)" },
-                velocityTarget: item?.velocityTargetLabel,
-                isTimeBased: item?.isTimeBased == true,
-                velocityApplicable: item?.loadBasis != "bodyweight"
+                velocityTarget: isChangedRow ? nil : item?.velocityTargetLabel,
+                isTimeBased: isChangedRow ? false : item?.isTimeBased == true,
+                velocityApplicable: !isChangedRow
+                    && item?.loadBasis != "bodyweight"
                     && item?.loadBasis != "bodyweight_total",
                 isSaving: model.isSaving,
                 error: addError
@@ -293,7 +375,14 @@ struct ExerciseWorkoutView: View {
     }
 
     private func performedSet(at index: Int) -> WorkoutSet? {
-        performed.first {
+        if isChangedRow {
+            // A substitution's set indexes are per performed exercise, so an existing extra
+            // set can shift them. The planned card maps by order, not by the raw index.
+            let ordered = performed.sorted { ($0.setIndex ?? 0) < ($1.setIndex ?? 0) }
+            guard ordered.indices.contains(index - 1) else { return nil }
+            return ordered[index - 1]
+        }
+        return performed.first {
             $0.setIndex == index && $0.planItemIndex == planIdentity
         }
     }
@@ -315,14 +404,7 @@ struct ExerciseWorkoutView: View {
     private func beginLog(planSetIndex: Int?) {
         let draft: WorkoutDraftStore.Draft
         if planSetIndex != nil {
-            draft = WorkoutDraftStore.Draft(
-                loadText: item?.loadKg.map { String(format: "%.1f", $0) } ?? "",
-                repsText: item?.repsLow.map(String.init) ?? "",
-                rirText: item?.rirTarget.map(String.init) ?? "",
-                velocityText: "",
-                repVelocityText: "",
-                showingRepVelocity: false
-            )
+            draft = initialDraft
         } else {
             draft = drafts.drafts[draftKey] ?? initialDraft
         }
@@ -402,6 +484,7 @@ struct ExerciseWorkoutView: View {
             velocityMps: velocity,
             setIndex: setIndex,
             planItemIndex: planIdentity,
+            substitutesPlanItemIndex: substitutesPlanItemIndex,
             repVelocities: repVelocities,
             performedAt: completedAt
         )

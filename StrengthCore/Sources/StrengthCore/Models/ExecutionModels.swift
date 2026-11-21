@@ -49,7 +49,7 @@ public struct ExecutionEvent: Codable, Equatable, Identifiable {
     }
 }
 
-public struct ExecutionEventsRequest: Encodable {
+public struct ExecutionEventsRequest: Codable {
     public let events: [ExecutionEvent]
 
     public init(events: [ExecutionEvent]) {
@@ -57,7 +57,7 @@ public struct ExecutionEventsRequest: Encodable {
     }
 }
 
-public struct ExecutionEventsResponse: Decodable {
+public struct ExecutionEventsResponse: Codable {
     public let workoutId: String
     public let accepted: [String]
     public let duplicates: [String]
@@ -76,6 +76,8 @@ public struct ExecutionAnalyticsResponse: Decodable {
     public let lastActivityAt: String?
     public let stale: Bool?
     public let plan: PrescriptionPlan?
+    /// The current substitutions and additions with their watermark (DEC-RESOLVER-23).
+    public let execution: ExecutionView?
     public let totalElapsedS: Double
     public let events: [ExecutionAnalyticsEvent]
     public let sets: [ExecutionAnalyticsSet]

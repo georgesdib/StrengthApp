@@ -78,9 +78,20 @@ raw 100.x address.
 
 ## 4. Daily workout flow
 
-1. Open **Today** and review readiness and the prescription.
+1. Open **Today** and review readiness and the prescription. A **Review** card may show one
+   coaching nudge at a time (for example a scheduled deload or an active competition window);
+   **Snooze 14 days** or **Dismiss** records the decision on the server, and the card returns when
+   the underlying state changes. The read-only **Programme** card
+   shows the trained week, the DUP cycle, the deload status with its calendar week, and the
+   competition date/countdown. Trained week and deload week are different definitions: trained
+   weeks count only weeks with a session, while the deload calendar counts every week since the
+   block anchor.
 2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
    is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
+   The main-lift structure offers **Server default**, **Prefer top set + back-off**,
+   **Require top set + back-off** or **Straight sets**. Preferred accepts a straight-set fallback
+   with a recorded reason; required marks an unexpected fallback as unsatisfied, but the plan stays
+   startable. The server owns eligibility and every load.
 3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
    load, RIR, any velocity target, rest and any warnings. **Start workout** is on that screen, so the plan is always
    visible before it is consumed. The server issues the plan; the phone never invents plan content.
@@ -105,6 +116,34 @@ raw 100.x address.
    session feedback, quality flags and evidence. It is read-only. **Done** returns to Today.
 10. The same report is available later from the session's **History** detail. An imported session
     with no workout record explains that no report exists.
+
+### Substituting and adding work
+
+A plan item with more than one target group (for example a top set and a back-off) lists each
+group as its own target line, in order, on the phone and on the watch. The logging sheet
+prefills the next group by the number of working sets already recorded, and the last group holds
+beyond the plan.
+
+The plan is frozen when the workout starts. The **⋯** menu on a plan row offers the two
+mid-session changes:
+
+- **Substitute exercise…** replaces that plan slot for this session. It is available only
+  before any set is recorded for the slot; after that the menu is disabled, because the
+  replacement never takes over a partly completed slot. The performed sets stay attributed to
+  the slot, the phone and watch show the substitute, and the watch labels it **Changed on
+  phone**.
+- **Add extra work after…** adds work after that slot. It appears under **Extra work**, is
+  selectable on the phone and watch, and its sets are recorded as extra work without a plan
+  slot.
+
+The server solves the substitute's or addition's prefill, and that value fills the logging
+controls on both devices. The phone never computes a load. A null prefill stays blank and is
+never replaced by the original exercise's load. An offline phone records the change without a
+prefill, and it is not solved later.
+
+![Frozen plan with per-exercise options](docs/images/workout-plan.png)
+
+![Extra work after the plan](docs/images/extra-work.png)
 
 ### Set controls
 
@@ -131,7 +170,9 @@ The timer uses the prescription's rest seconds when available.
 
 While a rest is running, the phone shows a Live Activity countdown on the Lock Screen and in the
 Dynamic Island. The countdown is drawn by the system from the rest's end time, so it stays correct
-with the app closed. Tapping it opens Strength, where **+15 s** and **Skip** live.
+with the app closed. **+15 s** and **Skip** are buttons on the Lock Screen card and in the expanded
+Dynamic Island: they act at the tap without opening the app or unlocking the phone, and the app
+records the extension or the skip when it next runs. The compact Island shows the timer only.
 
 Settings → Control Center (or the Action button) can host the **Strength** control. It opens the
 running workout; it does not record a set or change a rest on its own.
@@ -271,6 +312,9 @@ Turn on **Settings → Daily reminder** and choose a time. At that time the app 
 notification that names a concrete fact from your record — a planned session, its lead lift and load,
 or a missing readiness entry — and asks you to train. The wording is written on the iPhone: by Apple
 Intelligence when it is available, otherwise from the built-in text. Nothing is sent to a server.
+
+A readiness entry with too few answers to form a score is not treated as done: the reminder asks
+you to finish it, and tapping it opens the readiness form.
 
 The reminder is skipped on a day you have already trained. If you train on the watch only and never
 open the phone, the phone cannot see the session, so the reminder may still arrive. Tapping the

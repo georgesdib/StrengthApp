@@ -14,6 +14,8 @@ final class WatchExecutionController: ObservableObject {
     @Published private(set) var pendingCount = 0
     @Published private(set) var completedSetCount = 0
     @Published private(set) var selectedItem: PrescriptionItem?
+    /// An addition selected from the list; it has no plan slot but still needs a logging screen.
+    @Published private(set) var selectedAdditionID: String?
     /// True only once the server acknowledged the finish; an empty queue is not proof.
     @Published private(set) var finishAcknowledged = false
     /// A shortcut or the Action button asked for the finish screen. The execution view observes it.
@@ -63,6 +65,7 @@ final class WatchExecutionController: ObservableObject {
         store: WatchCredentialStore = WatchCredentialStore(),
         anchor: WatchLivenessAnchor? = nil,
         recorder: WatchHealthKitRecorder? = nil,
+        relay: (any WatchRelayTransport)? = nil,
         onCredentialsMissing: @escaping @MainActor () -> Void
     ) {
         self.credentialStore = store
@@ -80,7 +83,8 @@ final class WatchExecutionController: ObservableObject {
         }
         self.engine = WatchExecutionEngine(
             client: IOSAPIClient(),
-            store: OfflineCaptureStore(fileURL: Self.recordFileURL)
+            store: OfflineCaptureStore(fileURL: Self.recordFileURL),
+            relay: relay
         )
         healthRecorder?.onHeartRate = { [weak self] bpm in
             self?.heartRateUpdated(bpm)
@@ -277,12 +281,13 @@ final class WatchExecutionController: ObservableObject {
         repVelocities: [RepVelocity]? = nil,
         completedAt: Date? = nil
     ) async {
-        guard let session = currentSession(), let item = engine.selectedItem else { return }
-        let itemIndex = item.orderIndex ?? 0
+        guard let session = currentSession(), let row = selectedRow else { return }
+        let itemIndex = row.planItemIndex
         let entry = WatchExecutionEngine.SetEntry(
-            exerciseId: item.exerciseId ?? "",
+            exerciseId: row.exerciseId,
             planItemIndex: itemIndex,
-            setIndex: engine.nextSetIndex(planItemIndex: itemIndex, rir: rir),
+            substitutesPlanItemIndex: row.substitutesPlanItemIndex,
+            setIndex: engine.nextSetIndex(exerciseId: row.exerciseId, rir: rir),
             loadKg: loadKg,
             reps: reps,
             rir: rir,
@@ -296,10 +301,10 @@ final class WatchExecutionController: ObservableObject {
         // Rest belongs to a working set that actually happened: a local storage failure must not
         // start one, while a network failure still does. RIR 6 is a warm-up and rests nothing.
         if rir != 6, result.persisted, engine.phase == .active,
-           let seconds = item.restS, seconds > 0 {
+           let seconds = selectedItemForRow?.restS, seconds > 0 {
             try? engine.startRest(
                 seconds: seconds,
-                planItemIndex: item.orderIndex,
+                planItemIndex: itemIndex,
                 startedAt: completedAt
             )
         }
@@ -326,6 +331,88 @@ final class WatchExecutionController: ObservableObject {
         engine.planItems
     }
 
+    /// Plan rows with the phone-authored execution view applied (DEC-RESOLVER-23).
+    var executionRows: [ExecutionRow] {
+        engine.executionRows
+    }
+
+    func executionRow(for item: PrescriptionItem) -> ExecutionRow? {
+        let identity = item.orderIndex ?? 0
+        return executionRows.first { $0.kind != .added && $0.planItemIndex == identity }
+    }
+
+    var selectedExecutionRow: ExecutionRow? {
+        guard let item = engine.selectedItem else { return nil }
+        return executionRow(for: item)
+    }
+
+    /// The active row, including an addition. This is the authority for targets and logging.
+    var selectedRow: ExecutionRow? {
+        if let selectedAdditionID {
+            return executionRows.first { $0.id == selectedAdditionID }
+        }
+        return selectedExecutionRow
+    }
+
+    var selectedItemForRow: PrescriptionItem? {
+        guard let index = selectedRow?.planItemIndex else { return nil }
+        return engine.planItems.first { ($0.orderIndex ?? -1) == index }
+    }
+
+    /// The next planned group for the selected planned exercise, by completed sets.
+    var selectedGroup: SetGroup? {
+        guard let row = selectedRow, row.kind == .planned,
+              let index = row.planItemIndex else { return nil }
+        return row.group(forLoggedCount: engine.setsDone(planItemIndex: index))
+    }
+
+    var selectedCompletedSets: Int {
+        guard let row = selectedRow else { return 0 }
+        if let index = row.planItemIndex {
+            return engine.setsDone(planItemIndex: index)
+        }
+        return (workout?.sets ?? []).filter {
+            $0.exerciseId == row.exerciseId && $0.planItemIndex == nil && $0.rir != 6
+        }.count
+    }
+
+    var selectedSetNumber: Int { selectedCompletedSets + 1 }
+
+    var selectedExerciseName: String {
+        let id = selectedRow?.exerciseId ?? engine.selectedItem?.exerciseId ?? ""
+        return Self.displayName(forExercise: id)
+    }
+
+    var selectedSubstitutionNote: String? {
+        guard let row = selectedExecutionRow, row.kind == .substituted else { return nil }
+        guard let planned = row.plannedExerciseId, !planned.isEmpty else {
+            return "Changed on phone"
+        }
+        return "Changed on phone from " + Self.displayName(forExercise: planned)
+    }
+
+    var selectedLoadLabel: String {
+        if let group = selectedGroup { return group.loadLabel }
+        if let row = selectedRow, row.kind != .planned { return row.loadLabel }
+        return selectedRow?.loadLabel ?? engine.selectedItem?.loadLabel ?? "—"
+    }
+
+    var selectedRepsLabel: String {
+        if let group = selectedGroup { return group.repsLabel }
+        if let row = selectedRow, row.kind != .planned { return row.repsLabel }
+        return selectedRow?.repsLabel ?? engine.selectedItem?.repsLabel ?? "—"
+    }
+
+    var selectedEffortLabel: String {
+        if let group = selectedGroup, let rir = group.rirTarget { return "RIR " + String(rir) }
+        if let row = selectedRow, row.kind != .planned { return row.effortLabel }
+        return selectedRow?.effortLabel ?? engine.selectedItem?.effortLabel ?? "—"
+    }
+
+    var selectedPlannedSets: Int {
+        selectedRow?.sets ?? engine.selectedItem?.sets ?? 0
+    }
+
     /// Read-only rows for the active-session Plan screen.
     var planRows: [WatchPlanRow] {
         engine.planRows
@@ -342,6 +429,7 @@ final class WatchExecutionController: ObservableObject {
 
     /// Opens an exercise from the list. Telemetry starts with the first set, not the tap.
     func select(_ item: PrescriptionItem) {
+        selectedAdditionID = nil
         do {
             try engine.selectItem(item.orderIndex ?? 0)
         } catch {
@@ -350,7 +438,25 @@ final class WatchExecutionController: ObservableObject {
         sync()
     }
 
+    /// Opens an addition. It has no plan slot, so it is selected by its execution-row id.
+    func selectAddition(_ row: ExecutionRow) {
+        guard row.kind == .added else { return }
+        guard engine.canLeaveExercise else {
+            lastError = "End the current exercise before opening extra work."
+            return
+        }
+        do {
+            try engine.clearSelection()
+        } catch {
+            lastError = "The exercise could not be opened."
+            return
+        }
+        selectedAdditionID = row.id
+        sync()
+    }
+
     func backToList() {
+        selectedAdditionID = nil
         do {
             try engine.clearSelection()
         } catch {
@@ -362,8 +468,14 @@ final class WatchExecutionController: ObservableObject {
     /// Explicitly marks that the lifter began a set, so its start time is observed rather than
     /// inferred. Logging without it is still allowed and simply records no start event.
     func beginSet(loadKg: Double?, reps: Int?) {
+        guard let row = selectedRow else { return }
         do {
-            try engine.beginSet(loadKg: loadKg, reps: reps)
+            try engine.beginSet(
+                exerciseId: row.exerciseId,
+                planItemIndex: row.planItemIndex,
+                loadKg: loadKg,
+                reps: reps
+            )
             draftLoad = loadKg
             draftReps = reps
         } catch {
@@ -379,6 +491,9 @@ final class WatchExecutionController: ObservableObject {
             try engine.doneWithExercise()
         } catch {
             lastError = "The exercise could not be marked done."
+        }
+        if selectedAdditionID != nil {
+            selectedAdditionID = nil
         }
         sync()
     }
@@ -408,11 +523,12 @@ final class WatchExecutionController: ObservableObject {
         engine.currentStamp()
     }
 
-    /// −15s on the watch: shortens what is left, and simply ends the rest if that is all of it.
+    /// −15s on the watch: shortens what is left. Once that is all of it, the rest is over — the
+    /// deliberate early end is recorded as a skip, matching the phone's Skip button.
     func shortenRest(by seconds: Int) {
         let remaining = engine.sessionRecord?.rest.map { $0.endsAt.timeIntervalSinceNow } ?? 0
         if remaining <= Double(seconds) {
-            try? engine.endRest()
+            try? engine.skipRest()
         } else {
             try? engine.shortenRest(by: seconds)
         }
@@ -649,7 +765,10 @@ final class WatchExecutionController: ObservableObject {
     }
 
     nonisolated private static func displayName(_ item: PrescriptionItem) -> String {
-        let id = item.exerciseId ?? ""
+        displayName(forExercise: item.exerciseId ?? "")
+    }
+
+    nonisolated static func displayName(forExercise id: String) -> String {
         guard !id.isEmpty else { return "Exercise" }
         return id
             .split(separator: "_")

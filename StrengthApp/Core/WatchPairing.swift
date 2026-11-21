@@ -7,6 +7,10 @@ import WatchConnectivity
 protocol WatchConnectivitySessionDelegate: AnyObject {
     func watchConnectivityDidChange()
     func watchConnectivityDidReceive(_ context: [String: Any])
+    func watchConnectivityDidReceiveMessage(
+        _ message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    )
 }
 
 @MainActor
@@ -17,7 +21,13 @@ protocol WatchConnectivitySession: AnyObject {
     var isWatchAppInstalled: Bool { get }
     var activationState: WCSessionActivationState { get }
     var receivedApplicationContext: [String: Any] { get }
+    var isReachable: Bool { get }
     func activate()
+    func sendMessage(
+        _ message: [String: Any],
+        replyHandler: (([String: Any]) -> Void)?,
+        errorHandler: ((Error) -> Void)?
+    )
     func updateApplicationContext(_ context: [String: Any]) throws
     /// Queued delivery for content that must not be dropped when the watch is unreachable.
     /// Used for execution payloads; the credential handshake keeps the single-slot
@@ -42,6 +52,19 @@ final class LiveWatchConnectivitySession: NSObject, WatchConnectivitySession, WC
     var isWatchAppInstalled: Bool { session?.isWatchAppInstalled ?? false }
     var activationState: WCSessionActivationState { session?.activationState ?? .notActivated }
     var receivedApplicationContext: [String: Any] { session?.receivedApplicationContext ?? [:] }
+    var isReachable: Bool { session?.isReachable ?? false }
+
+    func sendMessage(
+        _ message: [String: Any],
+        replyHandler: (([String: Any]) -> Void)?,
+        errorHandler: ((Error) -> Void)?
+    ) {
+        guard let session, session.activationState == .activated else {
+            errorHandler?(WatchConnectivityError.unavailable)
+            return
+        }
+        session.sendMessage(message, replyHandler: replyHandler, errorHandler: errorHandler)
+    }
 
     func activate() {
         guard let session else { return }
@@ -91,6 +114,18 @@ final class LiveWatchConnectivitySession: NSObject, WatchConnectivitySession, WC
     ) {
         Task { @MainActor in self.delegate?.watchConnectivityDidReceive(applicationContext) }
     }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        Task { @MainActor in
+            self.delegate?.watchConnectivityDidReceiveMessage(
+                message, replyHandler: replyHandler
+            )
+        }
+    }
 }
 
 enum WatchConnectivityError: LocalizedError {
@@ -119,6 +154,7 @@ final class WatchPairingCoordinator: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var isWatchPaired = false
     @Published private(set) var isWatchAppInstalled = false
+    @Published private(set) var connectivitySpikeStatus: String?
 
     private let client: IOSAPIClient
     private let store: PairedStore
@@ -155,6 +191,42 @@ final class WatchPairingCoordinator: ObservableObject {
     var canRevoke: Bool {
         guard let link, !link.revoked, !isRevoking else { return false }
         return true
+    }
+
+    /// Runs the WP8 WatchConnectivity spike: a reachable-watch round trip carrying an id.
+    func testConnectivity() {
+        connectivitySpikeStatus = nil
+        guard isActive, let link, !link.revoked, let connectivity else {
+            connectivitySpikeStatus = "Pair the watch and open both apps first."
+            return
+        }
+        guard connectivity.activationState == .activated else {
+            connectivitySpikeStatus = "WatchConnectivity is not active yet."
+            return
+        }
+        guard connectivity.isReachable else {
+            connectivitySpikeStatus = "Watch is not reachable. Open the watch app."
+            return
+        }
+        let requestID = UUID().uuidString.lowercased()
+        let started = Date()
+        connectivity.sendMessage(
+            ["kind": "spike", "request_id": requestID],
+            replyHandler: { [weak self] reply in
+                Task { @MainActor in
+                    let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+                    let echoed = reply["request_id"] as? String
+                    self?.connectivitySpikeStatus = echoed == requestID
+                        ? "Watch replied in \(elapsed) ms."
+                        : "Watch replied with the wrong request id."
+                }
+            },
+            errorHandler: { [weak self] error in
+                Task { @MainActor in
+                    self?.connectivitySpikeStatus = error.localizedDescription
+                }
+            }
+        )
     }
 
     var statusText: String {
@@ -204,19 +276,25 @@ final class WatchPairingCoordinator: ObservableObject {
         }
     }
 
-    /// Sends the plan revision the watch is missing after a phone edit. Queued rather than
-    /// latest-wins so a nudge is not dropped while the watch is unreachable; the watch ignores
-    /// anything not newer than its snapshot (contract §10.2, §10.5). Best effort: the watch also
-    /// refreshes on foreground and after each set, so a lost nudge is recoverable.
+    /// Sends the frozen plan snapshot and the phone-authored execution view to the watch. Queued
+    /// rather than latest-wins so a nudge is not dropped while the watch is unreachable; the watch
+    /// merges the execution view by watermark and ignores a plan that is not newer
+    /// (contract §10.2, §10.5; DEC-RESOLVER-23). A workout the server did not stamp with a
+    /// plan revision cannot be pushed coherently. Best effort: the watch also refreshes on
+    /// foreground and after each set, so a lost nudge is recoverable.
     @discardableResult
-    func pushExecution(_ workout: WorkoutDetail) -> Bool {
+    func pushExecution(_ workout: WorkoutDetail, execution: ExecutionView? = nil) -> Bool {
         guard isActive,
               link?.revoked != true,
               let connectivity,
               connectivity.activationState == .activated,
               connectivity.isWatchAppInstalled,
               let revision = workout.planRevision,
-              let payload = RemoteExecutionPayload(workout: workout, revision: revision),
+              let payload = RemoteExecutionPayload(
+                workout: workout,
+                revision: revision,
+                execution: execution
+              ),
               let json = payload.encodedString() else {
             return false
         }
@@ -718,6 +796,119 @@ final class WatchPairingCoordinator: ObservableObject {
         )
     }
 
+    /// Executes one watch operation with the watch token. The phone is a transport, not a
+    /// second author: it does not journal, retry or reinterpret the request.
+    private func relay(_ request: WatchRelayRequest) async -> WatchRelayResponse {
+        do {
+            let baseURL = try IOSAPIClient.validatedBaseURL(request.baseURL)
+            let watchSession = IOSSession(
+                baseURL: baseURL, token: request.token, deviceID: request.deviceID
+            )
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            func payload<T: Decodable>(_ type: T.Type) throws -> T {
+                guard let data = request.payload else {
+                    throw APIError.decoding
+                }
+                return try decoder.decode(T.self, from: data)
+            }
+            func encode<T: Encodable>(_ value: T) -> Data? {
+                try? encoder.encode(value)
+            }
+            switch request.operation {
+            case .bootstrap:
+                let value = try await client.bootstrap(session: watchSession)
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .start:
+                guard let issuedPlanId = request.issuedPlanId,
+                      let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "start relay is incomplete", fields: [:])
+                }
+                let value = try await client.startWorkout(
+                    issuedPlanId: issuedPlanId, session: watchSession, idempotencyKey: key
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .addSet:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "set relay is incomplete", fields: [:])
+                }
+                let value = try await client.addSet(
+                    workoutId: workoutId,
+                    body: try payload(AddSetRequest.self),
+                    session: watchSession,
+                    idempotencyKey: key,
+                    journaling: false
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .executionEvents:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "event relay is incomplete", fields: [:])
+                }
+                let value = try await client.submitExecutionEvents(
+                    workoutId: workoutId,
+                    events: try payload(ExecutionEventsRequest.self).events,
+                    session: watchSession,
+                    idempotencyKey: key
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .finish:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "finish relay is incomplete", fields: [:])
+                }
+                let value = try await client.completeWorkout(
+                    workoutId: workoutId,
+                    body: try payload(CompleteWorkoutRequest.self),
+                    session: watchSession,
+                    idempotencyKey: key,
+                    journaling: false
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .abandon:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "abandon relay is incomplete", fields: [:])
+                }
+                let value = try await client.abandonWorkout(
+                    workoutId: workoutId, session: watchSession, idempotencyKey: key
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .rateForm:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "form relay is incomplete", fields: [:])
+                }
+                let value = try await client.rateForm(
+                    workoutId: workoutId,
+                    body: try payload(FormRatingRequest.self),
+                    session: watchSession,
+                    idempotencyKey: key,
+                    journaling: false
+                )
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            }
+        } catch {
+            return WatchRelayResponse(
+                requestId: request.requestId,
+                ok: false,
+                errorMessage: error.localizedDescription
+            )
+        }
+    }
+
     private func validHomeBaseURL() -> URL? {
         guard let homeBaseURL, !homeBaseURL.isEmpty else { return nil }
         return try? IOSAPIClient.validatedBaseURL(homeBaseURL)
@@ -755,6 +946,33 @@ final class WatchPairingCoordinator: ObservableObject {
 }
 
 extension WatchPairingCoordinator: WatchConnectivitySessionDelegate {
+    func watchConnectivityDidReceiveMessage(
+        _ message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        let kind = message["kind"] as? String
+        if kind == "relay",
+           let encoded = message["request"] as? String,
+           let request = WatchRelayCoding.decodeRequest(encoded) {
+            Task { @MainActor in
+                let response = await self.relay(request)
+                replyHandler([
+                    "kind": "relay_reply",
+                    "response": WatchRelayCoding.encodeResponse(response) ?? "",
+                ])
+            }
+            return
+        }
+        guard kind == "spike" else {
+            replyHandler(["kind": "unsupported"])
+            return
+        }
+        replyHandler([
+            "kind": "spike_reply",
+            "request_id": message["request_id"] as? String ?? "",
+        ])
+    }
+
     func watchConnectivityDidChange() {
         refreshAvailability()
         updatePhase()

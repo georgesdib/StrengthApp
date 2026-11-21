@@ -40,6 +40,7 @@ struct WatchExerciseListView: View {
                 }
 
                 ForEach(Array(execution.planItems.enumerated()), id: \.element.id) { index, item in
+                    let row = execution.executionRow(for: item)
                     Button {
                         execution.select(item)
                     } label: {
@@ -47,6 +48,30 @@ struct WatchExerciseListView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(exerciseName(item))
                                     .font(.subheadline)
+                                if row?.kind == .substituted {
+                                    Text("Changed on phone")
+                                        .font(.caption2)
+                                        .foregroundStyle(.blue)
+                                        .accessibilityIdentifier("watch-substituted-\(index)")
+                                }
+                                if let groups = row?.groups, !groups.isEmpty {
+                                    // One row per planned group, in order, so the top set and
+                                    // its back-off are both visible (DEC-RESOLVER-18).
+                                    ForEach(Array(groups.enumerated()), id: \.offset) {
+                                        groupIndex, group in
+                                        Text(group.rowLabel)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .accessibilityIdentifier(
+                                                "watch-group-\(index)-\(groupIndex)"
+                                            )
+                                    }
+                                } else if let row, row.kind == .substituted {
+                                    Text(row.repsLabel + " · " + row.loadLabel)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityIdentifier("watch-substitute-target-\(index)")
+                                }
                                 Text("\(execution.completedSetCount(for: item)) of \(item.sets ?? 0)")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
@@ -64,6 +89,30 @@ struct WatchExerciseListView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("watch-exercise-\(index)")
+                }
+
+                ForEach(execution.executionRows.filter { $0.kind == .added }) { row in
+                    Button {
+                        execution.selectAddition(row)
+                    } label: {
+                        HStack(alignment: .center) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(WatchExecutionController.displayName(
+                                    forExercise: row.exerciseId
+                                ))
+                                .font(.subheadline)
+                                Text("Extra work · " + row.repsLabel + " · " + row.loadLabel)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("watch-addition-" + row.id)
                 }
 
                 WatchStaleWarning(isStale: execution.isStale)
@@ -98,10 +147,7 @@ struct WatchExerciseListView: View {
     }
 
     private func exerciseName(_ item: PrescriptionItem) -> String {
-        guard let id = item.exerciseId, !id.isEmpty else { return "Exercise" }
-        return id
-            .split(separator: "_")
-            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
-            .joined(separator: " ")
+        let id = execution.executionRow(for: item)?.exerciseId ?? item.exerciseId ?? ""
+        return WatchExecutionController.displayName(forExercise: id)
     }
 }

@@ -59,23 +59,16 @@ Install the watch app on a paired physical watch:
     ./scripts/install-watch.sh              # builds Release, then installs
     BUILD=0 ./scripts/install-watch.sh      # install the existing bundle (staleness checked)
 
-It builds the phone app and its embedded Watch/StrengthWatch.app, then pushes that bundle straight
-to the watch with devicectl. Use it when the iPhone's Watch app spins and silently returns to
-"Install": that handoff gives up quietly when the watch is asleep or off its charger, while this
-prints the actual result. Override with WATCH_UDID, IPHONE_UDID or APP_PATH.
+It builds the phone app and its embedded Watch/StrengthWatch.app, then pushes that bundle straight to the watch with devicectl. Use it when the iPhone's Watch app spins and silently returns to "Install": that handoff gives up quietly when the watch is asleep or off its charger, while this prints the actual result. Override with WATCH_UDID, IPHONE_UDID or APP_PATH.
 
 It refuses to install a bundle older than the watch sources (StrengthWatch, StrengthCore,
-WatchInfo.plist, the project) unless FORCE=1 is set: an install that silently pushed a stale
-bundle looks exactly like "the fix did not work".
+WatchInfo.plist, the project) unless FORCE=1 is set: an install that silently pushed a stale bundle looks exactly like "the fix did not work".
 
 Simulator smoke test (on demand, not a CI gate):
 
     ./scripts/watch-smoke.sh
 
-It starts a disposable server, mints a watch credential, seeds the watch app through a Debug-only
-launch argument, and runs StrengthWatchUITests on a watch simulator: fetch → start → log →
-finish. Known rough edges: the test runner sometimes fails to attach, and a watch simulator booted
-outside Xcode can lose its network path; rerun before treating a failure as a product bug.
+It starts a disposable server, mints a watch credential, seeds the watch app through a Debug-only launch argument, and runs StrengthWatchUITests on a watch simulator: fetch → start → log → finish. Known rough edges: the test runner sometimes fails to attach, and a watch simulator booted outside Xcode can lose its network path; rerun before treating a failure as a product bug.
 
 Release compile:
 
@@ -89,22 +82,19 @@ the full suite to watch it. Live UI tests use docs/AGENT-LIVE-TESTS.md.
 ## 4. Completion checks
 
 1. The narrowest relevant unit/UI tests pass.
-2. A new behaviour has a test that fails without it.
-3. The app and the watch target build under the current minimums, and the app contains
+2. The app and the watch target build under the current minimums, and the app contains
    Watch/StrengthWatch.app.
-4. LiveConfig.swift is disabled and git status is clean.
-5. UI changes are checked in portrait and landscape where relevant.
-6. User-visible changes update README/USER-GUIDE or relevant contract docs.
-7. Physical-only behaviour is not claimed from simulator evidence.
+3. LiveConfig.swift is disabled and git status is clean.
+4. UI changes are checked in portrait and landscape where relevant.
+5. User-visible changes update README/USER-GUIDE or relevant contract docs.
+6. Physical-only behaviour is not claimed from simulator evidence.
 
 ## 5. CI rules
 
 .github/workflows/ios-ci.yml runs on pushes to main, PRs targeting main, and manual dispatch.
-It selects Xcode 27.2 and calls scripts/ci.sh, which builds both schemes. Change the script,
-not the workflow. Keep the workflow trigger and documentation in sync.
+It selects Xcode 27.2 and calls scripts/ci.sh, which builds both schemes. Change the script, not the workflow. Keep the workflow trigger and documentation in sync.
 
-The script refuses a filled LiveConfig.swift. A filled config carries a server address and a
-one-use pairing code.
+The script refuses a filled LiveConfig.swift. A filled config carries a server address and a one-use pairing code.
 
 ## 6. Build/test quirks
 
@@ -127,8 +117,7 @@ private/BUILD-TEST-QUIRKS.md in the same turn. Read that file before a build/tes
 - docs/AGENT-LIVE-TESTS.md — disposable live server/UI acceptance.
 - docs/AGENT-CONTRACTS.md — server authority and additive client/server changes.
 
-Put client-owned documents in this repository and link to server contracts rather than copying
-them. The portfolio placement policy is
+Put client-owned documents in this repository and link to server contracts rather than copying them. The portfolio placement policy is
 [`docs/DOCUMENTATION.md`](https://github.com/georgesdib/strength-app/blob/main/docs/DOCUMENTATION.md).
 Do not duplicate live-test secrets or real server values in tracked files.
 

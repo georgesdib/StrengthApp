@@ -14,6 +14,7 @@ struct StrengthWatchApp: App {
 #endif
         let session = WatchSessionController()
         let execution = WatchExecutionController(
+            relay: session,
             onCredentialsMissing: { session.markCredentialsMissing() }
         )
         let today = WatchTodayController(

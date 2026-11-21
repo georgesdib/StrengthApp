@@ -26,6 +26,12 @@ struct TodayView: View {
                     TodaySummarySection(model: model)
                         .id(model.chatModelChoice)
                 }
+                if let header = model.today?.programmeHeader {
+                    ProgrammeHeaderSection(header: header)
+                }
+                if let nudge = model.nudge {
+                    NudgeReviewSection(nudge: nudge, model: model)
+                }
                 if let error = model.errorMessage {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -882,8 +888,9 @@ struct PlanSettingsView: View {
     ]
 
     private enum MainLiftStructure: String, CaseIterable, Identifiable {
-        case server = "Server decides"
-        case topSet = "Top set + back-off"
+        case server = "Server default"
+        case preferred = "Prefer top set + back-off"
+        case required = "Require top set + back-off"
         case straight = "Straight sets"
 
         var id: String { rawValue }
@@ -892,17 +899,19 @@ struct PlanSettingsView: View {
     private var structure: Binding<MainLiftStructure> {
         Binding(
             get: {
-                switch settings.topSet {
-                case .some(true): return .topSet
-                case .some(false): return .straight
+                switch settings.topSetIntent {
+                case .preferred: return .preferred
+                case .required: return .required
+                case .off: return .straight
                 case nil: return .server
                 }
             },
             set: { value in
                 switch value {
-                case .server: settings.topSet = nil
-                case .topSet: settings.topSet = true
-                case .straight: settings.topSet = false
+                case .server: settings.topSetIntent = nil
+                case .preferred: settings.topSetIntent = .preferred
+                case .required: settings.topSetIntent = .required
+                case .straight: settings.topSetIntent = .off
                 }
             }
         )
@@ -936,7 +945,7 @@ struct PlanSettingsView: View {
                         }
                     }
                     .accessibilityIdentifier("main-lift-structure")
-                    Text("Top set/back-off is applied by the server only when the resolver supports it for this session. Straight sets asks for no top-set structure.")
+                    Text("Preferred accepts a straight-set fallback with a recorded reason; required marks an unexpected fallback unsatisfied on a still-startable plan. The server owns eligibility, structure and every load.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -973,3 +982,126 @@ struct PlanSettingsView: View {
         }
     }
 }
+
+
+private struct ProgrammeHeaderSection: View {
+    let header: ProgrammeHeader
+
+    private var hasContent: Bool {
+        header.trainedWeek != nil
+            || header.dup != nil
+            || header.competition != nil
+            || header.deload?.calendarWeek != nil
+            || (header.deload?.status != nil && header.deload?.status != "none")
+    }
+
+    var body: some View {
+        if hasContent {
+            Section("Programme") {
+                if let week = header.trainedWeek {
+                    LabeledContent("Trained week", value: String(week))
+                }
+                if let dup = header.dup {
+                    LabeledContent("DUP", value: dupLabel(dup))
+                }
+                if let calendar = header.deload?.calendarWeek {
+                    LabeledContent("Deload week (calendar)", value: String(calendar))
+                }
+                if let status = header.deload?.status {
+                    LabeledContent("Deload", value: deloadLabel(status))
+                    if status != "none", let reason = header.deload?.reason, !reason.isEmpty {
+                        Text(reason)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let competition = header.competition {
+                    LabeledContent("Competition", value: competitionLabel(competition))
+                }
+            }
+            .accessibilityIdentifier("programme-header")
+        }
+    }
+
+    private func dupLabel(_ dup: ProgrammeHeaderDUP) -> String {
+        var parts: [String] = []
+        if let week = dup.cycleWeek, let weeks = dup.cycleWeeks {
+            parts.append("week \(week) of \(weeks)")
+        } else if let weeks = dup.cycleWeeks {
+            parts.append("\(weeks)-week cycle")
+        }
+        let schemes = [dup.mainScheme, dup.accessoryScheme]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        if !schemes.isEmpty {
+            parts.append(schemes.joined(separator: " / "))
+        }
+        return parts.isEmpty ? "on" : parts.joined(separator: " · ")
+    }
+
+    private func deloadLabel(_ status: String) -> String {
+        switch status {
+        case "active": return "Active"
+        case "suggested": return "Suggested"
+        case "none": return "None"
+        default: return status
+        }
+    }
+
+    private func competitionLabel(_ competition: ProgrammeHeaderCompetition) -> String {
+        var parts: [String] = []
+        if let date = competition.date, !date.isEmpty {
+            parts.append(date)
+        }
+        if let days = competition.daysUntil {
+            parts.append(days == 0 ? "today" : "\(days) days")
+        } else {
+            parts.append("past")
+        }
+        if let window = competition.window, window != "none" {
+            parts.append(window)
+        }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    }
+}
+
+
+
+private struct NudgeReviewSection: View {
+    let nudge: Nudge
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Section {
+            Text(nudge.statement)
+                .font(.subheadline)
+            Text("Coaching nudge · " + nudge.family.replacingOccurrences(of: "_", with: " "))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let limitations = nudge.evidence?.limitations, !limitations.isEmpty {
+                DisclosureGroup("Why this nudge") {
+                    ForEach(Array(limitations.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            HStack {
+                Button("Snooze 14 days") {
+                    Task { await model.snoozeNudge() }
+                }
+                .accessibilityIdentifier("nudge-snooze")
+                Spacer()
+                Button("Dismiss", role: .destructive) {
+                    Task { await model.dismissNudge() }
+                }
+                .accessibilityIdentifier("nudge-dismiss")
+            }
+        } header: {
+            Text("Review")
+        }
+        .accessibilityIdentifier("today-nudge")
+    }
+}
+

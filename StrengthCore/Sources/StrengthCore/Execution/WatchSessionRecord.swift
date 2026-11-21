@@ -8,7 +8,10 @@ import Foundation
 public struct ActiveSet: Codable, Equatable, Sendable {
     /// Also the idempotency key of the add-set request and the `local_set_id` of its events.
     public var localSetID: String
+    /// -1 for an addition, which has no plan slot.
     public var planItemIndex: Int
+    /// The performed exercise; nil in older records, where the plan item was the exercise.
+    public var exerciseId: String?
     public var setIndex: Int
     public var startedAt: Date
     /// The lifter's adjustments, persisted so a termination mid-set does not lose them.
@@ -18,6 +21,7 @@ public struct ActiveSet: Codable, Equatable, Sendable {
     public init(
         localSetID: String,
         planItemIndex: Int,
+        exerciseId: String? = nil,
         setIndex: Int,
         startedAt: Date,
         loadKg: Double? = nil,
@@ -25,6 +29,7 @@ public struct ActiveSet: Codable, Equatable, Sendable {
     ) {
         self.localSetID = localSetID
         self.planItemIndex = planItemIndex
+        self.exerciseId = exerciseId
         self.setIndex = setIndex
         self.startedAt = startedAt
         self.loadKg = loadKg
@@ -52,6 +57,9 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
     /// local set id -> server set id, learned when the add-set is acknowledged. Used only to
     /// attach `set_id` to the matching telemetry event; a missing entry sends no set id.
     public var eventSetIDs: [String: Int]?
+    /// The latest server-confirmed execution view. The watch merges it by watermark and never
+    /// authors a substitution or addition (DEC-RESOLVER-23).
+    public var execution: ExecutionView?
 
     public init(
         sessionUUID: String,
@@ -64,7 +72,8 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         eventSetIDs: [String: Int]? = nil,
         selectedItemIndex: Int? = nil,
         exerciseItemIndex: Int? = nil,
-        offPlanNoted: Bool? = nil
+        offPlanNoted: Bool? = nil,
+        execution: ExecutionView? = nil
     ) {
         self.sessionUUID = sessionUUID
         self.startedAt = startedAt
@@ -77,6 +86,7 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         self.selectedItemIndex = selectedItemIndex
         self.exerciseItemIndex = exerciseItemIndex
         self.offPlanNoted = offPlanNoted
+        self.execution = execution
     }
 
     public var clock: ServerClock? {

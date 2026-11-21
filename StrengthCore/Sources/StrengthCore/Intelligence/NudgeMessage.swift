@@ -5,6 +5,8 @@ import Foundation
 public struct NudgeFacts: Sendable, Equatable {
     public enum Readiness: Sendable, Equatable {
         case missing
+        /// Some answers are stored but the server could not form a score yet.
+        case partial
         case logged(score: Double?)
     }
 
@@ -53,6 +55,10 @@ public struct NudgeFacts: Sendable, Equatable {
         switch readiness {
         case .missing:
             lines.append("Today's readiness is not logged.")
+        case .partial:
+            lines.append(
+                "Today's readiness is partly logged; it is not enough to form a score yet."
+            )
         case .logged(let score):
             if let score {
                 lines.append("Today's readiness is logged with a score of \(Self.number(score)).")
@@ -138,6 +144,13 @@ public enum NudgeCopy {
             return NudgeMessage(
                 title: "Log readiness first",
                 body: "Readiness is not logged yet. Two minutes now and today's session is ready to go.",
+                origin: .template
+            )
+        }
+        if facts.readiness == .partial {
+            return NudgeMessage(
+                title: "Finish readiness",
+                body: "You logged part of today's readiness. Add the missing answers and the session can be scored.",
                 origin: .template
             )
         }

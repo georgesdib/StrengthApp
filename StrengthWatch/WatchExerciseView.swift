@@ -23,12 +23,12 @@ struct WatchExerciseView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                if let item = execution.selectedItem {
-                    header(item)
+                if let row = execution.selectedRow {
+                    header(row)
                     if execution.activeSet != nil {
-                        runningSet(item)
+                        runningSet(row)
                     } else {
-                        idle(item)
+                        idle(row)
                     }
                 }
 
@@ -68,7 +68,7 @@ struct WatchExerciseView: View {
             }
         }
         .onAppear { prepare() }
-        .onChange(of: execution.selectedItem?.orderIndex) { _, _ in
+        .onChange(of: execution.selectedRow?.id) { _, _ in
             prepare()
         }
         .onChange(of: loadKg) { _, value in execution.draftChanged(loadKg: value, reps: reps) }
@@ -79,7 +79,7 @@ struct WatchExerciseView: View {
 
     // MARK: - Sections
 
-    private func header(_ item: PrescriptionItem) -> some View {
+    private func header(_ row: ExecutionRow) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 if execution.canLeaveExercise {
@@ -90,7 +90,7 @@ struct WatchExerciseView: View {
                     }
                     .accessibilityIdentifier("watch-back-to-list")
                 }
-                Text(exerciseName(item))
+                Text(execution.selectedExerciseName)
                     .font(.headline)
                 Spacer()
                 Button {
@@ -106,9 +106,13 @@ struct WatchExerciseView: View {
                 }
                 .accessibilityIdentifier("watch-session")
             }
-            Text("Set \(setNumber(item)) of \(item.sets ?? 0)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            Text(
+                row.kind == .added
+                    ? "Extra work · set \(execution.selectedSetNumber)"
+                    : "Set \(execution.selectedSetNumber) of \(execution.selectedPlannedSets)"
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 if let heartRate = execution.heartRate {
                     Label("\(heartRate) bpm", systemImage: "heart.fill")
@@ -125,12 +129,19 @@ struct WatchExerciseView: View {
             }
             .font(.caption)
             .monospacedDigit()
-            Text("\(item.loadLabel) × \(item.repsLabel)")
+            Text("\(execution.selectedLoadLabel) × \(execution.selectedRepsLabel)")
                 .font(.title3)
-            Text(item.effortLabel)
+            Text(execution.selectedEffortLabel)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            if let target = item.velocityTargetLabel {
+            if let note = execution.selectedSubstitutionNote {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.blue)
+                    .accessibilityIdentifier("watch-substitution-note")
+            }
+            if row.kind == .planned,
+               let target = execution.selectedItemForRow?.velocityTargetLabel {
                 Text("target \(target)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -139,9 +150,11 @@ struct WatchExerciseView: View {
         }
     }
 
-    private func idle(_ item: PrescriptionItem) -> some View {
+    private func idle(_ row: ExecutionRow) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            warmupSection(item)
+            if row.kind == .planned, let item = execution.selectedItemForRow {
+                warmupSection(item)
+            }
             loadRow
             repsRow
             if loadEntryNeeded {
@@ -149,9 +162,9 @@ struct WatchExerciseView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
-            if prescribedSetsExhausted(item) {
+            if prescribedSetsExhausted(row) {
                 Button {
-                    execution.beginSet(loadKg: loadKg, reps: reps)
+                    execution.beginSet(loadKg: enteredLoadKg, reps: reps)
                 } label: {
                     Text("Add set").frame(maxWidth: .infinity)
                 }
@@ -159,7 +172,7 @@ struct WatchExerciseView: View {
                 .accessibilityIdentifier("watch-add-set")
             } else {
                 Button {
-                    execution.beginSet(loadKg: loadKg, reps: reps)
+                    execution.beginSet(loadKg: enteredLoadKg, reps: reps)
                 } label: {
                     Text("Start set").frame(maxWidth: .infinity)
                 }
@@ -174,7 +187,7 @@ struct WatchExerciseView: View {
         }
     }
 
-    private func runningSet(_ item: PrescriptionItem) -> some View {
+    private func runningSet(_ row: ExecutionRow) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text("Set time \(formattedDuration(execution.setDuration(at: context.date)))")
@@ -259,7 +272,7 @@ struct WatchExerciseView: View {
     }
 
     private var isTimeBased: Bool {
-        execution.selectedItem?.isTimeBased == true
+        execution.selectedItemForRow?.isTimeBased == true
     }
 
     private var completionSheet: some View {
@@ -269,7 +282,8 @@ struct WatchExerciseView: View {
                 Text("\(formatted(loadKg)) kg × \(reps)\(isTimeBased ? "s" : "")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                if let target = execution.selectedItem?.velocityTargetLabel {
+                if execution.selectedRow?.kind == .planned,
+                   let target = execution.selectedItemForRow?.velocityTargetLabel {
                     Text("Target \(target)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -327,7 +341,7 @@ struct WatchExerciseView: View {
 
     private func saveForm(rating: Int) {
         showingForm = false
-        let exerciseId = execution.selectedItem?.exerciseId ?? ""
+        let exerciseId = execution.selectedRow?.exerciseId ?? ""
         Task {
             await execution.rateForm(exerciseId: exerciseId, rating: rating)
             endExercise()
@@ -346,7 +360,8 @@ struct WatchExerciseView: View {
     /// A swapped or otherwise re-solved exercise has no issued target; allow an optional
     /// measurement for it, but keep bodyweight work free of a bar-speed prompt.
     private var offersVelocityInput: Bool {
-        guard let item = execution.selectedItem else { return false }
+        guard execution.selectedRow?.kind == .planned,
+              let item = execution.selectedItemForRow else { return false }
         // The watch only records the measurement. A server target is optional; external-load
         // work can always be measured, while bodyweight work is not asked for bar speed.
         return !isBodyweight(item)
@@ -358,11 +373,16 @@ struct WatchExerciseView: View {
 
     /// A nil load after a swap is unknown, not bodyweight. Force an explicit entry before the
     /// set can be started so a missing value is never recorded as 0 kg.
+    /// A blank load field is unknown and must stay null, not become 0 kg.
+    private var enteredLoadKg: Double? {
+        loadText.trimmingCharacters(in: .whitespaces).isEmpty ? nil : loadKg
+    }
+
     private var loadEntryNeeded: Bool {
-        guard let item = execution.selectedItem else { return false }
-        return item.loadKg == nil
-            && !isBodyweight(item)
-            && loadKg <= 0
+        guard let row = execution.selectedRow else { return false }
+        guard row.loadKg == nil else { return false }
+        if let item = execution.selectedItemForRow, isBodyweight(item) { return false }
+        return loadKg <= 0
     }
 
     private var parsedVelocity: Double? {
@@ -399,7 +419,7 @@ struct WatchExerciseView: View {
         completionStamp = nil
         Task {
             await execution.logSet(
-                loadKg: loadKg,
+                loadKg: enteredLoadKg,
                 reps: reps,
                 rir: rir,
                 velocityMps: velocity,
@@ -414,26 +434,36 @@ struct WatchExerciseView: View {
     }
 
     private func prepare() {
-        guard let item = execution.selectedItem else { return }
-        let itemIndex = item.orderIndex ?? -1
-        if let active = execution.activeSet, active.planItemIndex == itemIndex {
-            loadKg = active.loadKg ?? loadKg
-            loadText = formatted(loadKg)
+        guard let row = execution.selectedRow else { return }
+        if let active = execution.activeSet,
+           active.planItemIndex == (row.planItemIndex ?? -1),
+           active.exerciseId == nil || active.exerciseId == row.exerciseId {
+            loadKg = active.loadKg ?? 0
+            loadText = active.loadKg.map { formatted($0) } ?? ""
             reps = active.reps ?? reps
-            preparedFor = "\(itemIndex)-draft"
+            preparedFor = "\(row.id)-draft"
             return
         }
-        let key = "\(itemIndex)-\(item.exerciseId ?? "")"
+        // The execution row is authoritative, including a null prefill. The next planned group,
+        // when one exists, supplies the load for this set; an addition or substitution never
+        // falls back to the original exercise's load.
+        let targetLoad = execution.selectedGroup?.loadKg ?? row.loadKg
+        let targetReps = execution.selectedGroup?.repsLow
+            ?? row.repsLow
+            ?? row.repsHigh
+        let loadKey = targetLoad.map { formatted($0) } ?? "nil"
+        let repsKey = targetReps.map { String($0) } ?? "nil"
+        let key = "\(row.id)-\(loadKey)-\(repsKey)"
         guard preparedFor != key else { return }
         preparedFor = key
-        if let plannedLoad = item.loadKg {
-            loadKg = plannedLoad
-            loadText = formatted(plannedLoad)
+        if let targetLoad {
+            loadKg = targetLoad
+            loadText = formatted(targetLoad)
         } else {
             loadKg = 0
             loadText = ""
         }
-        reps = item.repsLow ?? item.repsHigh ?? reps
+        reps = targetReps ?? 0
     }
 
     // MARK: - Helpers
@@ -445,12 +475,9 @@ struct WatchExerciseView: View {
     }
 
     /// True once every prescribed set is done, so the only remaining action is an extra set.
-    private func prescribedSetsExhausted(_ item: PrescriptionItem) -> Bool {
-        execution.completedSetCount(for: item) >= max(0, item.sets ?? 0)
-    }
-
-    private func setNumber(_ item: PrescriptionItem) -> Int {
-        execution.completedSetCount(for: item) + 1
+    private func prescribedSetsExhausted(_ row: ExecutionRow) -> Bool {
+        let planned = max(0, row.sets ?? 0)
+        return planned > 0 && execution.selectedCompletedSets >= planned
     }
 
     private func formattedDuration(_ interval: TimeInterval) -> String {

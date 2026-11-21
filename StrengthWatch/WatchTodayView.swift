@@ -4,6 +4,7 @@ import StrengthCore
 struct WatchTodayView: View {
     @ObservedObject var today: WatchTodayController
     @ObservedObject var execution: WatchExecutionController
+    @ObservedObject var session: WatchSessionController
 
     var body: some View {
         ScrollView {
@@ -19,6 +20,18 @@ struct WatchTodayView: View {
                     }
                     .disabled(today.isRefreshing)
                     .accessibilityIdentifier("watch-today-refresh")
+                    Button {
+                        session.testConnectivity()
+                    } label: {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                    }
+                    .accessibilityIdentifier("watch-test-connection")
+                }
+                if let spike = session.spikeStatus {
+                    Text(spike)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("watch-connection-status")
                 }
 
                 switch today.state {

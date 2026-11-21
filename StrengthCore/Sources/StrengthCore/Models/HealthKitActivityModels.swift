@@ -96,9 +96,65 @@ public struct HealthKitActivitySamplesBody: Encodable {
     }
 }
 
+/// Result of one of the two activity upload calls.
+///
+/// The server is deliberately per-item tolerant: a malformed metric or an immutable sample
+/// conflict increments a counter instead of failing the whole batch. The client must therefore
+/// read `rejected` and the nested metric `skipped` count; a 200 is not proof that every item
+/// was stored.
 public struct HealthKitActivityUploadResult: Decodable, Equatable {
     public let created: Int
     public let existing: Int
+    /// Items the server declined to store. They need investigation, not blind re-submission.
+    public let rejected: Int
+    /// HealthKit keys the server rejected, when it can identify them. Empty from an older server;
+    /// the caller must then hold the cursor instead of quarantining by key.
+    public let rejectedKeys: [String]
+    /// Present only on the samples call, which carries standalone metrics too.
+    public let metrics: HealthKitActivityMetricUploadResult?
+
+    private enum CodingKeys: String, CodingKey {
+        case created, existing, rejected, rejectedKeys, metrics
+    }
+
+    public init(
+        created: Int = 0,
+        existing: Int = 0,
+        rejected: Int = 0,
+        rejectedKeys: [String] = [],
+        metrics: HealthKitActivityMetricUploadResult? = nil
+    ) {
+        self.created = created
+        self.existing = existing
+        self.rejected = rejected
+        self.rejectedKeys = rejectedKeys
+        self.metrics = metrics
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        created = try container.decodeIfPresent(Int.self, forKey: .created) ?? 0
+        existing = try container.decodeIfPresent(Int.self, forKey: .existing) ?? 0
+        // A metrics-only samples call omits rejected entirely.
+        rejected = try container.decodeIfPresent(Int.self, forKey: .rejected) ?? 0
+        rejectedKeys = try container.decodeIfPresent([String].self, forKey: .rejectedKeys) ?? []
+        metrics = try container.decodeIfPresent(
+            HealthKitActivityMetricUploadResult.self, forKey: .metrics
+        )
+    }
+
+    public var skippedMetrics: Int { metrics?.skipped ?? 0 }
+    public var isPartial: Bool { rejected > 0 || skippedMetrics > 0 }
+}
+
+public struct HealthKitActivityMetricUploadResult: Decodable, Equatable {
+    public let written: Int
+    public let skipped: Int
+
+    public init(written: Int, skipped: Int) {
+        self.written = written
+        self.skipped = skipped
+    }
 }
 
 public struct HealthKitActivityBatch {

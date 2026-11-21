@@ -197,15 +197,23 @@ final class NudgeSchedulerTests: XCTestCase {
 
     // MARK: - Readiness detection
 
-    func testReadinessWithoutTheKnownKeyCountsAsLogged() throws {
-        // The server sends known:false only for a day with no usable row; a merged row omits
-        // the key. Reading a missing key as "not logged" is what made the first reminder wrong.
-        let logged = Data(#"{"date":"2026-11-16","readiness":{"on_date":"2026-11-16","sleep":3}}"#.utf8)
-        let today = try JSONDecoder().decode(TodayResponse.self, from: logged)
-        XCTAssertEqual(today.readiness?.isLogged, true)
+    func testReadinessLoggingUsesTheFormedScoreNotThePresenceOfARow() throws {
+        // The server omits `known` for any merged row and sets `known:false` only when the day
+        // has no row at all. Row presence is not a logged answer: a partial entry merges into a
+        // row whose score status is `insufficient`.
+        let ready = Data(#"{"date":"2026-11-16","readiness":{"on_date":"2026-11-16","sleep":3,"score":{"status":"ready","score":0.72}}}"#.utf8)
+        let logged = try JSONDecoder().decode(TodayResponse.self, from: ready)
+        XCTAssertEqual(logged.readiness?.hasEntry, true)
+        XCTAssertEqual(logged.readiness?.isLogged, true)
+
+        let partial = Data(#"{"date":"2026-11-16","readiness":{"on_date":"2026-11-16","sleep":3,"score":{"status":"insufficient","score":null}}}"#.utf8)
+        let unfinished = try JSONDecoder().decode(TodayResponse.self, from: partial)
+        XCTAssertEqual(unfinished.readiness?.hasEntry, true)
+        XCTAssertEqual(unfinished.readiness?.isLogged, false)
 
         let missing = Data(#"{"date":"2026-11-16","readiness":{"on_date":"2026-11-16","known":false}}"#.utf8)
         let empty = try JSONDecoder().decode(TodayResponse.self, from: missing)
+        XCTAssertEqual(empty.readiness?.hasEntry, false)
         XCTAssertEqual(empty.readiness?.isLogged, false)
     }
 
@@ -225,9 +233,17 @@ final class NudgeSchedulerTests: XCTestCase {
         XCTAssertEqual(message.title, "Log readiness first")
     }
 
+    func testPartialReadinessAsksForTheRest() {
+        let message = NudgeCopy.message(for: NudgeFacts(readiness: .partial))
+        XCTAssertEqual(message.title, "Finish readiness")
+        XCTAssertTrue(message.body.contains("part of today's readiness"))
+        XCTAssertTrue(NudgeFacts(readiness: .partial).factText.contains("partly logged"))
+    }
+
     func testEveryTemplateFitsANotification() {
         let shapes: [NudgeFacts] = [
             NudgeFacts(readiness: .missing),
+            NudgeFacts(readiness: .partial),
             NudgeFacts(readiness: .logged(score: 72)),
             facts(),
             NudgeFacts(readiness: .logged(score: nil), sessionInProgress: true),

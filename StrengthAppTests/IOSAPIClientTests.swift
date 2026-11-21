@@ -36,29 +36,41 @@ final class IOSAPIClientTests: XCTestCase {
         XCTAssertEqual(transport.requests.count, 1)
     }
 
-    func testMovePlanExercisePostsTheTargetPositionAndExpectedItem() async throws {
+    func testExecutionChangePostsThePhoneAuthoredChange() async throws {
         let (client, transport) = makeClient { request in
             XCTAssertEqual(
                 request.url?.path,
-                "/api/ios/v1/workouts/workout-1/plan/items/2/move"
+                "/api/ios/v1/workouts/workout-1/execution"
             )
             XCTAssertEqual(request.httpMethod, "POST")
             let object = request.httpBody.flatMap {
                 try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
             }
-            XCTAssertEqual(object?["to_index"] as? Int, 0)
-            XCTAssertEqual(object?["expected_exercise_id"] as? String, "squat")
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            XCTAssertEqual(object?["event_id"] as? String, "event-1")
+            XCTAssertEqual(object?["change"] as? String, "substitution")
+            XCTAssertEqual(object?["plan_item_index"] as? Int, 0)
+            XCTAssertEqual(object?["exercise_id"] as? String, "squat")
+            XCTAssertEqual(object?["prefill_requested"] as? Bool, true)
+            return (200, Data("""
+            {"execution": {"workout_id": "workout-1", "watermark": 3,
+             "substitutions": [], "additions": []}}
+            """.utf8))
         }
 
-        _ = try await client.movePlanExercise(
+        let response = try await client.recordExecutionChange(
             workoutId: "workout-1",
-            itemIndex: 2,
-            body: PlanMoveRequest(toIndex: 0, expectedExerciseId: "squat"),
+            body: ExecutionChangeRequest(
+                eventId: "event-1",
+                change: "substitution",
+                planItemIndex: 0,
+                exerciseId: "squat",
+                prefillRequested: true
+            ),
             session: session,
-            idempotencyKey: "move-1"
+            idempotencyKey: "exec-1"
         )
 
+        XCTAssertEqual(response.execution.watermark, 3)
         XCTAssertEqual(transport.requests.count, 1)
     }
 

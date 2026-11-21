@@ -19,19 +19,36 @@ enum HealthKitActivityError: LocalizedError {
 protocol HealthKitActivityProviding {
     var isAvailable: Bool { get }
     var lastSyncedAt: Date { get }
-    func requestAuthorization() async throws
     var lastWorkoutAt: Date { get }
+    func requestAuthorization() async throws
     func fetchBatch(now: Date) async throws -> HealthKitActivityBatch
-    func markSynced(now: Date, workouts: [HealthKitActivityWorkout])
+    /// Advances the workout cursor and remembers each interval for later sample association.
+    /// Rejected keys are quarantined so the 24-hour overlap cannot rediscover them.
+    func markWorkoutsSynced(_ workouts: [HealthKitActivityWorkout], rejectedKeys: Set<String>)
+    /// Advances the heart-rate sample cursor. Rejected keys are quarantined so the seven-day
+    /// overlap cannot rediscover them.
+    func markSamplesSynced(at date: Date, rejectedKeys: Set<String>)
+    var quarantinedWorkoutKeys: [String] { get }
+    var quarantinedSampleKeys: [String] { get }
+    func clearQuarantine()
+}
+
+/// A workout interval the app has uploaded. Heart-rate samples can arrive after the workout has
+/// left the short workout query, so the interval is persisted and reused when associating samples.
+struct HealthKitActivityInterval: Codable, Equatable {
+    let key: String
+    let start: Date
+    let workoutEnd: Date
+    let tailEnd: Date
 }
 
 /// Reads the incremental slice of HealthKit activity: workouts after the export cutoff, and the
-/// heart-rate samples that belong to them or to their ten-minute recovery tail.
+/// heart-rate samples that belong to those workouts or to their ten-minute recovery tail.
 ///
-/// The export promoted history up to `2026-11-17T17:49:23Z`, so the first run starts a week before
-/// that date and every run after it starts a week before the last success. The lookback is
-/// deliberate: a sample can arrive after the sync that should have carried it, and re-sending is
-/// idempotent while missing one is not.
+/// Workouts and samples have independent cursors. Workouts use a one-day overlap because uploads
+/// are idempotent; samples use a seven-day overlap because HealthKit can deliver a sample long
+/// after the workout it belongs to. Crucially, sample association uses every uploaded workout
+/// interval remembered in `intervalStoreKey`, not only the workouts rediscovered in this run.
 final class HealthKitActivityService: HealthKitActivityProviding {
     static let defaultCutoff = ISO8601DateFormatter().date(from: "2026-11-17T17:49:23Z") ?? Date()
 
@@ -39,8 +56,16 @@ final class HealthKitActivityService: HealthKitActivityProviding {
     private let defaults: UserDefaults
     private let sampleCursorKey = "healthkit.activity.samplesSyncedAt.v2"
     private let workoutCursorKey = "healthkit.activity.workoutsSyncedAt.v2"
+    private let intervalStoreKey = "healthkit.activity.uploadedWorkoutIntervals.v1"
+    private let workoutQuarantineKey = "healthkit.activity.quarantinedWorkoutKeys.v1"
+    private let sampleQuarantineKey = "healthkit.activity.quarantinedSampleKeys.v1"
+    private static let workoutQuarantineLimit = 500
+    private static let sampleQuarantineLimit = 5000
     private let lookback: TimeInterval = 7 * 24 * 60 * 60
-    private let tail: TimeInterval = 600
+    private static let workoutOverlap: TimeInterval = 24 * 60 * 60
+    private static let tail: TimeInterval = 600
+    /// Enough to cover the seven-day sample window plus the recovery tail and a late sync.
+    private let intervalRetention: TimeInterval = 14 * 24 * 60 * 60
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -52,19 +77,150 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         (defaults.object(forKey: sampleCursorKey) as? Date) ?? Self.defaultCutoff
     }
 
-    /// The workouts cursor advances only to the latest workout actually uploaded. Advancing it to
-    /// "now" would skip a workout that ended before the sync began, which is exactly how the
-    /// 17 November session was lost.
+    /// The workouts cursor advances to the latest workout the server answered for, including a
+    /// quarantined one. Advancing it to "now" would skip a workout that ended before the sync began,
+    /// which is exactly how the 17 November session was lost.
     var lastWorkoutAt: Date {
         (defaults.object(forKey: workoutCursorKey) as? Date) ?? Self.defaultCutoff
     }
 
-    func markSynced(now: Date, workouts: [HealthKitActivityWorkout]) {
-        defaults.set(now, forKey: sampleCursorKey)
+    var quarantinedWorkoutKeys: [String] { storedKeys(forKey: workoutQuarantineKey) }
+    var quarantinedSampleKeys: [String] { storedKeys(forKey: sampleQuarantineKey) }
+
+    /// Commit a workout upload after the server answered. Intervals are persisted only for workouts
+    /// the server accepted; a rejected key is quarantined so the 24-hour overlap cannot rediscover
+    /// it. The cursor still advances past the whole batch, so one bad workout cannot stall later
+    /// ones. This method must not be called when the server did not identify its rejected keys.
+    func markWorkoutsSynced(
+        _ workouts: [HealthKitActivityWorkout],
+        rejectedKeys: Set<String>
+    ) {
+        let now = Date()
         let formatter = ISO8601DateFormatter()
+        let accepted = workouts.filter { !rejectedKeys.contains($0.key) }
+        let newIntervals = accepted.compactMap {
+            Self.interval(for: $0, formatter: formatter)
+        }
+        if !newIntervals.isEmpty {
+            let merged = Self.mergedIntervals(
+                knownIntervals(now: now) + newIntervals,
+                now: now,
+                retention: intervalRetention
+            )
+            if let data = try? JSONEncoder().encode(merged) {
+                defaults.set(data, forKey: intervalStoreKey)
+            }
+        }
         if let latest = workouts.compactMap({ formatter.date(from: $0.endedAt) }).max() {
             defaults.set(latest, forKey: workoutCursorKey)
         }
+        if !rejectedKeys.isEmpty {
+            saveKeys(
+                Self.mergedKeys(
+                    rejectedKeys,
+                    existing: quarantinedWorkoutKeys,
+                    limit: Self.workoutQuarantineLimit
+                ),
+                forKey: workoutQuarantineKey
+            )
+        }
+    }
+
+    func markSamplesSynced(at date: Date, rejectedKeys: Set<String>) {
+        defaults.set(date, forKey: sampleCursorKey)
+        if !rejectedKeys.isEmpty {
+            saveKeys(
+                Self.mergedKeys(
+                    rejectedKeys,
+                    existing: quarantinedSampleKeys,
+                    limit: Self.sampleQuarantineLimit
+                ),
+                forKey: sampleQuarantineKey
+            )
+        }
+    }
+
+    func clearQuarantine() {
+        defaults.removeObject(forKey: workoutQuarantineKey)
+        defaults.removeObject(forKey: sampleQuarantineKey)
+    }
+
+    private func storedKeys(forKey key: String) -> [String] {
+        guard let data = defaults.data(forKey: key),
+              let keys = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return keys
+    }
+
+    private func saveKeys(_ keys: [String], forKey key: String) {
+        guard let data = try? JSONEncoder().encode(keys) else { return }
+        defaults.set(data, forKey: key)
+    }
+
+    static func mergedKeys(
+        _ newKeys: Set<String>,
+        existing: [String],
+        limit: Int
+    ) -> [String] {
+        var result = existing
+        var seen = Set(existing)
+        for key in newKeys.sorted() {
+            if seen.insert(key).inserted { result.append(key) }
+        }
+        if result.count > limit {
+            result.removeFirst(result.count - limit)
+        }
+        return result
+    }
+
+    /// Intervals already uploaded, newest data pruned to the sample retention window.
+    func knownIntervals(now: Date = Date()) -> [HealthKitActivityInterval] {
+        guard let data = defaults.data(forKey: intervalStoreKey),
+              let decoded = try? JSONDecoder().decode(
+                  [HealthKitActivityInterval].self, from: data
+              )
+        else { return [] }
+        return Self.mergedIntervals(decoded, now: now, retention: intervalRetention)
+    }
+
+    static func interval(
+        for workout: HealthKitActivityWorkout,
+        formatter: ISO8601DateFormatter
+    ) -> HealthKitActivityInterval? {
+        guard let start = formatter.date(from: workout.startedAt),
+              let end = formatter.date(from: workout.endedAt)
+        else { return nil }
+        return HealthKitActivityInterval(
+            key: workout.key,
+            start: start,
+            workoutEnd: end,
+            tailEnd: end.addingTimeInterval(tail)
+        )
+    }
+
+    /// Deduplicate by HealthKit key and drop intervals too old for the sample window.
+    static func mergedIntervals(
+        _ intervals: [HealthKitActivityInterval],
+        now: Date,
+        retention: TimeInterval
+    ) -> [HealthKitActivityInterval] {
+        let oldest = now.addingTimeInterval(-retention)
+        var byKey: [String: HealthKitActivityInterval] = [:]
+        for interval in intervals where interval.tailEnd >= oldest {
+            if let existing = byKey[interval.key] {
+                if interval.tailEnd > existing.tailEnd { byKey[interval.key] = interval }
+            } else {
+                byKey[interval.key] = interval
+            }
+        }
+        return byKey.values.sorted { $0.start < $1.start }
+    }
+
+    static func interval(
+        containing date: Date,
+        in intervals: [HealthKitActivityInterval]
+    ) -> HealthKitActivityInterval? {
+        intervals.first { $0.start <= date && date <= $0.tailEnd }
     }
 
     func requestAuthorization() async throws {
@@ -90,28 +246,43 @@ final class HealthKitActivityService: HealthKitActivityProviding {
 
     func fetchBatch(now: Date = Date()) async throws -> HealthKitActivityBatch {
         guard isAvailable else { throw HealthKitActivityError.unavailable }
-        // Workouts never need a lookback: anything before the export cutoff is already in the
-        // database under a content key, and re-uploading it here would create a second row for the
-        // same session (the mistake this filter exists to prevent). The lookback belongs to samples
-        // only, and samples are filtered by the intervals of the workouts fetched in this run.
-        // One day of overlap on workouts: cheap because uploads are idempotent, and it covers a
-        // workout that ended just before the previous cursor advanced.
-        let workoutStart = max(
-            lastWorkoutAt.addingTimeInterval(-24 * 60 * 60),
-            Self.defaultCutoff
-        )
-        let efforts = try await fetchEffortScores(since: workoutStart)
-        let workouts = try await fetchWorkouts(since: workoutStart, efforts: efforts)
-        let formatter = ISO8601DateFormatter()
-        let intervals = workouts.compactMap {
-            workout -> (key: String, start: Date, workoutEnd: Date, end: Date)? in
-            guard let end = formatter.date(from: workout.endedAt),
-                  let begin = formatter.date(from: workout.startedAt)
-            else { return nil }
-            return (workout.key, begin, end, end.addingTimeInterval(tail))
-        }
+        // Never query before the export cutoff: those workouts already exist under a content key,
+        // and sending them here would create a second row for the same session.
+        let storedIntervals = knownIntervals(now: now)
         let sampleStart = lastSyncedAt.addingTimeInterval(-lookback)
+        var workoutStart = lastWorkoutAt.addingTimeInterval(-Self.workoutOverlap)
+        if storedIntervals.isEmpty {
+            // No remembered intervals (first run on this build, or a cleared store). Query back to
+            // the sample window once, so a heart-rate sample delivered late can still find the
+            // workout it belongs to. The intervals are persisted when the workout upload succeeds.
+            workoutStart = min(workoutStart, sampleStart)
+        }
+        workoutStart = max(workoutStart, Self.defaultCutoff)
+        let quarantinedWorkouts = Set(quarantinedWorkoutKeys)
+        let quarantinedSamples = Set(quarantinedSampleKeys)
+        let efforts = try await fetchEffortScores(since: workoutStart)
+        let fetchedWorkouts = try await fetchWorkouts(since: workoutStart, efforts: efforts)
+        // The short workout overlap can rediscover a quarantined workout for a day, and the
+        // seven-day sample overlap can rediscover its samples for a week. Filter both here so a
+        // rejected identity is not re-sent on every sync.
+        let workouts = fetchedWorkouts.filter { !quarantinedWorkouts.contains($0.key) }
+        let formatter = ISO8601DateFormatter()
+        let fetchedIntervals = workouts.compactMap {
+            Self.interval(for: $0, formatter: formatter)
+        }
+        // Associate against previously uploaded workouts as well as the ones discovered now. A
+        // workout uploaded on an earlier sync is outside this run's 24-hour workout overlap, but
+        // its samples can still be inside the seven-day sample window.
+        let intervals = Self.mergedIntervals(
+            storedIntervals + fetchedIntervals,
+            now: now,
+            retention: intervalRetention
+        )
         let samples = try await fetchHeartRate(since: sampleStart, intervals: intervals)
+            .filter {
+                !quarantinedSamples.contains($0.key)
+                    && !quarantinedWorkouts.contains($0.workoutKey)
+            }
         // Metrics are content-deduplicated on the server, so they are sent without a cutoff: that
         // lets a sync fill any gap in the exported history instead of only appending forward.
         let metrics = try await fetchMetrics()
@@ -151,7 +322,12 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         since: Date,
         efforts: [(start: Date, end: Date, value: Double)]
     ) async throws -> [HealthKitActivityWorkout] {
-        let predicate = HKQuery.predicateForSamples(withStart: since, end: nil, options: [])
+        // strictStartDate matters: without it HealthKit also returns a workout that started before
+        // the cursor but overlaps it. Sending such a workout can trip the server's pre-cutoff guard
+        // and put the whole workout half into a permanent rejected state.
+        let predicate = HKQuery.predicateForSamples(
+            withStart: since, end: nil, options: [.strictStartDate]
+        )
         let samples: [HKWorkout] = try await withCheckedThrowingContinuation { continuation in
             let query = HKSampleQuery(
                 sampleType: HKObjectType.workoutType(),
@@ -167,7 +343,9 @@ final class HealthKitActivityService: HealthKitActivityProviding {
             }
             store.execute(query)
         }
-        return samples.map { workout in
+        // Defence in depth: never let a pre-cutoff workout into the upload even if a query or a
+        // cursor correction widens the window. The server rejects it, which would hold the cursor.
+        return samples.filter { $0.startDate >= Self.defaultCutoff }.map { workout in
             let heartRate = workout.statistics(for: HKQuantityType(.heartRate))
             let energy = workout.statistics(for: HKQuantityType(.activeEnergyBurned))
             // Apple's own MET value travels in metadata, not in statistics: the export had it for
@@ -197,7 +375,7 @@ final class HealthKitActivityService: HealthKitActivityProviding {
 
     private func fetchHeartRate(
         since: Date,
-        intervals: [(key: String, start: Date, workoutEnd: Date, end: Date)]
+        intervals: [HealthKitActivityInterval]
     ) async throws -> [HealthKitActivitySample] {
         guard !intervals.isEmpty, let type = HKObjectType.quantityType(forIdentifier: .heartRate) else {
             return []
@@ -219,7 +397,7 @@ final class HealthKitActivityService: HealthKitActivityProviding {
             store.execute(query)
         }
         return samples.compactMap { sample in
-            guard let match = intervals.first(where: { $0.start <= sample.startDate && sample.startDate <= $0.end })
+            guard let match = Self.interval(containing: sample.startDate, in: intervals)
             else { return nil }
             let value = sample.quantity.doubleValue(for: Self.bpm)
             guard value.isFinite, (20...260).contains(value) else { return nil }
@@ -287,6 +465,7 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         case .highIntensityIntervalTraining: return "HKWorkoutActivityTypeHighIntensityIntervalTraining"
         case .golf: return "HKWorkoutActivityTypeGolf"
         case .tennis: return "HKWorkoutActivityTypeTennis"
+        case .tableTennis: return "HKWorkoutActivityTypeTableTennis"
         case .yoga: return "HKWorkoutActivityTypeYoga"
         default: return "HKWorkoutActivityTypeOther"
         }

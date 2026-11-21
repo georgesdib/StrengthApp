@@ -32,7 +32,7 @@ struct WatchExecutionView: View {
             case .ended(let reason):
                 WatchEndedView(execution: execution, reason: reason)
             default:
-                if execution.selectedItem == nil {
+                if execution.selectedRow == nil {
                     WatchExerciseListView(
                         execution: execution,
                         showingSession: $showingSession,

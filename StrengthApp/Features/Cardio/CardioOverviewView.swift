@@ -127,7 +127,24 @@ struct CardioOverviewView: View {
                 }
                 .disabled(model.isSyncingActivity || !model.canSyncActivity)
                 if let message = model.activitySyncMessage {
-                    Text(message).font(.caption).foregroundStyle(.secondary)
+                    HStack(alignment: .top, spacing: 6) {
+                        if model.activitySyncNeedsAttention {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        }
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(model.activitySyncNeedsAttention ? .orange : .secondary)
+                            .textSelection(.enabled)
+                    }
+                    .accessibilityIdentifier("cardio-sync-status")
+                }
+                if model.activitySyncNeedsAttention {
+                    Button("Dismiss warning") {
+                        model.dismissActivityQuarantine()
+                    }
+                    .font(.caption)
+                    .accessibilityIdentifier("cardio-sync-dismiss")
                 }
                 if let latest = payload?.summary.latestWorkoutAt {
                     Text("Last recorded workout: \(latest.prefix(10))")

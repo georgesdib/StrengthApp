@@ -1086,10 +1086,10 @@ final class Phase2AppModelTests: XCTestCase {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         let settings = try encoder.encode(
-            PlanSettings(sessionType: "squat", topSet: true)
+            PlanSettings(sessionType: "squat", topSetIntent: .required)
         )
         let settingsText = try XCTUnwrap(String(data: settings, encoding: .utf8))
-        XCTAssertTrue(settingsText.contains("\"top_set\":true"))
+        XCTAssertTrue(settingsText.contains("\"top_set_intent\":\"required\""))
 
         let complete = try encoder.encode(
             CompleteWorkoutRequest(
@@ -1103,6 +1103,127 @@ final class Phase2AppModelTests: XCTestCase {
         let removal = try encoder.encode(RemoveSetRequest(setId: 42))
         let removalText = try XCTUnwrap(String(data: removal, encoding: .utf8))
         XCTAssertTrue(removalText.contains("\"set_id\":42"))
+    }
+
+    func testNudgeResponseDecodes() throws {
+        let json = """
+        {
+          "on_date": "2026-11-20",
+          "nudge": {
+            "key": "nudge:programme:deload",
+            "family": "programme",
+            "statement": "A scheduled deload is due (block week 3).",
+            "gate": "signal",
+            "n": 1,
+            "evidence_id": "programme:deload:3",
+            "observation_id": "ob:programme:abc",
+            "category": "review",
+            "source": "programme context",
+            "evidence": {
+              "evidence_id": "programme:deload:3",
+              "source": "programme_header",
+              "method": "strength_coach.features.programme.header",
+              "gate": "signal",
+              "n": 1,
+              "limitations": ["A policy suggestion, not a measured requirement."]
+            }
+          }
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let response = try decoder.decode(NudgeResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(response.nudge?.key, "nudge:programme:deload")
+        XCTAssertEqual(response.nudge?.family, "programme")
+        XCTAssertEqual(response.nudge?.evidenceId, "programme:deload:3")
+        XCTAssertEqual(response.nudge?.evidence?.limitations?.count, 1)
+    }
+
+    func testNudgeClientReadsAndRecordsTheDecision() async throws {
+        let session = IOSSession(
+            baseURL: URL(string: "http://127.0.0.1:8000")!,
+            token: "token-abc"
+        )
+        let responseJSON = """
+        {"nudge": {"key": "nudge:programme:deload", "family": "programme",
+         "statement": "A scheduled deload is due.", "gate": "signal", "n": 1,
+         "evidence_id": "programme:deload:3", "observation_id": "ob:programme:abc",
+         "category": "review", "source": "programme context",
+         "evidence": {"evidence_id": "programme:deload:3", "limitations": []}}}
+        """
+        let transport = StubTransport { request in
+            if request.httpMethod == "GET" {
+                return (200, Data(responseJSON.utf8))
+            }
+            return (200, Data(#"{"nudge": null}"#.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        let response = try await client.nudge(session: session)
+        XCTAssertEqual(response.nudge?.key, "nudge:programme:deload")
+
+        let after = try await client.recordNudge(
+            key: "nudge:programme:deload",
+            action: "dismiss",
+            evidenceId: "programme:deload:3",
+            date: "2026-11-20",
+            session: session
+        )
+        XCTAssertNil(after.nudge)
+        let post = try XCTUnwrap(transport.requests.last)
+        XCTAssertEqual(post.url?.path, "/api/nudge")
+        let body = String(data: try XCTUnwrap(post.httpBody), encoding: .utf8) ?? ""
+        XCTAssertTrue(body.contains(#""action":"dismiss""#))
+        XCTAssertTrue(body.contains(#""evidence_id":"programme:deload:3""#))
+        XCTAssertTrue(body.contains(#""date":"2026-11-20""#))
+    }
+
+    func testTodayDecodesTheProgrammeHeader() throws {
+        let json = """
+        {
+          "date": "2026-11-20",
+          "programme_header": {
+            "trained_week": 3,
+            "dup": {
+              "enabled": true, "cycle_weeks": 4, "cycle_week": 3,
+              "main_scheme": "maximal", "accessory_scheme": "accessory"
+            },
+            "deload": {
+              "calendar_week": 3, "status": "none",
+              "trigger": null, "reason": null
+            },
+            "competition": {
+              "date": "2027-01-16", "days_until": 58, "window": "peak"
+            }
+          }
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let today = try decoder.decode(TodayResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(today.programmeHeader?.trainedWeek, 3)
+        XCTAssertEqual(today.programmeHeader?.dup?.cycleWeek, 3)
+        XCTAssertEqual(today.programmeHeader?.deload?.calendarWeek, 3)
+        XCTAssertEqual(today.programmeHeader?.competition?.daysUntil, 58)
+    }
+
+    func testFrozenTopSetStatusDecodes() throws {
+        let json = """
+        {
+          "items": [],
+          "top_set": {
+            "status": "unsatisfied",
+            "reason_code": "no_usable_load",
+            "reason": "no usable main-lift load"
+          }
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let plan = try decoder.decode(PrescriptionPlan.self, from: Data(json.utf8))
+        XCTAssertEqual(plan.topSet?.status, "unsatisfied")
+        XCTAssertEqual(plan.topSet?.reasonCode, "no_usable_load")
+        XCTAssertEqual(plan.topSet?.statusLabel, "Required but unavailable")
+        XCTAssertFalse(plan.topSet?.isApplied ?? true)
     }
 
     func testAppModelForwardsWatchExecutionTarget() async {

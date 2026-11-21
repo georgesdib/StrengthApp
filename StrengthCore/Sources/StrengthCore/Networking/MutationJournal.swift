@@ -57,7 +57,7 @@ public enum MutationKind: String, Codable, CaseIterable {
     case removeSet
     case executionEvents
     case rateForm
-    case planEdit
+    case executionChange
     case completeWorkout
     case abandonWorkout
     case takeover
@@ -73,7 +73,7 @@ public enum MutationKind: String, Codable, CaseIterable {
         case .removeSet: return "Remove set"
         case .executionEvents: return "Execution events"
         case .rateForm: return "Form rating"
-        case .planEdit: return "Plan edit"
+        case .executionChange: return "Execution change"
         case .completeWorkout: return "Complete workout"
         case .abandonWorkout: return "Abandon workout"
         case .takeover: return "Take over logging"

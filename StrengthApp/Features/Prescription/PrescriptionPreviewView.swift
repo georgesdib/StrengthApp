@@ -57,6 +57,26 @@ struct PrescriptionPreviewView: View {
                 }
             }
 
+            if let topSet = issued.plan.topSet, topSet.reasonCode != "intent_off" {
+                Section("Top set") {
+                    LabeledContent("Outcome", value: topSet.statusLabel)
+                    if let reason = topSet.reason, !reason.isEmpty {
+                        Text(reason)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    if topSet.isApplied,
+                       let load = topSet.topSetLoadKg,
+                       let rir = topSet.topSetRir {
+                        LabeledContent(
+                            "Heaviest set",
+                            value: String(format: "%.1f kg · RIR %d", load, rir)
+                        )
+                    }
+                }
+                .accessibilityIdentifier("top-set-status")
+            }
+
             Section("Plan") {
                 ForEach(issued.plan.items) { item in
                     VStack(alignment: .leading, spacing: 4) {

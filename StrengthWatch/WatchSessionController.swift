@@ -14,6 +14,7 @@ final class WatchSessionController: NSObject, ObservableObject {
 
     @Published private(set) var state: State = .waiting
     @Published private(set) var lastError: String?
+    @Published private(set) var spikeStatus: String?
 
     /// The app decides when a configuration change may be applied (contract §7.8: not while a
     /// session is active or work is queued).
@@ -61,6 +62,36 @@ final class WatchSessionController: NSObject, ObservableObject {
         guard let context = deferredContext, canApplyConfig() else { return }
         process(context)
         sendAcknowledgement()
+    }
+
+    /// WP8 spike: a reachable-phone round trip carrying a request id.
+    func testConnectivity() {
+        spikeStatus = nil
+        guard let session, session.activationState == .activated else {
+            spikeStatus = "WatchConnectivity is not active."
+            return
+        }
+        guard session.isReachable else {
+            spikeStatus = "Open the iPhone app to make it reachable."
+            return
+        }
+        let requestID = UUID().uuidString.lowercased()
+        let started = Date()
+        session.sendMessage(
+            ["kind": "spike", "request_id": requestID],
+            replyHandler: { [weak self] reply in
+                Task { @MainActor in
+                    let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+                    let echoed = reply["request_id"] as? String
+                    self?.spikeStatus = echoed == requestID
+                        ? "iPhone replied in \(elapsed) ms."
+                        : "iPhone replied with the wrong request id."
+                }
+            },
+            errorHandler: { [weak self] error in
+                Task { @MainActor in self?.spikeStatus = error.localizedDescription }
+            }
+        )
     }
 
     /// Called by the 6.3 API layer after a 401/403. The token is wiped immediately; the next
@@ -144,6 +175,64 @@ final class WatchSessionController: NSObject, ObservableObject {
     }
 }
 
+extension WatchSessionController: WatchRelayTransport {
+    func send(_ request: WatchRelayRequest) async throws -> WatchRelayResponse {
+        guard let session, session.activationState == .activated else {
+            throw NSError(
+                domain: "StrengthWatch.Relay",
+                code: 0,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "WatchConnectivity is not active."
+                ]
+            )
+        }
+        guard session.isReachable else {
+            throw NSError(
+                domain: "StrengthWatch.Relay",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Open the iPhone app to relay this set. It will retry when the phone is reachable."
+                ]
+            )
+        }
+        guard let encoded = WatchRelayCoding.encodeRequest(request) else {
+            throw NSError(
+                domain: "StrengthWatch.Relay",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "The relay request could not be encoded."]
+            )
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            session.sendMessage(
+                ["kind": "relay", "request": encoded],
+                replyHandler: { reply in
+                    guard (reply["kind"] as? String) == "relay_reply",
+                          let value = reply["response"] as? String,
+                          let response = WatchRelayCoding.decodeResponse(value),
+                          response.requestId == request.requestId else {
+                        continuation.resume(
+                            throwing: NSError(
+                                domain: "StrengthWatch.Relay",
+                                code: 3,
+                                userInfo: [
+                                    NSLocalizedDescriptionKey:
+                                        "The iPhone returned an invalid relay response."
+                                ]
+                            )
+                        )
+                        return
+                    }
+                    continuation.resume(returning: response)
+                },
+                errorHandler: { error in
+                    continuation.resume(throwing: error)
+                }
+            )
+        }
+    }
+}
+
 extension WatchSessionController: WCSessionDelegate {
     nonisolated func session(
         _ session: WCSession,
@@ -181,6 +270,22 @@ extension WatchSessionController: WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         Task { @MainActor in
             self.sendAcknowledgement()
+        }
+    }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        let kind = message["kind"] as? String
+        if kind == "spike" {
+            replyHandler([
+                "kind": "spike_reply",
+                "request_id": message["request_id"] as? String ?? "",
+            ])
+        } else {
+            replyHandler(["kind": "unsupported"])
         }
     }
 }

@@ -120,6 +120,9 @@ public final class WatchExecutionEngine {
     public struct SetEntry: Equatable, Sendable {
         public var exerciseId: String
         public var planItemIndex: Int?
+        /// Set only when the phone substituted this plan slot: the performed exercise is the
+        /// substitute and the slot is the annotation (DEC-RESOLVER-23).
+        public var substitutesPlanItemIndex: Int?
         public var setIndex: Int
         public var loadKg: Double?
         public var reps: Int
@@ -135,6 +138,7 @@ public final class WatchExecutionEngine {
         public init(
             exerciseId: String,
             planItemIndex: Int?,
+            substitutesPlanItemIndex: Int? = nil,
             setIndex: Int,
             loadKg: Double?,
             reps: Int,
@@ -145,6 +149,7 @@ public final class WatchExecutionEngine {
         ) {
             self.exerciseId = exerciseId
             self.planItemIndex = planItemIndex
+            self.substitutesPlanItemIndex = substitutesPlanItemIndex
             self.setIndex = setIndex
             self.loadKg = loadKg
             self.reps = reps
@@ -181,6 +186,20 @@ public final class WatchExecutionEngine {
     /// The server considers this session idle (contract §16 idle warning); display only.
     public private(set) var isStale = false
 
+    /// The latest server-confirmed execution view (substitutions and additions).
+    public var executionView: ExecutionView? { sessionRecord?.execution }
+
+    /// The plan rows to render and log against, with substitutions applied and additions after
+    /// their anchor. Order is the plan order (DEC-RESOLVER-23).
+    public var executionRows: [ExecutionRow] {
+        (executionView ?? .empty).rows(plan: workout?.plan)
+    }
+
+    /// The next planned group for a row, by cumulative logged sets. Nil for straight sets.
+    public func group(for row: ExecutionRow, logged: Int) -> SetGroup? {
+        row.group(forLoggedCount: logged)
+    }
+
     /// Descriptive tonnage of acknowledged plus queued sets. Not a training decision.
     public var tonnageKg: Double {
         // RIR 6 is the warm-up role; it is work, but not working-set volume.
@@ -206,11 +225,13 @@ public final class WatchExecutionEngine {
     public init(
         client: IOSAPIClient,
         store: OfflineCaptureStore,
+        relay: (any WatchRelayTransport)? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.client = client
         self.store = store
         self.now = now
+        client.relay = relay
     }
 
     // MARK: - Derived state
@@ -298,7 +319,7 @@ public final class WatchExecutionEngine {
     /// An exercise is active from its first started set until it is ended, so the list cannot be
     /// re-entered in between.
     public var canLeaveExercise: Bool {
-        sessionRecord?.exerciseItemIndex == nil
+        sessionRecord?.exerciseItemIndex == nil && sessionRecord?.activeSet == nil
     }
 
     /// The exercise the lifter picked from the list. Nothing can be started or logged without
@@ -363,19 +384,33 @@ public final class WatchExecutionEngine {
     /// started as a warm-up can be logged as a working set and vice versa. Warm-ups sit above
     /// the planned range so they never take a planned slot; the server classifies them by RIR 6.
     public func nextSetIndex(planItemIndex: Int, rir: Int?) -> Int {
+        let row = executionRows.first {
+            $0.kind != .added && $0.planItemIndex == planItemIndex
+        }
+        let exerciseId = row?.exerciseId
+            ?? planItems.first { ($0.orderIndex ?? -1) == planItemIndex }?.exerciseId
+            ?? ""
+        return nextSetIndex(exerciseId: exerciseId, rir: rir)
+    }
+
+    /// The identity of a set is (exercise, index), not its plan slot: a substitute or an
+    /// addition must count every set already recorded for the performed exercise.
+    public func nextSetIndex(exerciseId: String, rir: Int?) -> Int {
+        let acknowledged = (workout?.sets ?? []).filter { $0.exerciseId == exerciseId }
+        let queued = pending.compactMap { operation -> AddSetRequest? in
+            guard case .addSet(let body) = operation.body,
+                  body.exerciseId == exerciseId else { return nil }
+            return body
+        }
         if rir == 6 {
             // Above every warm-up already logged, so undoing one cannot hand out a live index.
-            let acknowledged = (workout?.sets ?? []).filter {
-                ($0.planItemIndex ?? -1) == planItemIndex && $0.rir == 6
-            }.compactMap(\.setIndex)
-            let queued = pending.compactMap { operation -> Int? in
-                guard case .addSet(let body) = operation.body,
-                      body.planItemIndex == planItemIndex, body.rir == 6 else { return nil }
-                return body.setIndex
-            }
-            return max(1000, ((acknowledged + queued).max() ?? 999) + 1)
+            let warm = acknowledged.filter { $0.rir == 6 }.compactMap(\.setIndex)
+                + queued.filter { $0.rir == 6 }.compactMap(\.setIndex)
+            return max(1000, (warm.max() ?? 999) + 1)
         }
-        return setsDone(planItemIndex: planItemIndex) + 1
+        let working = acknowledged.filter { $0.rir != 6 }.compactMap(\.setIndex)
+            + queued.filter { $0.rir != 6 }.compactMap(\.setIndex)
+        return max(0, working.max() ?? 0) + 1
     }
 
     /// Now in the session's clock domain (server-adjusted when the offset is known).
@@ -453,6 +488,7 @@ public final class WatchExecutionEngine {
     @discardableResult
     public func applyRemote(_ payload: RemoteExecutionPayload, deviceID: String?) -> Bool {
         guard let workout, payload.workoutId == workout.workoutId else { return false }
+        let executionApplied = applyExecutionIfNeeded(payload.execution)
         let phoneOwns = payload.ownerDeviceId.flatMap { owner in
             guard !owner.isEmpty, let deviceID, !deviceID.isEmpty else { return false }
             return owner != deviceID
@@ -470,7 +506,9 @@ public final class WatchExecutionEngine {
             phase = .readOnly
             return true
         }
-        guard payload.planRevision > (sessionRecord?.planRevision ?? 0) else { return false }
+        guard payload.planRevision > (sessionRecord?.planRevision ?? 0) else {
+            return executionApplied
+        }
         guard activeSet == nil else {
             deferredPlan = (payload.planRevision, payload.plan)
             planUpdated = true
@@ -528,6 +566,7 @@ public final class WatchExecutionEngine {
             phase = .ended(WatchEndedReason(status: envelope.status))
             return .nothingToSend
         }
+        _ = applyExecutionIfNeeded(envelope.execution)
         // Missing ownership is never permission to write (fail closed).
         guard let owner = envelope.ownerDeviceId, !owner.isEmpty else {
             phase = .readOnly
@@ -554,6 +593,26 @@ public final class WatchExecutionEngine {
         applyRevisionIfNeeded(envelope)
         markOnline(session)
         return .allSent
+    }
+
+    /// Merges an execution view only when it is at least as new as the stored one. The view is a
+    /// hint, never the record; a delayed replay cannot move it backwards.
+    @discardableResult
+    private func applyExecutionIfNeeded(_ view: ExecutionView?) -> Bool {
+        guard let view, let record = sessionRecord else { return false }
+        guard view.watermark >= (record.execution?.watermark ?? 0) else { return false }
+        guard view != record.execution else { return false }
+        do {
+            try mutate { capture in
+                guard var current = capture.session else { return }
+                current.execution = view
+                capture.session = current
+            }
+            return true
+        } catch {
+            lastError = message(for: error)
+            return false
+        }
     }
 
     private func applyRevisionIfNeeded(_ envelope: ExecutionAnalyticsResponse) {
@@ -701,18 +760,39 @@ public final class WatchExecutionEngine {
 
     /// The lifter began a set. This is an explicit observation, never inferred from a screen.
     public func beginSet(loadKg: Double? = nil, reps: Int? = nil) throws {
-        guard phase == .active, let item = selectedItem, let workout else { return }
-        let itemIndex = item.orderIndex ?? 0
-        let setIndex = setsDone(planItemIndex: itemIndex) + 1
+        guard let item = selectedItem else { return }
+        try beginSet(
+            exerciseId: item.exerciseId ?? "",
+            planItemIndex: item.orderIndex,
+            loadKg: loadKg,
+            reps: reps
+        )
+    }
+
+    /// Starts a set for an explicit exercise. An addition has no plan slot, so it passes nil and
+    /// is stored with the -1 sentinel only for the local active-set record.
+    public func beginSet(
+        exerciseId: String,
+        planItemIndex: Int?,
+        loadKg: Double? = nil,
+        reps: Int? = nil
+    ) throws {
+        guard phase == .active, let workout, !exerciseId.isEmpty else { return }
+        let setIndex = nextSetIndex(exerciseId: exerciseId, rir: nil)
         let stamp = stampedNow()
         let token = UUID().uuidString.lowercased()
         try mutate { capture in
             try self.closeRest(in: &capture, at: stamp, workout: workout)
-            try self.touchExercise(in: &capture, itemIndex: itemIndex, at: stamp, workout: workout)
+            if let planItemIndex {
+                try self.touchExercise(
+                    in: &capture, itemIndex: planItemIndex, at: stamp, workout: workout
+                )
+            }
             guard var record = capture.session else { return }
             record.activeSet = ActiveSet(
                 localSetID: token,
-                planItemIndex: itemIndex,
+                planItemIndex: planItemIndex ?? -1,
+                exerciseId: exerciseId,
                 setIndex: setIndex,
                 startedAt: stamp,
                 loadKg: loadKg,
@@ -723,7 +803,7 @@ public final class WatchExecutionEngine {
                 eventId: UUID().uuidString.lowercased(),
                 eventType: .setStarted,
                 occurredAt: ServerClock.encodedISO(stamp),
-                planItemIndex: itemIndex,
+                planItemIndex: planItemIndex,
                 localSetId: token,
                 payload: nil
             )], to: &capture, workout: workout)
@@ -833,6 +913,18 @@ public final class WatchExecutionEngine {
         applyDeferredPlanIfIdle()
     }
 
+    /// Ends an open rest early on the lifter's command, recorded the way the phone records a
+    /// skip: one deliberate terminal event, `rest_skipped`. The watch has no separate skip
+    /// control, so the −15 s control bound for zero is that command (owner decision 2026-11-18).
+    public func skipRest() throws {
+        guard let workout else { return }
+        let stamp = stampedNow()
+        try mutate { capture in
+            try self.closeRest(in: &capture, at: stamp, workout: workout, outcome: .skipped)
+        }
+        applyDeferredPlanIfIdle()
+    }
+
     /// Persists the lifter's in-progress adjustments so a termination before logging loses
     /// nothing.
     public func updateActiveSetDraft(loadKg: Double?, reps: Int?) throws {
@@ -880,6 +972,7 @@ public final class WatchExecutionEngine {
             velocityMps: entry.velocityMps,
             setIndex: entry.setIndex,
             planItemIndex: entry.planItemIndex,
+            substitutesPlanItemIndex: entry.substitutesPlanItemIndex,
             repVelocities: entry.repVelocities,
             performedAt: ServerClock.encodedISO(performed)
         )
@@ -1434,6 +1527,7 @@ public final class WatchExecutionEngine {
                 velocityMps: body.velocityMps,
                 setIndex: body.setIndex,
                 planItemIndex: nil,
+                substitutesPlanItemIndex: body.substitutesPlanItemIndex,
                 repVelocities: body.repVelocities,
                 performedAt: body.performedAt
             ))
@@ -1467,15 +1561,16 @@ public final class WatchExecutionEngine {
     private func closeRest(
         in capture: inout OfflineCapture,
         at stamp: Date,
-        workout: WorkoutDetail
+        workout: WorkoutDetail,
+        outcome: RestOutcome = .completed
     ) throws {
         guard var record = capture.session, var rest = record.rest, rest.isOpen else { return }
-        rest.finish(at: stamp, outcome: .completed)
+        rest.finish(at: stamp, outcome: outcome)
         record.rest = rest
         capture.session = record
         try append([ExecutionEvent(
             eventId: UUID().uuidString.lowercased(),
-            eventType: .restCompleted,
+            eventType: outcome == .skipped ? .restSkipped : .restCompleted,
             occurredAt: ServerClock.encodedISO(stamp),
             planItemIndex: rest.planItemIndex,
             payload: nil

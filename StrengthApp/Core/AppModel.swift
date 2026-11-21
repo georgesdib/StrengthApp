@@ -53,6 +53,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var bootstrap: BootstrapResponse?
     @Published private(set) var today: TodayResponse?
+    /// The one AFC-4 review nudge for today, or nil when suppressed/absent.
+    @Published private(set) var nudge: Nudge?
     @Published private(set) var sessions: [HistorySession] = []
     @Published private(set) var historyTotal = 0
     @Published private(set) var isPairing = false
@@ -75,6 +77,20 @@ final class AppModel: ObservableObject {
     /// Exercises the lifter started and has not ended. Supersets keep more than one open, and a
     /// set — not a screen — is what starts one.
     @Published private(set) var activeExercises: [ActiveExercise] = []
+
+    /// The current execution substitutions and additions for the active workout. The plan is
+    /// frozen at start, so this is the only mid-session change (DEC-RESOLVER-23).
+    @Published private(set) var executionView: ExecutionView?
+
+    /// Plan rows with the execution view applied; extra work follows its anchor item.
+    var executionRows: [ExecutionRow] {
+        (executionView ?? .empty).rows(plan: activeWorkout?.plan)
+    }
+
+    /// The execution row for one frozen plan slot, if the plan has it.
+    func executionRow(forPlanIndex index: Int) -> ExecutionRow? {
+        executionRows.first { $0.kind != .added && $0.planItemIndex == index }
+    }
     @Published var narrativeEnabled: Bool = UserDefaults.standard.bool(
         forKey: "intelligence.narrative.enabled"
     ) {
@@ -197,6 +213,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var isImportingHealthKit = false
     @Published private(set) var isSyncingActivity = false
     @Published private(set) var activitySyncMessage: String?
+    /// True when the last activity sync left rejected records on the server. The Cardio screen uses
+    /// this to distinguish a partial ingestion from an ordinary success message.
+    @Published private(set) var activitySyncNeedsAttention = false
+    /// Keys the backend rejected and the app now skips. They need investigation; dismissing the
+    /// warning does not make the missing data reappear.
+    @Published private(set) var quarantinedActivityWorkoutKeys: [String] = []
+    @Published private(set) var quarantinedActivitySampleKeys: [String] = []
     @Published private(set) var healthKitSelection: HealthKitReadinessSelection?
 
     @Published var serverURLText: String
@@ -216,6 +239,17 @@ final class AppModel: ObservableObject {
     @Published var pairingLabelText: String
 
     private static let healthKitDefaultsKey = "healthKitReadinessEnabled"
+    private static let activitySyncIssueKey = "healthkit.activity.lastIssue.v1"
+
+    /// Persisted so a partial ingestion is still visible after the app is relaunched; the in-memory
+    /// message alone would make the warning easy to miss.
+    private struct ActivitySyncIssue: Codable {
+        let at: Date
+        let workoutsRejected: Int
+        let samplesRejected: Int
+        let metricsSkipped: Int
+        let samplesDeferred: Bool
+    }
     private let client: IOSAPIClient
     private let tokens: TokenStoring
     private let store: PairedStore
@@ -233,6 +267,7 @@ final class AppModel: ObservableObject {
     private var healthKitFollowUp = false
     private var networkMonitor: NetworkMonitor?
     private var restDoneCancellable: AnyCancellable?
+    private var restActivityCancellable: AnyCancellable?
     private var nudgeTapCancellable: AnyCancellable?
     private var nudgeRefreshTask: Task<Void, Never>?
     private let nudges = NudgeScheduler.shared
@@ -263,7 +298,7 @@ final class AppModel: ObservableObject {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
         let readiness = healthKit ?? HealthKitReadinessService()
-        let activity = HealthKitActivityService()
+        let activity = HealthKitActivityService(defaults: healthKitDefaults)
         let enabled = healthKitDefaults.bool(forKey: Self.healthKitDefaultsKey)
         let captureStore = offlineStore ?? OfflineCaptureStore()
         let resolvedAutomation = automation ?? WorkoutAutomation.shared
@@ -316,6 +351,14 @@ final class AppModel: ObservableObject {
         restTimer.onExtend = { [weak self] seconds in
             self?.recordRestExtension(seconds)
         }
+        restActivityCancellable = NotificationCenter.default
+            .publisher(for: .restActivityChangedExternally)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.drainRestActivityChanges()
+                }
+            }
         restDoneCancellable = NotificationCenter.default
             .publisher(for: .restNotificationDone)
             .receive(on: DispatchQueue.main)
@@ -332,6 +375,23 @@ final class AppModel: ObservableObject {
                     self?.handlePendingNudgeTap()
                 }
             }
+        quarantinedActivityWorkoutKeys = activity.quarantinedWorkoutKeys
+        quarantinedActivitySampleKeys = activity.quarantinedSampleKeys
+        if let issue = Self.loadActivitySyncIssue(from: healthKitDefaults) {
+            activitySyncMessage = Self.activityIssueMessage(
+                issue,
+                quarantinedWorkouts: quarantinedActivityWorkoutKeys,
+                quarantinedSamples: quarantinedActivitySampleKeys
+            )
+            activitySyncNeedsAttention = true
+        } else if !quarantinedActivityWorkoutKeys.isEmpty
+                    || !quarantinedActivitySampleKeys.isEmpty {
+            activitySyncMessage = Self.activityQuarantineMessage(
+                quarantinedWorkouts: quarantinedActivityWorkoutKeys,
+                quarantinedSamples: quarantinedActivitySampleKeys
+            )
+            activitySyncNeedsAttention = true
+        }
         restoreExerciseSession()
     }
 
@@ -438,28 +498,178 @@ final class AppModel: ObservableObject {
         do {
             try await healthKitActivity.requestAuthorization()
             let now = Date()
-            let batch = try await healthKitActivity.fetchBatch(now: now)
-            if !batch.workouts.isEmpty {
-                _ = try await client.uploadActivity(
-                    HealthKitActivityWorkoutsBody(workouts: batch.workouts),
-                    session: session,
-                    idempotencyKey: UUID().uuidString
+            let report = try await HealthKitActivitySync(
+                client: client, activity: healthKitActivity
+            ).run(session: session, at: now)
+            refreshActivityQuarantine()
+            if report.isPartial {
+                let issue = ActivitySyncIssue(
+                    at: now,
+                    workoutsRejected: report.workoutsRejected,
+                    samplesRejected: report.samplesRejected,
+                    metricsSkipped: report.metricsSkipped,
+                    samplesDeferred: report.samplesDeferred
                 )
-            }
-            if !batch.samples.isEmpty || !batch.metrics.isEmpty {
-                _ = try await client.uploadActivity(
-                    HealthKitActivitySamplesBody(samples: batch.samples, metrics: batch.metrics),
-                    session: session,
-                    idempotencyKey: UUID().uuidString
+                Self.saveActivitySyncIssue(issue, to: healthKitDefaults)
+                activitySyncNeedsAttention = true
+                activitySyncMessage = Self.activityIssueMessage(
+                    issue,
+                    quarantinedWorkouts: quarantinedActivityWorkoutKeys,
+                    quarantinedSamples: quarantinedActivitySampleKeys
                 )
+            } else if !quarantinedActivityWorkoutKeys.isEmpty
+                        || !quarantinedActivitySampleKeys.isEmpty {
+                // This sync was clean, but earlier rejected records are still skipped. Keep the
+                // warning rather than implying the history is complete.
+                Self.clearActivitySyncIssue(from: healthKitDefaults)
+                activitySyncNeedsAttention = true
+                activitySyncMessage = Self.activityQuarantineMessage(
+                    quarantinedWorkouts: quarantinedActivityWorkoutKeys,
+                    quarantinedSamples: quarantinedActivitySampleKeys
+                )
+            } else {
+                Self.clearActivitySyncIssue(from: healthKitDefaults)
+                activitySyncNeedsAttention = false
+                activitySyncMessage = Self.activitySuccessMessage(report, now: now)
             }
-            healthKitActivity.markSynced(now: now, workouts: batch.workouts)
-            activitySyncMessage = batch.isEmpty
-                ? "Nothing new since \(Self.shortDate(now))."
-                : "Synced \(batch.workouts.count) workout(s) and \(batch.samples.count) heart-rate sample(s)."
         } catch {
-            activitySyncMessage = error.localizedDescription
+            // A transport or validation failure is eligible for retry: the coordinator advances
+            // each cursor only after its own half was accepted, so a confirmed half is kept.
+            refreshActivityQuarantine()
+            activitySyncNeedsAttention = true
+            activitySyncMessage = "Sync stopped before all data was confirmed: "
+                + "\(error.localizedDescription) The next sync retries from the last saved cursor."
         }
+    }
+
+    /// Stop showing a quarantine warning after the owner has investigated it. The rejected records
+    /// stay on the server untouched; this only clears the local warning and the skip list, so a
+    /// later sync inside the overlap window can retry them.
+    func dismissActivityQuarantine() {
+        healthKitActivity.clearQuarantine()
+        refreshActivityQuarantine()
+        Self.clearActivitySyncIssue(from: healthKitDefaults)
+        activitySyncNeedsAttention = false
+        activitySyncMessage = nil
+    }
+
+    private func refreshActivityQuarantine() {
+        quarantinedActivityWorkoutKeys = healthKitActivity.quarantinedWorkoutKeys
+        quarantinedActivitySampleKeys = healthKitActivity.quarantinedSampleKeys
+    }
+
+    private static func activitySuccessMessage(
+        _ report: HealthKitActivitySyncReport,
+        now: Date
+    ) -> String {
+        if report.isEmpty {
+            return "Nothing new since \(shortDate(now))."
+        }
+        let created = report.workoutsCreated + report.samplesCreated + report.metricsWritten
+        if created == 0 {
+            return "Everything in this sync window was already on the server."
+        }
+        var parts: [String] = []
+        if report.workoutsCreated > 0 {
+            parts.append("\(report.workoutsCreated) workout(s)")
+        }
+        if report.samplesCreated > 0 {
+            parts.append("\(report.samplesCreated) heart-rate sample(s)")
+        }
+        if report.metricsWritten > 0 {
+            parts.append("\(report.metricsWritten) VO₂max measurement(s)")
+        }
+        return "Synced " + parts.joined(separator: ", ") + "."
+    }
+
+    private static func activityIssueMessage(
+        _ issue: ActivitySyncIssue,
+        quarantinedWorkouts: [String],
+        quarantinedSamples: [String]
+    ) -> String {
+        var counts: [String] = []
+        if issue.workoutsRejected > 0 {
+            counts.append("\(issue.workoutsRejected) workout(s)")
+        }
+        if issue.samplesRejected > 0 {
+            counts.append("\(issue.samplesRejected) heart-rate sample(s)")
+        }
+        if issue.metricsSkipped > 0 {
+            counts.append("\(issue.metricsSkipped) VO₂max measurement(s)")
+        }
+        let rejected = counts.isEmpty ? "Some records" : counts.joined(separator: ", ")
+        var message = "Partial sync on \(shortDate(issue.at)): \(rejected) rejected or skipped "
+            + "by the server."
+        if issue.samplesDeferred {
+            message += " The workout cursor was held and samples were deferred."
+        }
+        let hasQuarantine = !quarantinedWorkouts.isEmpty || !quarantinedSamples.isEmpty
+        if hasQuarantine {
+            message += " " + quarantineSummary(
+                quarantinedWorkouts: quarantinedWorkouts,
+                quarantinedSamples: quarantinedSamples
+            )
+            message += " The cursor advanced past the quarantined keys."
+        } else if issue.metricsSkipped > 0 {
+            message += " Skipped metrics are re-checked on every sync."
+        } else if !issue.samplesDeferred {
+            message += " The affected cursor was not advanced."
+        }
+        message += " Investigate before retrying."
+        return message
+    }
+
+    private static func activityQuarantineMessage(
+        quarantinedWorkouts: [String],
+        quarantinedSamples: [String]
+    ) -> String {
+        quarantineSummary(
+            quarantinedWorkouts: quarantinedWorkouts,
+            quarantinedSamples: quarantinedSamples
+        ) + " They are skipped on future syncs; dismiss this warning only after investigating."
+    }
+
+    private static func quarantineSummary(
+        quarantinedWorkouts: [String],
+        quarantinedSamples: [String]
+    ) -> String {
+        var parts: [String] = []
+        if !quarantinedWorkouts.isEmpty {
+            parts.append(
+                "\(quarantinedWorkouts.count) workout(s) quarantined: "
+                    + keyList(quarantinedWorkouts)
+            )
+        }
+        if !quarantinedSamples.isEmpty {
+            parts.append(
+                "\(quarantinedSamples.count) heart-rate sample(s) quarantined: "
+                    + keyList(quarantinedSamples)
+            )
+        }
+        return parts.joined(separator: ". ") + "."
+    }
+
+    private static func keyList(_ keys: [String]) -> String {
+        let shown = keys.prefix(3).joined(separator: ", ")
+        guard keys.count > 3 else { return shown }
+        return shown + ", +" + String(keys.count - 3) + " more"
+    }
+
+    private static func loadActivitySyncIssue(from defaults: UserDefaults) -> ActivitySyncIssue? {
+        guard let data = defaults.data(forKey: activitySyncIssueKey) else { return nil }
+        return try? JSONDecoder().decode(ActivitySyncIssue.self, from: data)
+    }
+
+    private static func saveActivitySyncIssue(
+        _ issue: ActivitySyncIssue,
+        to defaults: UserDefaults
+    ) {
+        guard let data = try? JSONEncoder().encode(issue) else { return }
+        defaults.set(data, forKey: activitySyncIssueKey)
+    }
+
+    private static func clearActivitySyncIssue(from defaults: UserDefaults) {
+        defaults.removeObject(forKey: activitySyncIssueKey)
     }
 
     private static func shortDate(_ date: Date) -> String {
@@ -792,6 +1002,7 @@ final class AppModel: ObservableObject {
     }
 
     func appBecameActive() async {
+        drainRestActivityChanges()
         await recheckServerSelection()
         await syncOfflineCapture()
         if phase == .paired, let session {
@@ -857,9 +1068,16 @@ final class AppModel: ObservableObject {
     }
 
     private func currentNudgeFacts() -> NudgeFacts {
-        let readiness: NudgeFacts.Readiness = today?.readiness?.isLogged == true
-            ? .logged(score: today?.readinessScore?.score)
-            : .missing
+        let readiness: NudgeFacts.Readiness
+        if today?.readiness?.isLogged == true {
+            readiness = .logged(score: today?.readinessScore?.score)
+        } else if today?.readiness?.hasEntry == true {
+            // The athlete answered some fields but the server could not form a score. The
+            // reminder must ask for the rest, not claim readiness is already logged.
+            readiness = .partial
+        } else {
+            readiness = .missing
+        }
         var planned: NudgeFacts.PlannedSession?
         if case .issued(let issued) = prescriptionState {
             let items = issued.plan.items
@@ -935,6 +1153,8 @@ final class AppModel: ObservableObject {
         return TodaySummaryFacts(
             date: today?.date ?? Self.isoDate(),
             readinessLogged: today?.readiness?.isLogged ?? false,
+            readinessPartial: today?.readiness?.hasEntry == true
+                && today?.readiness?.isLogged != true,
             readinessScore: today?.readinessScore?.score,
             sessionLabel: planned?.label,
             exerciseCount: planned?.exerciseCount,
@@ -957,6 +1177,7 @@ final class AppModel: ObservableObject {
         }
         return [
             today?.date ?? "",
+            String(today?.readiness?.hasEntry ?? false),
             String(today?.readiness?.isLogged ?? false),
             score,
             planId,
@@ -1021,6 +1242,12 @@ final class AppModel: ObservableObject {
             let (newBootstrap, newToday) = try await (bootstrapTask, todayTask)
             bootstrap = newBootstrap
             today = newToday
+            // The nudge is a separate, non-blocking read: a slow observation pass must not
+            // delay the Today refresh, and a failure must not fail it.
+            Task { @MainActor [weak self] in
+                guard let self, self.session != nil else { return }
+                self.nudge = (try? await self.client.nudge(session: session))?.nudge
+            }
             // R7: the plan area is rendered from the authoritative read, never from a cached
             // Today payload (contract section 6). An active workout wins over a plan preview.
             let planStateResponse = try? await client.planState(session: session)
@@ -1505,6 +1732,24 @@ final class AppModel: ObservableObject {
             planItemIndex: restTimer.planItemIndex,
             payload: ["added_s": .number(Double(seconds))]
         ))
+    }
+
+    /// Applies a change made from the rest Live Activity. The added time is recorded once, and a
+    /// rest the activity ended is recorded with the outcome it ended with.
+    func drainRestActivityChanges() {
+        guard let workoutId = activeWorkout?.workoutId else {
+            // Nothing to attribute: discard anything the activity left behind rather than
+            // recording it against a finished workout.
+            _ = RestActivityStore.takeExtension()
+            _ = RestActivityStore.takeCompletion()
+            return
+        }
+        if let seconds = RestActivityStore.takeExtension() {
+            recordRestExtension(seconds)
+        }
+        if let result = restTimer.reconcileExternalChanges(workoutId: workoutId) {
+            recordRestResult(result)
+        }
     }
 
     private func handleRestNotificationDone() {
@@ -2179,136 +2424,64 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func swapPlanExercise(
+    /// Appends a phone-authored substitution or addition and refreshes the execution view.
+    /// An offline author queues the body with prefillRequested false and is never retro-solved
+    /// (DEC-RESOLVER-23).
+    func recordExecutionChange(
         workoutId: String,
-        itemIndex: Int,
+        planItemIndex: Int? = nil,
+        afterItemIndex: Int? = nil,
         exerciseId: String,
-        expectedExerciseId: String,
+        repsLow: Int? = nil,
+        repsHigh: Int? = nil,
+        rirTarget: Int? = nil,
         idempotencyKey: String
     ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.swapPlanExercise(
-                workoutId: workoutId,
-                itemIndex: itemIndex,
-                body: PlanSwapRequest(
-                    exerciseId: exerciseId,
-                    expectedExerciseId: expectedExerciseId
-                ),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    func removePlanExercise(
-        workoutId: String,
-        itemIndex: Int,
-        expectedExerciseId: String,
-        idempotencyKey: String
-    ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.removePlanExercise(
-                workoutId: workoutId,
-                itemIndex: itemIndex,
-                body: PlanRemoveRequest(expectedExerciseId: expectedExerciseId),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    func changePlanSets(
-        workoutId: String,
-        itemIndex: Int,
-        delta: Int,
-        expectedExerciseId: String,
-        idempotencyKey: String
-    ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.changePlanSets(
-                workoutId: workoutId,
-                itemIndex: itemIndex,
-                body: PlanSetsRequest(
-                    delta: delta,
-                    expectedExerciseId: expectedExerciseId
-                ),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    func movePlanExercise(
-        workoutId: String,
-        itemIndex: Int,
-        toIndex: Int,
-        expectedExerciseId: String,
-        idempotencyKey: String
-    ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.movePlanExercise(
-                workoutId: workoutId,
-                itemIndex: itemIndex,
-                body: PlanMoveRequest(
-                    toIndex: toIndex,
-                    expectedExerciseId: expectedExerciseId
-                ),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    func addPlanExercise(
-        workoutId: String,
-        exerciseId: String,
-        idempotencyKey: String
-    ) async -> Bool {
-        guard let session else { return false }
-        return await performPlanEdit(idempotencyKey: idempotencyKey) {
-            try await client.addPlanExercise(
-                workoutId: workoutId,
-                body: PlanAddRequest(exerciseId: exerciseId),
-                session: session,
-                idempotencyKey: idempotencyKey
-            )
-        }
-    }
-
-    private func performPlanEdit(
-        idempotencyKey: String,
-        _ operation: () async throws -> WorkoutDetail
-    ) async -> Bool {
-        guard !isSaving, session != nil, activeWorkout != nil else { return false }
-        guard !offlineCaptureActive else {
-            mutationError = "Plan editing requires the server."
+        guard !isSaving, let session, activeWorkout != nil else { return false }
+        guard permitsMutation(kind: .executionChange, operationId: idempotencyKey) else {
             return false
         }
-        guard permitsMutation(kind: .planEdit, operationId: idempotencyKey) else {
-            return false
-        }
+        let body = ExecutionChangeRequest(
+            eventId: idempotencyKey,
+            change: planItemIndex == nil ? "addition" : "substitution",
+            planItemIndex: planItemIndex,
+            afterItemIndex: afterItemIndex,
+            exerciseId: exerciseId,
+            repsLow: repsLow,
+            repsHigh: repsHigh,
+            rirTarget: rirTarget,
+            prefillRequested: !isOffline
+        )
         _ = apply(.operationBegan)
         defer { _ = apply(.operationEnded) }
         do {
-            let updated = try await operation()
-            _ = apply(.operationSucceeded(updated))
-            workoutRefreshGrace = true
-            persistActiveWorkout()
+            let response = try await client.recordExecutionChange(
+                workoutId: workoutId,
+                body: body,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            executionView = response.execution
+            mutationError = nil
             pushExecutionToWatch()
             return true
         } catch {
-            if let api = error as? APIError,
-               ["workout_not_active", "plan_consumed", "plan_changed",
-                "sets_already_logged", "sets_below_logged", "last_plan_item",
-                "exercise_already_present"].contains(api.code ?? "") {
-                await refresh()
-            }
             handleMutation(error)
             return false
+        }
+    }
+
+    /// Reads the current execution view so a reopened workout shows the changes.
+    func refreshExecutionView(workoutId: String) async {
+        guard let session, activeWorkout?.workoutId == workoutId else { return }
+        do {
+            let envelope = try await client.executionAnalytics(
+                workoutId: workoutId,
+                session: session
+            )
+            executionView = envelope.execution ?? executionView
+        } catch {
+            // A read failure is not a session failure; the next foreground refresh retries.
         }
     }
 
@@ -2585,9 +2758,14 @@ final class AppModel: ObservableObject {
                     let ack: PlanAckEnvelope = try await client.replay(entry, session: session)
                     _ = ack
                     await reconcilePlanState()
-                case .startWorkout, .addSet, .removeSet, .rateForm, .planEdit, .takeover:
+                case .startWorkout, .addSet, .removeSet, .rateForm, .takeover:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = true
+                case .executionChange:
+                    let response: ExecutionChangeResponse = try await client.replay(
+                        entry, session: session
+                    )
+                    executionView = response.execution
                 case .completeWorkout, .abandonWorkout:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = false
@@ -3157,10 +3335,10 @@ final class AppModel: ObservableObject {
     /// design: the watch also refreshes on foreground and after each set (contract §10.2), so a
     /// dropped payload costs one stale view, never a lost edit.
     private func pushExecutionToWatch() {
-        // Push after any plan edit, whether the watch owns capture or is read-only; the watch
-        // mirrors the plan in both states and its read-only path now applies revisions.
+        // Push after an execution change, whether the watch owns capture or is read-only; the
+        // watch mirrors the plan in both states and merges the execution view by watermark.
         guard let workout = activeWorkout else { return }
-        watchPairing.pushExecution(workout)
+        watchPairing.pushExecution(workout, execution: executionView)
     }
 
     /// Takes logging back from the watch. The watch turns read-only on its next refresh.
@@ -3183,7 +3361,7 @@ final class AppModel: ObservableObject {
             persistActiveWorkout()
             // Tell an open watch immediately; otherwise it keeps writing until its next
             // foreground/refresh, even though the server now assigns ownership to the phone.
-            watchPairing.pushExecution(updated)
+            watchPairing.pushExecution(updated, execution: executionView)
             mutationError = nil
             return true
         } catch {
@@ -3197,7 +3375,7 @@ final class AppModel: ObservableObject {
         // The server allows abandonment from any device (contract §9), and the watch turns
         // read-only on the next refresh. Everything else that writes to a watch-owned session
         // needs the take-over first.
-        if isMirroringWatchSession, kind != .planEdit, kind != .abandonWorkout {
+        if isMirroringWatchSession, kind != .executionChange, kind != .abandonWorkout {
             mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
             return false
         }
@@ -3219,6 +3397,31 @@ final class AppModel: ObservableObject {
 
     // MARK: Local credential management
 
+    /// Dismiss or snooze the current review nudge. The server owns the append-only decision.
+    func dismissNudge() async {
+        await decideNudge(action: "dismiss")
+    }
+
+    func snoozeNudge() async {
+        await decideNudge(action: "snooze")
+    }
+
+    private func decideNudge(action: String) async {
+        guard let session, let nudge, let day = today?.date else { return }
+        do {
+            self.nudge = try await client.recordNudge(
+                key: nudge.key,
+                action: action,
+                evidenceId: action == "dismiss" ? nudge.evidenceId : nil,
+                date: day,
+                session: session
+            ).nudge
+            mutationError = nil
+        } catch {
+            mutationError = message(for: error)
+        }
+    }
+
     func forgetDevice() {
         forgetLocally(message: nil)
     }
@@ -3235,6 +3438,7 @@ final class AppModel: ObservableObject {
         session = nil
         bootstrap = nil
         today = nil
+        nudge = nil
         sessions = []
         historyTotal = 0
         historyOffset = 0

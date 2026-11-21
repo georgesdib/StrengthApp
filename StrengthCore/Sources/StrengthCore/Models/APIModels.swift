@@ -19,7 +19,7 @@ public struct PairResponse: Decodable {
 
 // MARK: - Bootstrap
 
-public struct BootstrapResponse: Decodable, Equatable {
+public struct BootstrapResponse: Codable, Equatable {
     public let apiVersion: String
     public let serverDate: String
     public let serverTime: String
@@ -28,7 +28,7 @@ public struct BootstrapResponse: Decodable, Equatable {
     public let capabilities: Capabilities
 }
 
-public struct Capabilities: Decodable, Equatable {
+public struct Capabilities: Codable, Equatable {
     public let readiness: Bool
     public let prescription: Bool
     public let workoutWrite: Bool
@@ -65,11 +65,72 @@ public struct Capabilities: Decodable, Equatable {
 
 // MARK: - Today
 
+/// Read-only programme context for Today (WP4). Every block is optional so an older server
+/// or a profile without an anchor still decodes.
+public struct ProgrammeHeader: Decodable, Equatable, Sendable {
+    public let trainedWeek: Int?
+    public let dup: ProgrammeHeaderDUP?
+    public let deload: ProgrammeHeaderDeload?
+    public let competition: ProgrammeHeaderCompetition?
+}
+
+public struct ProgrammeHeaderDUP: Decodable, Equatable, Sendable {
+    public let enabled: Bool?
+    public let cycleWeeks: Int?
+    public let cycleWeek: Int?
+    public let mainScheme: String?
+    public let accessoryScheme: String?
+}
+
+public struct ProgrammeHeaderDeload: Decodable, Equatable, Sendable {
+    public let calendarWeek: Int?
+    public let status: String?
+    public let trigger: String?
+    public let reason: String?
+}
+
+public struct ProgrammeHeaderCompetition: Decodable, Equatable, Sendable {
+    public let date: String?
+    public let daysUntil: Int?
+    public let window: String?
+}
+
+/// The one AFC-4 review nudge for Today (DEC-AFC-05, DEC-RESOLVER-26).
+public struct NudgeEvidence: Decodable, Equatable, Sendable {
+    public let evidenceId: String?
+    public let source: String?
+    public let method: String?
+    public let gate: String?
+    public let n: Int?
+    public let limitations: [String]?
+}
+
+public struct Nudge: Decodable, Equatable, Identifiable, Sendable {
+    public let key: String
+    public let family: String
+    public let statement: String
+    public let gate: String?
+    public let n: Int?
+    public let evidenceId: String?
+    public let observationId: String?
+    public let category: String?
+    public let source: String?
+    public let evidence: NudgeEvidence?
+
+    public var id: String { key }
+}
+
+public struct NudgeResponse: Decodable {
+    public let onDate: String?
+    public let nudge: Nudge?
+}
+
 public struct TodayResponse: Decodable {
     public let date: String
     public let readiness: ReadinessPayload?
     public let readinessScore: ReadinessScore?
     public let activeWorkout: WorkoutDetail?
+    public let programmeHeader: ProgrammeHeader?
 }
 
 /// The existing server readiness payload is wider than Phase 1 shows; decode the fields this
@@ -85,9 +146,15 @@ public struct ReadinessPayload: Decodable {
     public let sources: [String: String]?
     public let healthkit: [String: HealthKitReadinessProvenance]?
 
-    /// The server sends `known: false` only when the day has no usable row, and omits the key
-    /// entirely when a merged row exists, so an absent value means the day was logged.
-    public var isLogged: Bool { known ?? true }
+    /// The server sends `known: false` only when the day has no row at all and omits the key
+    /// when any merged row exists. Row presence is not the same as a usable answer: a partial
+    /// manual entry merges into a row whose score status is `insufficient`.
+    public var hasEntry: Bool { known ?? true }
+
+    /// A day counts as logged only when the server formed a readiness score. A merged row with
+    /// too few core fields is `hasEntry` but `insufficient`, and the athlete still has readiness
+    /// to finish; treating row presence as logged hid that in the daily reminder.
+    public var isLogged: Bool { hasEntry && score?.status == "ready" }
 }
 
 public struct HealthKitReadinessProvenance: Decodable, Equatable {

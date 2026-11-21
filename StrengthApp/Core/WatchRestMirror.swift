@@ -30,8 +30,10 @@ final class WatchRestMirror {
     /// rest that ends in that window must still close the card it just asked for.
     private var watchRestRequested = false
 
-    init(presenter: RestActivityPresenting = RestLiveActivityController.shared) {
-        self.presenter = presenter
+    /// The presenter is resolved inside the initialiser: a default argument naming a main-actor
+    /// singleton would be evaluated outside the actor.
+    init(presenter: RestActivityPresenting? = nil) {
+        self.presenter = presenter ?? RestLiveActivityController.shared
     }
 
     /// Handles one user-info message. Returns true when it was a rest delivery, so the caller can

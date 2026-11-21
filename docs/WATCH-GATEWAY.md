@@ -74,6 +74,12 @@ start a session offline. Offline-on-both-devices remains a documented limitation
 - `StrengthWatch/WatchSessionController.swift` — WCSession transport, request/reply.
 - `StrengthWatch/StrengthWatchApp.swift` — injects the watch session as the relay.
 
+## Acceptance
+
+The physical run on 2026-11-21 started a watch-owned workout with the watch unable to reach
+the server, relayed the set, form and finish through the phone, and the server recorded one set
+with no duplicate. The owner accepted WP8 with no follow-ups.
+
 ## Tests
 
 - `WatchRelayTests`: transport fallback preserves token/device/idempotency; direct success does

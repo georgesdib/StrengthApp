@@ -98,8 +98,9 @@ The script refuses a filled LiveConfig.swift. A filled config carries a server a
 
 ## 6. Build/test quirks
 
-Standing owner rule: anything that surprises you and costs a retry gets a dated row in
-private/BUILD-TEST-QUIRKS.md in the same turn. Read that file before a build/test run.
+Standing owner rule: anything that surprises you and costs a retry gets a dated row in the
+matching `private/quirks/` topic file in the same turn. Read the index
+(`private/BUILD-TEST-QUIRKS.md`) and the topic file for the run before a build/test run.
 
 - Append, do not rewrite. A superseding fix gets a new row.
 - It may name local paths/ports/simulators but never pairing codes, tokens, real server

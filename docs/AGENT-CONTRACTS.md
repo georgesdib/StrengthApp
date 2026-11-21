@@ -68,9 +68,7 @@ For API, schema, authentication or client/server behaviour changes:
 - Unknown response fields must not break decoding unless the contract is intentionally closed.
 - Error codes are part of the contract; preserve useful server messages.
 - Add fixtures/tests for new payload shapes.
-- Intelligence payloads (if INT-3 lands) decode into `StrengthCore/Intelligence`; unknown fields must
-  not break decoding, and no Swift code may derive a metric, percentage, gate or evidence id from a
-  fact block. Model-specific code stays in `StrengthApp/Intelligence`, never in `StrengthCore`.
+- Intelligence payloads (if INT-3 lands) decode into `StrengthCore/Intelligence`; unknown fields must not break decoding, and no Swift code may derive a metric, percentage, gate or evidence id from a fact block. Model-specific code stays in `StrengthApp/Intelligence`, never in `StrengthCore`.
 
 ## 7. Documentation
 

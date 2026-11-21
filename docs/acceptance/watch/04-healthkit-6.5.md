@@ -1,3 +1,5 @@
+# Heart rate and HealthKit (6.5)
+
 _Part of the watch acceptance record. Index: [WATCH-ACCEPTANCE.md](../../../WATCH-ACCEPTANCE.md). Content preserved verbatim._
 
 ## Heart rate and HealthKit (6.5) — owner-run

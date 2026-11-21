@@ -1,3 +1,5 @@
+# Reconciliation and conflicts (6.4)
+
 _Part of the watch acceptance record. Index: [WATCH-ACCEPTANCE.md](../../../WATCH-ACCEPTANCE.md). Content preserved verbatim._
 
 ## Reconciliation and conflicts (6.4) — owner-run

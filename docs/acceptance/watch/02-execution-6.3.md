@@ -1,3 +1,5 @@
+# Execution lifecycle (6.3)
+
 _Part of the watch acceptance record. Index: [WATCH-ACCEPTANCE.md](../../../WATCH-ACCEPTANCE.md). Content preserved verbatim._
 
 ## Execution lifecycle (6.3) — owner-run

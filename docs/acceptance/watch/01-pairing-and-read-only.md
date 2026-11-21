@@ -1,3 +1,5 @@
+# Pairing, handshake and read-only Today (6.2b–6.2c)
+
 _Part of the watch acceptance record. Index: [WATCH-ACCEPTANCE.md](../../../WATCH-ACCEPTANCE.md). Content preserved verbatim._
 
 ## Before you start

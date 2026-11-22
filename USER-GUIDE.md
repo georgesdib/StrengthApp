@@ -405,9 +405,12 @@ Apple Watch** (allow Home access when the watch asks, or check the app's HomeKit
 **Home … not on watch**, **Scene … not in …**, or **HomeKit: …** with the system error.
 
 While the watch owns the session the phone shows **Logged on Apple Watch** and does not accept sets,
-form ratings or velocity. Use the phone to edit the plan; an edit reaches the watch at its next idle
-point, never mid-set. **Take over logging** asks for confirmation, moves the session to the phone
-and leaves the watch read-only; sets the watch already recorded stay in the session.
+form ratings or velocity. Use the phone to edit the plan; the change is queued until the server
+accepts it, then reaches the watch at its next idle point, never mid-set. If the watch has already
+logged sets for that exercise, the server refuses the change and the workout screen says so; those
+sets stay recorded, and the phone marks any set that could not be attached to its plan item.
+**Take over logging** asks for confirmation, moves the session to the phone and leaves the watch
+read-only; sets the watch already recorded stay in the session.
 
 If the server address changes, save the settings and let the app recheck. If you change to a
 different server/database, pair again.

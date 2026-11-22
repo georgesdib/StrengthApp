@@ -115,7 +115,7 @@ struct ActiveWorkoutView: View {
                                 )
                                 .foregroundStyle(.secondary)
                                 .accessibilityIdentifier("mirror-banner")
-                                Text("Sets are recorded on the watch. Plan edits here reach it at the next idle point, never mid-set.")
+                                Text("Sets are recorded on the watch. A plan change reaches it after the server accepts it, at its next idle point — never mid-set.")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                                 if let takeOverError {
@@ -140,6 +140,59 @@ struct ActiveWorkoutView: View {
                                 .disabled(model.isSaving)
                                 .accessibilityIdentifier("take-over-logging")
                             }
+                        }
+
+                        if let rejection = model.executionChangeRejection,
+                           rejection.workoutID == workout.workoutId {
+                            Section("Plan change not applied") {
+                                Text(rejection.message)
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                                Text(
+                                    model.isMirroringWatchSession
+                                        ? "The session keeps the sets already recorded. Check the plan on the watch before logging the next exercise."
+                                        : "The session keeps the sets already recorded. Refresh to load the current plan."
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                Button("Dismiss") {
+                                    model.dismissExecutionChangeRejection()
+                                }
+                            }
+                            .accessibilityIdentifier("execution-change-rejection")
+                        }
+
+                        if !model.pendingExecutionChanges.isEmpty {
+                            Section("Pending plan change") {
+                                Text(
+                                    model.isMirroringWatchSession
+                                        ? "Queued on this phone. The Apple Watch keeps the previous exercise until the server accepts it."
+                                        : "Queued on this phone. It is not on the server yet."
+                                )
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                ForEach(model.pendingExecutionChanges) { entry in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(entry.kind.label)
+                                            .font(.subheadline)
+                                        Text("Queued \(entry.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        HStack {
+                                            Button("Retry now") {
+                                                Task { await model.retryPendingMutations() }
+                                            }
+                                            .disabled(model.isRecovering || model.isSaving)
+                                            Button("Discard", role: .destructive) {
+                                                model.discardPendingMutation(entry)
+                                            }
+                                            .disabled(model.isRecovering || model.isSaving)
+                                        }
+                                        .font(.caption)
+                                    }
+                                }
+                            }
+                            .accessibilityIdentifier("pending-plan-change")
                         }
 
                         Section {
@@ -255,6 +308,24 @@ struct ActiveWorkoutView: View {
                             }
                         } header: {
                             Text("Plan")
+                        }
+
+                        if !model.unlinkedWatchSets.isEmpty {
+                            Section("Sets outside the plan") {
+                                Text("These sets are saved but are not attached to a plan item. This normally means the Apple Watch recorded them before a plan change reached it.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                ForEach(model.unlinkedWatchSets) { set in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(Self.label(set.exerciseId))
+                                            .font(.subheadline)
+                                        Text("Set \(set.setIndex ?? 0) · \(set.summary)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .accessibilityIdentifier("unlinked-watch-sets")
                         }
 
                         let additions = model.executionRows.filter { $0.kind == .added }

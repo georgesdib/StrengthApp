@@ -40,6 +40,11 @@ Debug → Motion capture → **Record without workout**. Set a label, pick the a
 set, Stop. The file is identical to an in-workout capture: same sampler, same schema, same store,
 same export, same analysis on the Mac.
 
+Starting an ad-hoc recording also starts a temporary HealthKit workout session that is ended
+without saving. It is not a workout you will see anywhere; it exists because watchOS suspends the
+app when the wrist drops and the screen turns off, which killed the sample stream on the first
+squat captures. It needs the workout permission the app already has.
+
 The identity is local — `workoutId: "adhoc"`, your label as the exercise, an incrementing set
 number — and the axis is chosen by hand because no plan item supplies it. That makes it usable for
 pairing against the LPT anywhere: no session, no plan, no server.

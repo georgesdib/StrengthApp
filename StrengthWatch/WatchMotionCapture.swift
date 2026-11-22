@@ -24,6 +24,11 @@ final class WatchMotionCapture: ObservableObject {
     private let sampler = WatchMotionSampler()
     private let lock = NSLock()
     private var recorder: MotionRecorder?
+    /// Keeps the app alive outside a workout. Without an active workout session watchOS suspends
+    /// the app as soon as the wrist drops and the screen turns off, and the sample stream dies —
+    /// which is exactly what happened to the squat captures. Ended without saving: this is not a
+    /// recorded workout.
+    private let liveness = WatchHealthKitRecorder()
 
     static var isEnabled: Bool {
 #if DEBUG
@@ -77,6 +82,7 @@ final class WatchMotionCapture: ObservableObject {
     /// pairs these files with the LPT by hand, and the Python tool reads the same schema.
     func beginStandalone(label: String, axis: MotionAxis) {
         guard Self.isEnabled else { return }
+        Task { try? await liveness.begin(at: Date()) }
         let counter = UserDefaults.standard.integer(forKey: "motionAdhocCounter") + 1
         UserDefaults.standard.set(counter, forKey: "motionAdhocCounter")
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -125,6 +131,7 @@ final class WatchMotionCapture: ObservableObject {
         guard let recorder else { return }
         sampler.stop()
         isRecording = false
+        Task { await liveness.endWithoutSaving() }
 
         let recording = recorder.finish()
         guard !recording.samples.isEmpty else {

@@ -1,9 +1,14 @@
 _Part of the device acceptance record. Index: [DEVICE-ACCEPTANCE.md](../../../DEVICE-ACCEPTANCE.md). Content preserved verbatim._
 
-# INT-10 Daily reminder acceptance — outstanding
+# INT-10 Daily reminder acceptance — waived 2026-11-18, not run
 
 **Status 2026-11-16:** implemented on the iOS client; automated tests pass. The physical-device checks
-are **not run yet** — simulator success is not proof of notification delivery.
+were **not run** — simulator success is not proof of notification delivery.
+
+**Status 2026-11-18:** the owner waived the remaining physical-device checks (delivery timing, tap
+routing, Focus behaviour) rather than running them, and the nudge shipped in StrengthApp v1.2. The
+unrun list below is retained as the procedure a future device run would follow; it is not pending
+work or a blocker.
 
 ## Automated
 
@@ -12,7 +17,7 @@ are **not run yet** — simulator success is not proof of notification delivery.
 - [x] The iOS scheme builds for the iPhone 18 Pro simulator (iOS 27.2).
 - [x] The full `scripts/ci.sh` gate: both schemes build and 425 tests pass (1 skipped).
 
-## Physical device — outstanding
+## Physical device — waived, not run
 
 - [ ] Enable the reminder, set it two minutes ahead, background the app and receive it on time.
 - [ ] The message names only facts the app already shows; with Apple Intelligence off it uses the
@@ -40,9 +45,9 @@ are **not run yet** — simulator success is not proof of notification delivery.
 - **Not mirrored to the watch.** Expected behaviour, not a defect: iOS mirrors an iPhone notification
   only while the iPhone is locked or asleep.
 
-Both fixes are covered by `NudgeSchedulerTests` (20 tests). The physical-device list above still
-needs a re-run against the fixed build.
+Both fixes are covered by `NudgeSchedulerTests` (20 tests). The physical-device list above was never
+re-run against the fixed build.
 
-Owner confirmation: pending.
+Owner confirmation: acceptance waived 2026-11-18; the device checks above were not run.
 
 ---

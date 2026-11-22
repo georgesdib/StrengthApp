@@ -33,9 +33,11 @@ struct WatchMotionStandaloneView: View {
                 } else {
                     TextField("Label", text: $label)
                         .accessibilityIdentifier("watch-motion-label")
-                    Picker("Axis", selection: $axis) {
-                        Text("Vertical").tag(MotionAxis.vertical)
-                        Text("Horizontal").tag(MotionAxis.horizontal)
+                    // Two buttons, not a Picker: a Picker inside a ScrollView on watchOS does
+                    // not present a usable selection control, so the axis could not be changed.
+                    HStack(spacing: 6) {
+                        axisButton("Vertical", value: .vertical)
+                        axisButton("Horizontal", value: .horizontal)
                     }
                     .accessibilityIdentifier("watch-motion-axis")
                     Button("Start") {
@@ -58,6 +60,18 @@ struct WatchMotionStandaloneView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("Record")
+    }
+
+    private func axisButton(_ title: String, value: MotionAxis) -> some View {
+        Button {
+            axis = value
+        } label: {
+            Text(axis == value ? "✓ \(title)" : title)
+                .font(.caption2)
+        }
+        .buttonStyle(.bordered)
+        .tint(axis == value ? .green : .gray)
+        .accessibilityIdentifier("watch-motion-axis-\(value.rawValue)")
     }
 
     private func elapsed(to now: Date) -> String {

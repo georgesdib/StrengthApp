@@ -145,9 +145,13 @@ if [[ "$BUILD" == "1" ]]; then
   fi
   echo "stamp:  $STAMP"
   echo "building $CONFIGURATION for the device..."
+  # -allowProvisioningUpdates lets xcodebuild reissue a development profile from the portal once
+  # one lapses or is pruned; without it a plain build fails with "No profiles for ... were found"
+  # until Xcode is opened. install-watch.sh already passes the same flag.
   xcodebuild -project "$BUILD_ROOT/StrengthApp.xcodeproj" -scheme StrengthApp \
     -configuration "$CONFIGURATION" -destination "id=$IPHONE_UDID" \
-    -derivedDataPath "$DERIVED_DATA" "${BUILD_SETTINGS[@]}" build
+    -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates \
+    "${BUILD_SETTINGS[@]}" build
 
   if [[ -z "$CLEAN_WORKTREE" ]]; then
     STATE_AFTER="$(tree_state)"

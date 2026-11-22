@@ -270,11 +270,17 @@ ignored); set `IPHONE_UDID` to override. It is the phone counterpart of
 `scripts/install-watch.sh`, which builds the phone app and installs its embedded watch app on the
 paired watch.
 
-Two failure modes that are environmental rather than code:
+Three failure modes that are environmental rather than code:
 
 - **"Test crashed with signal kill before establishing connection"** means the simulator session
   is wedged, usually after a test run was killed. `xcrun simctl shutdown all` then boot the device
   again, or run on a different simulator. A clean device always works.
+- **"No profiles for 'com.georgesdibpersonalteam.StrengthApp(.watchkitapp)' were found"** means the
+  development profiles lapsed or were pruned on this Mac; the Xcode account is fine and nothing in
+  the project needs changing. `scripts/install-iphone.sh` builds with
+  `-allowProvisioningUpdates`, which reissues them from the portal, so re-run the script rather
+  than editing signing settings. Building for a device without a signed-in Xcode account cannot be
+  fixed this way.
 - **A non-interactive shell has no pseudo-terminal**, which `xcodebuild test` needs. Wrap the
   command: `script -q /dev/null xcodebuild test …` (macOS). The build alone does not need it.
 

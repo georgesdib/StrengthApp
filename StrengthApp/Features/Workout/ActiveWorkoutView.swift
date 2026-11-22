@@ -195,6 +195,31 @@ struct ActiveWorkoutView: View {
                             .accessibilityIdentifier("pending-plan-change")
                         }
 
+                        if !model.conflictedExecutionChanges.isEmpty {
+                            Section("Plan change needs attention") {
+                                Text(
+                                    "This change could not be confirmed and cannot be retried. The session kept the sets already recorded; discard the entry if the plan on screen is correct."
+                                )
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                ForEach(model.conflictedExecutionChanges) { entry in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(entry.kind.label)
+                                            .font(.subheadline)
+                                        Text("Conflict · \(entry.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Button("Discard", role: .destructive) {
+                                            model.discardPendingMutation(entry)
+                                        }
+                                        .disabled(model.isRecovering || model.isSaving)
+                                        .font(.caption)
+                                    }
+                                }
+                            }
+                            .accessibilityIdentifier("conflicted-plan-change")
+                        }
+
                         Section {
                             let planItems = workout.plan?.items ?? []
                             ForEach(Array(planItems.enumerated()), id: \.offset) { index, item in

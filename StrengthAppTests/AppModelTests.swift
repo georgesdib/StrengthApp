@@ -341,6 +341,34 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(connectivity.userInfos.contains { $0["execution"] != nil })
     }
 
+    func testConflictedExecutionChangeIsNotOfferedAsQueued() async throws {
+        let journal = MutationJournal(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("execution-change-\(UUID().uuidString).json"))
+        let entry = pendingExecutionChange()
+        try journal.record(entry)
+        try journal.markConflict(entry)
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(executionChangeToday().utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, suite) = executionChangeModel(transport: transport, journal: journal)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+        // A conflict cannot be replayed, so it must not be presented as a queued change with a retry.
+        XCTAssertTrue(model.pendingExecutionChanges.isEmpty)
+        XCTAssertEqual(model.conflictedExecutionChanges.count, 1)
+        XCTAssertEqual(model.conflictedExecutionChanges.first?.targetId, "workout-1")
+    }
+
     func testPairingInputErrorsDoNotCreateADevice() async {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }

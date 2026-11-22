@@ -99,12 +99,26 @@ final class AppModel: ObservableObject {
         executionRows.first { $0.kind != .added && $0.planItemIndex == index }
     }
 
-    /// Phone-authored plan changes for the active workout that the server has not confirmed yet.
-    /// The watch only learns about a change after the server accepts it, so these are still local.
+    /// Phone-authored plan changes for the active workout that the server has not confirmed yet
+    /// and that can still be replayed. The watch only learns about a change after the server
+    /// accepts it, so these are still local.
     var pendingExecutionChanges: [PendingMutation] {
-        guard let workoutId = activeWorkout?.workoutId else { return [] }
+        executionChanges(for: activeWorkout?.workoutId, state: .pending)
+    }
+
+    /// Execution changes for the active workout that the journal could not resolve. They cannot be
+    /// replayed, so the workout screen explains the conflict and offers only a discard.
+    var conflictedExecutionChanges: [PendingMutation] {
+        executionChanges(for: activeWorkout?.workoutId, state: .conflict)
+    }
+
+    private func executionChanges(
+        for workoutId: String?,
+        state: PendingMutation.State
+    ) -> [PendingMutation] {
+        guard let workoutId else { return [] }
         return pendingMutations.filter {
-            $0.kind == .executionChange && $0.targetId == workoutId
+            $0.kind == .executionChange && $0.targetId == workoutId && $0.state == state
         }
     }
 

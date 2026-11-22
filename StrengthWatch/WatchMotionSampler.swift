@@ -19,6 +19,10 @@ final class WatchMotionSampler {
     private var pending: [MotionSample] = []
     private var deliver: (([MotionSample]) -> Void)?
     private let batchSize = 20
+    /// Latest raw readings, paired with each device-motion sample. Both streams run at the same
+    /// interval, so the pairing error is at most one sample period.
+    private var latestAccelerometer: CMAcceleration?
+    private var latestGyro: CMRotationRate?
 
     var isAvailable: Bool { manager.isDeviceMotionAvailable }
 
@@ -33,9 +37,19 @@ final class WatchMotionSampler {
             self?.deliver = onBatch
         }
         manager.deviceMotionUpdateInterval = 1.0 / rateHz
+        manager.accelerometerUpdateInterval = 1.0 / rateHz
+        manager.gyroUpdateInterval = 1.0 / rateHz
+        manager.startAccelerometerUpdates(to: queue) { [weak self] data, _ in
+            self?.latestAccelerometer = data?.acceleration
+        }
+        manager.startGyroUpdates(to: queue) { [weak self] data, _ in
+            self?.latestGyro = data?.rotationRate
+        }
         manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) {
             [weak self] motion, _ in
             guard let self, let motion else { return }
+            let raw = self.latestAccelerometer
+            let rawGyro = self.latestGyro
             self.pending.append(
                 MotionSample(
                     t: motion.timestamp,
@@ -47,7 +61,9 @@ final class WatchMotionSampler {
                     rz: motion.rotationRate.z,
                     gx: motion.gravity.x,
                     gy: motion.gravity.y,
-                    gz: motion.gravity.z
+                    gz: motion.gravity.z,
+                    rax: raw?.x, ray: raw?.y, raz: raw?.z,
+                    rgx: rawGyro?.x, rgy: rawGyro?.y, rgz: rawGyro?.z
                 )
             )
             if self.pending.count >= self.batchSize {
@@ -60,6 +76,8 @@ final class WatchMotionSampler {
     func stop() {
         guard manager.isDeviceMotionActive else { return }
         manager.stopDeviceMotionUpdates()
+        manager.stopAccelerometerUpdates()
+        manager.stopGyroUpdates()
         queue.addOperation { [weak self] in
             self?.flush()
             self?.deliver = nil

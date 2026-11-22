@@ -8,9 +8,11 @@ Capture contract: portfolio `docs/contracts/IOS-WATCH-CONTRACT.md`, amendment "p
 
 ## What it records
 
-While a set is open (Start set → End set), the watch samples device motion at the hardware's
-highest rate — 100 Hz where available. Each sample carries monotonic time, user acceleration,
-rotation rate and gravity. At End set the recording is written to
+While a set is open (Start set → End set), the watch samples at the hardware's highest rate —
+100 Hz where available. Each sample carries monotonic time, gravity, CoreMotion's fused user
+acceleration, and the **raw accelerometer and gyroscope**. The raw channels matter: the fused
+signal is filtered to suppress drift and that filter also attenuates slow, large-amplitude
+movement several-fold, which is exactly what a squat is. At End set the recording is written to
 `Documents/Motion/motion-<timestamp>-<exercise>-set<N>.json` and nothing is uploaded.
 
 The file also carries a **gap report**: expected samples, actual samples, the longest interval and

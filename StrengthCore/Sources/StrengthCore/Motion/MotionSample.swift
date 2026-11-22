@@ -19,12 +19,27 @@ public struct MotionSample: Codable, Equatable, Sendable {
     public let gx: Double
     public let gy: Double
     public let gz: Double
+    /// Raw accelerometer in g, **including gravity**, straight from the sensor.
+    ///
+    /// `ax`/`ay`/`az` come from CoreMotion's fused device motion, which is filtered to suppress
+    /// drift — and that filter also suppresses the slow, large-amplitude movement of a squat,
+    /// attenuating it several-fold. The raw channel is unfiltered; subtract gravity and project.
+    /// Optional so recordings captured before this channel existed still decode.
+    public let rax: Double?
+    public let ray: Double?
+    public let raz: Double?
+    /// Raw rotation rate in radians per second, unfiltered. Optional for the same reason.
+    public let rgx: Double?
+    public let rgy: Double?
+    public let rgz: Double?
 
     public init(
         t: Double,
         ax: Double, ay: Double, az: Double,
         rx: Double, ry: Double, rz: Double,
-        gx: Double, gy: Double, gz: Double
+        gx: Double, gy: Double, gz: Double,
+        rax: Double? = nil, ray: Double? = nil, raz: Double? = nil,
+        rgx: Double? = nil, rgy: Double? = nil, rgz: Double? = nil
     ) {
         self.t = t
         self.ax = ax
@@ -36,6 +51,12 @@ public struct MotionSample: Codable, Equatable, Sendable {
         self.gx = gx
         self.gy = gy
         self.gz = gz
+        self.rax = rax
+        self.ray = ray
+        self.raz = raz
+        self.rgx = rgx
+        self.rgy = rgy
+        self.rgz = rgz
     }
 }
 

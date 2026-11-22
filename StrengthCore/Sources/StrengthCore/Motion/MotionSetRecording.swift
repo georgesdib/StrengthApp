@@ -7,7 +7,9 @@ import Foundation
 /// analysis must never pool across versions.
 public struct MotionSetRecording: Codable, Equatable, Sendable {
     public static let schemaVersion = 1
-    public static let methodVersion = "tempo/1"
+    /// Bumped when the capture changes: v2 adds raw accelerometer and raw gyroscope channels.
+    /// Derived numbers are not comparable across versions.
+    public static let methodVersion = "tempo/2"
 
     public let schema: Int
     public let methodVersion: String

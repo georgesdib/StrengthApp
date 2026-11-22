@@ -166,6 +166,9 @@ struct HistoryDetailView: View {
                     if let heartRate = detail.heartRate?.summary {
                         LabeledContent("Heart rate", value: heartRate)
                     }
+                    if let recovery = detail.hrRecovery?.finalSet?.summary {
+                        LabeledContent("Final-set recovery", value: recovery)
+                    }
                 }
                 Section("Coaching report") {
                     if let workoutId = detail.workoutId, !workoutId.isEmpty {

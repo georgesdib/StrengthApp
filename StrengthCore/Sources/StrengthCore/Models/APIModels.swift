@@ -226,6 +226,34 @@ public struct HistoryDetail: Decodable {
     /// Apple's own average and peak for the workout linked to this session; nil when no workout
     /// is linked, so "not recorded" never renders as a zero.
     public let heartRate: HistoryHeartRate?
+    /// Display-only recovery values. They track effort rather than recovery capacity, so the
+    /// caveat travels with them and nothing reads them back.
+    public let hrRecovery: HistoryRecovery?
+}
+
+public struct HistoryRecovery: Decodable {
+    public let setsWithValue: Int?
+    public let caveat: String?
+    public let finalSet: HistoryFinalSetRecovery?
+}
+
+public struct HistoryFinalSetRecovery: Decodable {
+    public let hrEndBpm: Int?
+    public let hrr60Bpm: Int?
+    public let hrr120Bpm: Int?
+
+    /// "−22 bpm at 1 min, −31 at 2 min · from the final set"; nil when neither horizon exists.
+    public var summary: String? {
+        var parts: [String] = []
+        if let hrr60Bpm { parts.append(Self.phrase(hrr60Bpm, minutes: 1)) }
+        if let hrr120Bpm { parts.append(Self.phrase(hrr120Bpm, minutes: 2)) }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ") + " · from the final set"
+    }
+
+    private static func phrase(_ value: Int, minutes: Int) -> String {
+        let signed = "\(value > 0 ? "−" : "")\(abs(value)) bpm"
+        return "\(signed) at \(minutes) min"
+    }
 }
 
 public struct HistoryHeartRate: Decodable {

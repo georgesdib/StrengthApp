@@ -13,7 +13,7 @@ Read this before changing any HealthKit code.
 | Surface | Reads | Writes |
 |---|---|---|
 | iPhone — readiness | HRV (SDNN), resting heart rate, body mass | Nothing |
-| iPhone — recorded activity | Workouts, heart rate, active energy, VO₂max, workout effort score, Apple's average METs | Nothing |
+| iPhone — recorded activity | Workouts, heart rate, active energy, VO₂max, workout effort score, Apple's average METs, step count, standing time | Nothing |
 | Watch — workout execution | Heart rate and active energy, during a running workout session | One strength-training workout, one workout effort score |
 
 Because read authorisation cannot be queried per type, the watch requests its full read scope at
@@ -56,6 +56,14 @@ There is still no write path from the phone to HealthKit beyond the watch's sing
   value and method — that lets a sync fill a gap in the exported history without duplicating it.
 - **Workout effort** (`HKMetadataKeyAverageMETs` and the effort score, 1–10) read from metadata and
   matched to its workout by interval; stored as `avg_mets` and `srpe`.
+- **Steps per day and sitting time** as one already-averaged measurement per completed calendar
+  week (Monday–Sunday), sent in the metrics array. Daily totals come from a
+  `HKStatisticsCollectionQuery` (`cumulativeSum`) over that week. The window digest is the key, so
+  a re-sync of the same week is a server-side no-op and a daily sync changes nothing until the week
+  rolls over — a rolling window would mint a new row every day. Sitting has no HealthKit type: it
+  is `24 h − appleStandTime`, clamped, with the derivation carried in `method`, and an iPhone-only
+  athlete writes no row at all. A day without data is absent rather than zero, and a failed query
+  yields no metric instead of an empty week.
 - Uploads go to `POST api/ios/v1/healthkit/workouts` then `.../samples` (samples and metrics in the
   second call), each device-authenticated and idempotent on the HealthKit UUID. The response reports
   `created`, `existing`, `rejected`, `rejected_keys` (plus nested
@@ -86,8 +94,8 @@ last workout.
 - `StrengthWatch.entitlements`: `com.apple.developer.healthkit` only.
 - Both extra capabilities are owner-confirmed as intentional; no code uses background delivery or
   clinical records yet. Verify both still validate at submission when something depends on them.
-- `NSHealthShareUsageDescription` covers the full read scope (HRV, resting HR, bodyweight, workouts,
-  heart rate and active energy). The watch string covers heart rate and active energy during a
+- `NSHealthShareUsageDescription` covers the full read scope (HRV, resting heart rate, bodyweight,
+  workouts, heart rate, active energy, VO₂max, steps and standing time). The watch string covers heart rate and active energy during a
   workout, and one saved workout.
 
 ## 6. What is not implemented
@@ -109,6 +117,8 @@ last workout.
 - `StrengthAppTests/WatchHealthKitFinalizerTests.swift` — the exactly-once workout save.
 - `StrengthAppTests/HealthKitActivityTests.swift` — independent cursor advancement, persisted
   workout-interval association, partial-response handling and the `rejected`/`skipped` decoding.
+- `StrengthAppTests/HealthKitWindowMetricsTests.swift` — the completed-week window and its roll on
+  Monday, window-key stability, the mean that skips days without data, and the sitting clamp.
 - The watch's active-energy scope and the saved workout's calorie statistic are physical-device
   behaviour; the simulator cannot create a HealthKit workout session. The check lives in the 6.5
   record linked from `WATCH-ACCEPTANCE.md`.

@@ -174,7 +174,10 @@ fi
 WATCH_BINARY="$APP_PATH/StrengthWatch"
 stale_source=""
 if [[ -f "$WATCH_BINARY" ]]; then
+  # Generated directories are pruned: Xcode rewrites .swiftpm and xcuserdata on every open, so
+  # their timestamps say nothing about whether the watch sources changed.
   stale_source=$(find StrengthWatch StrengthCore Support/WatchInfo.plist StrengthApp.xcodeproj \
+    \( -name .swiftpm -o -name .build -o -name xcuserdata -o -name DerivedData -o -name .git \) -prune -o \
     -type f \( -name '*.swift' -o -name '*.plist' -o -name '*.xcproj' \) \
     -newer "$WATCH_BINARY" -print -quit 2>/dev/null || true)
 fi

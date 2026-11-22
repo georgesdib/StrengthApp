@@ -223,6 +223,26 @@ public struct HistoryDetail: Decodable {
     public let durationMin: Double?
     public let durationBasis: String?
     public let sets: [HistoryDetailSet]?
+    /// Apple's own average and peak for the workout linked to this session; nil when no workout
+    /// is linked, so "not recorded" never renders as a zero.
+    public let heartRate: HistoryHeartRate?
+}
+
+public struct HistoryHeartRate: Decodable {
+    public let avgBpm: Int?
+    public let maxBpm: Int?
+    public let activityType: String?
+    public let source: String?
+
+    /// "128 avg / 165 max bpm", or whichever half Apple recorded; nil when neither exists.
+    public var summary: String? {
+        switch (avgBpm, maxBpm) {
+        case let (avg?, max?): return "\(avg) avg / \(max) max bpm"
+        case let (avg?, nil): return "\(avg) avg bpm"
+        case let (nil, max?): return "\(max) max bpm"
+        case (nil, nil): return nil
+        }
+    }
 }
 
 public struct HistoryDetailSet: Decodable, Identifiable {

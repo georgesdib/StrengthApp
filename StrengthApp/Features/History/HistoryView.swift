@@ -163,6 +163,9 @@ struct HistoryDetailView: View {
                     if let lifts = detail.mainLifts, !lifts.isEmpty {
                         LabeledContent("Main lifts", value: lifts.map(Self.liftLabel).joined(separator: ", "))
                     }
+                    if let heartRate = detail.heartRate?.summary {
+                        LabeledContent("Heart rate", value: heartRate)
+                    }
                 }
                 Section("Coaching report") {
                     if let workoutId = detail.workoutId, !workoutId.isEmpty {

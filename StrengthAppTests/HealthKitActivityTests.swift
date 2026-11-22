@@ -58,6 +58,7 @@ final class HealthKitActivitySyncTests: XCTestCase {
         var lastSyncedAt: Date
         var lastWorkoutAt: Date
         private(set) var authorizationRequests = 0
+        private(set) var preparedIdentities: [String] = []
         private(set) var workoutCommitCount = 0
         private(set) var workoutRejectedKeys: [Set<String>] = []
         private(set) var sampleCommitDates: [Date] = []
@@ -73,6 +74,10 @@ final class HealthKitActivitySyncTests: XCTestCase {
 
         func requestAuthorization() async throws {
             authorizationRequests += 1
+        }
+
+        func prepare(for serverIdentity: String) {
+            preparedIdentities.append(serverIdentity)
         }
 
         func fetchBatch(now: Date) async throws -> HealthKitActivityBatch { batch }
@@ -137,6 +142,7 @@ final class HealthKitActivitySyncTests: XCTestCase {
         XCTAssertEqual(activity.workoutCommitCount, 1)
         XCTAssertEqual(activity.sampleCommitDates, [now])
         XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(activity.preparedIdentities, ["device:device-1"])
     }
 
     func testRejectedWorkoutHoldsWorkoutCursorAndDefersSamples() async throws {
@@ -412,6 +418,147 @@ final class HealthKitActivitySyncTests: XCTestCase {
 
         XCTAssertEqual(merged.map(\.key), ["a"])
         XCTAssertEqual(merged.first?.workoutEnd, now)
+    }
+
+    // MARK: - Backend scoping
+
+    private func scopedService(
+        defaults: UserDefaults,
+        now: Date,
+        identity: String = "device:device-1"
+    ) -> (HealthKitActivityService, HealthKitActivityWorkout) {
+        let service = HealthKitActivityService(defaults: defaults)
+        let workout = workout(start: now.addingTimeInterval(-1800), end: now)
+        service.prepare(for: identity)
+        service.markWorkoutsSynced([workout], rejectedKeys: ["rejected-workout"])
+        service.markSamplesSynced(at: now, rejectedKeys: ["rejected-sample"])
+        return (service, workout)
+    }
+
+    func testSameServerIdentityKeepsCursorsIntervalsAndQuarantines() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let now = Date()
+        let (service, workout) = scopedService(defaults: defaults, now: now)
+
+        service.prepare(for: "device:device-1")
+
+        XCTAssertEqual(service.lastSyncedAt, now)
+        XCTAssertEqual(
+            service.lastWorkoutAt.timeIntervalSince1970,
+            now.timeIntervalSince1970,
+            accuracy: 1
+        )
+        XCTAssertEqual(service.knownIntervals(now: now).map(\.key), [workout.key])
+        XCTAssertEqual(service.quarantinedWorkoutKeys, ["rejected-workout"])
+        XCTAssertEqual(service.quarantinedSampleKeys, ["rejected-sample"])
+    }
+
+    func testDifferentServerIdentityClearsAllFivePiecesOfState() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let now = Date()
+        let (service, _) = scopedService(defaults: defaults, now: now)
+
+        service.prepare(for: "device:device-2")
+
+        XCTAssertEqual(service.lastSyncedAt, HealthKitActivityService.defaultCutoff)
+        XCTAssertEqual(service.lastWorkoutAt, HealthKitActivityService.defaultCutoff)
+        XCTAssertTrue(service.knownIntervals(now: now).isEmpty)
+        XCTAssertTrue(service.quarantinedWorkoutKeys.isEmpty)
+        XCTAssertTrue(service.quarantinedSampleKeys.isEmpty)
+
+        // A malformed identity is ignored instead of clearing the state it just re-scoped.
+        service.markSamplesSynced(at: now, rejectedKeys: [])
+        service.prepare(for: "   ")
+        XCTAssertEqual(service.lastSyncedAt, now)
+    }
+
+    func testMissingStoredIdentityClearsStateFromBeforeScoping() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = HealthKitActivityService(defaults: defaults)
+        let now = Date()
+        let workout = workout(start: now.addingTimeInterval(-1800), end: now)
+
+        // No prepare ran yet, as after an upgrade from a build without a stored identity.
+        service.markWorkoutsSynced([workout], rejectedKeys: [])
+        service.markSamplesSynced(at: now, rejectedKeys: [])
+        XCTAssertEqual(service.lastSyncedAt, now)
+
+        service.prepare(for: "device:device-1")
+
+        XCTAssertEqual(service.lastSyncedAt, HealthKitActivityService.defaultCutoff)
+        XCTAssertEqual(service.lastWorkoutAt, HealthKitActivityService.defaultCutoff)
+        XCTAssertTrue(service.knownIntervals(now: now).isEmpty)
+    }
+
+    func testScopeChangeDuringSyncDiscardsTheFetchedBatch() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = HealthKitActivityService(defaults: defaults)
+        let now = Date()
+        let workout = workout(start: now.addingTimeInterval(-1800), end: now)
+        service.prepare(for: "device:device-1")
+
+        // The fetch records the scope its results would belong to even when the host has no data.
+        _ = try? await service.fetchBatch(now: now)
+
+        service.prepare(for: "device:device-2")
+        service.markWorkoutsSynced([workout], rejectedKeys: [workout.key])
+        service.markSamplesSynced(at: now, rejectedKeys: ["rejected-sample"])
+
+        XCTAssertEqual(service.lastWorkoutAt, HealthKitActivityService.defaultCutoff)
+        XCTAssertEqual(service.lastSyncedAt, HealthKitActivityService.defaultCutoff)
+        XCTAssertTrue(service.knownIntervals(now: now).isEmpty)
+        XCTAssertTrue(service.quarantinedWorkoutKeys.isEmpty)
+        XCTAssertTrue(service.quarantinedSampleKeys.isEmpty)
+
+        // A batch fetched after the switch belongs to the new scope and commits normally.
+        _ = try? await service.fetchBatch(now: now)
+        service.markWorkoutsSynced([workout], rejectedKeys: [])
+        service.markSamplesSynced(at: now, rejectedKeys: [])
+
+        XCTAssertEqual(service.lastSyncedAt, now)
+        XCTAssertEqual(
+            service.lastWorkoutAt.timeIntervalSince1970,
+            now.timeIntervalSince1970,
+            accuracy: 1
+        )
+        XCTAssertEqual(service.knownIntervals(now: now).map(\.key), [workout.key])
+    }
+
+    func testHomeAndAwayRoutesToTheSameBackendShareOneIdentity() {
+        let home = IOSSession(
+            baseURL: URL(string: "http://192.168.1.10:8000")!,
+            token: "token",
+            deviceID: "device-1"
+        )
+        let away = IOSSession(
+            baseURL: URL(string: "https://home.example.com")!,
+            token: "token",
+            deviceID: "device-1"
+        )
+        let otherBackend = IOSSession(
+            baseURL: home.baseURL,
+            token: "token",
+            deviceID: "device-2"
+        )
+        let unpaired = IOSSession(baseURL: home.baseURL, token: "token")
+
+        XCTAssertEqual(HealthKitActivityServerIdentity.identity(for: home), "device:device-1")
+        XCTAssertEqual(
+            HealthKitActivityServerIdentity.identity(for: home),
+            HealthKitActivityServerIdentity.identity(for: away)
+        )
+        XCTAssertNotEqual(
+            HealthKitActivityServerIdentity.identity(for: home),
+            HealthKitActivityServerIdentity.identity(for: otherBackend)
+        )
+        XCTAssertEqual(
+            HealthKitActivityServerIdentity.identity(for: unpaired),
+            "url:http://192.168.1.10:8000"
+        )
     }
 
     // MARK: - Response contract

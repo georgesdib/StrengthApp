@@ -37,6 +37,13 @@ There is still no write path from the phone to HealthKit beyond the watch's sing
 
 `HealthKitActivityService` implements the sync:
 
+- **Backend scope.** The workout cursor, sample cursor, uploaded intervals and both quarantines
+  describe what one backend database already has, so they are scoped to the backend identity the
+  server issues at pairing (`HealthKitActivityServerIdentity`, derived from the paired device id,
+  not the base URL). Home and Away are two routes to the same database and share one identity, so
+  changing route keeps the cursors; pairing with a different database clears all five pieces of
+  state, and a sync whose scope changed mid-flight cannot commit its batch. A missing stored
+  identity (fresh install or upgrade) clears once, which costs one idempotent re-sync.
 - **Workouts** since the workout cursor minus one day (idempotent re-send), never before
   `history_cutoff`; the server also rejects pre-cutoff workouts as defence in depth. The cursor
   advances after the server answers. A rejected workout key is quarantined and skipped, so one
@@ -116,7 +123,9 @@ last workout.
   rule.
 - `StrengthAppTests/WatchHealthKitFinalizerTests.swift` — the exactly-once workout save.
 - `StrengthAppTests/HealthKitActivityTests.swift` — independent cursor advancement, persisted
-  workout-interval association, partial-response handling and the `rejected`/`skipped` decoding.
+  workout-interval association, partial-response handling, the `rejected`/`skipped` decoding and
+  backend scoping (same identity keeps state, a different identity clears it, a mid-sync scope
+  change discards the batch, Home/Away keep one identity).
 - `StrengthAppTests/HealthKitWindowMetricsTests.swift` — the completed-week window and its roll on
   Monday, window-key stability, the mean that skips days without data, and the sitting clamp.
 - The watch's active-energy scope and the saved workout's calorie statistic are physical-device

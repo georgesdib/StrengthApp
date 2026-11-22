@@ -21,6 +21,9 @@ protocol HealthKitActivityProviding {
     var lastSyncedAt: Date { get }
     var lastWorkoutAt: Date { get }
     func requestAuthorization() async throws
+    /// Discards persisted synchronization state when the destination backend database changes.
+    /// A missing stored identity (fresh install or upgrade) counts as a change.
+    func prepare(for serverIdentity: String)
     func fetchBatch(now: Date) async throws -> HealthKitActivityBatch
     /// Advances the workout cursor and remembers each interval for later sample association.
     /// Rejected keys are quarantined so the 24-hour overlap cannot rediscover them.
@@ -59,6 +62,10 @@ final class HealthKitActivityService: HealthKitActivityProviding {
     private let intervalStoreKey = "healthkit.activity.uploadedWorkoutIntervals.v1"
     private let workoutQuarantineKey = "healthkit.activity.quarantinedWorkoutKeys.v1"
     private let sampleQuarantineKey = "healthkit.activity.quarantinedSampleKeys.v1"
+    private let serverIdentityKey = "healthkit.activity.serverIdentity.v1"
+    /// Bumped by every real scope change; a batch fetched under an older value must not commit.
+    private var generation = 0
+    private var fetchedGeneration: Int?
     private static let workoutQuarantineLimit = 500
     private static let sampleQuarantineLimit = 5000
     private let lookback: TimeInterval = 7 * 24 * 60 * 60
@@ -69,6 +76,27 @@ final class HealthKitActivityService: HealthKitActivityProviding {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+    }
+
+    /// Reset every persisted activity watermark when the destination backend changes.
+    ///
+    /// The five pieces of state describe what one backend database already has, so they cannot be
+    /// carried to another database. Clearing happens before the new identity is recorded: an
+    /// interrupted switch must never let the old backend's cursor advance the new one. A missing
+    /// stored identity counts as a change (fresh install or upgrade), which costs one re-sync; that
+    /// is safe because uploads are idempotent server-side (workouts keyed, samples by sample id,
+    /// metrics content-deduplicated).
+    func prepare(for serverIdentity: String) {
+        let identity = serverIdentity.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !identity.isEmpty else { return }
+        guard defaults.string(forKey: serverIdentityKey) != identity else { return }
+        defaults.removeObject(forKey: workoutCursorKey)
+        defaults.removeObject(forKey: sampleCursorKey)
+        defaults.removeObject(forKey: intervalStoreKey)
+        defaults.removeObject(forKey: workoutQuarantineKey)
+        defaults.removeObject(forKey: sampleQuarantineKey)
+        defaults.set(identity, forKey: serverIdentityKey)
+        generation += 1
     }
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
@@ -95,6 +123,7 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         _ workouts: [HealthKitActivityWorkout],
         rejectedKeys: Set<String>
     ) {
+        guard !isStaleFetch else { return }
         let now = Date()
         let formatter = ISO8601DateFormatter()
         let accepted = workouts.filter { !rejectedKeys.contains($0.key) }
@@ -127,6 +156,7 @@ final class HealthKitActivityService: HealthKitActivityProviding {
     }
 
     func markSamplesSynced(at date: Date, rejectedKeys: Set<String>) {
+        guard !isStaleFetch else { return }
         defaults.set(date, forKey: sampleCursorKey)
         if !rejectedKeys.isEmpty {
             saveKeys(
@@ -143,6 +173,13 @@ final class HealthKitActivityService: HealthKitActivityProviding {
     func clearQuarantine() {
         defaults.removeObject(forKey: workoutQuarantineKey)
         defaults.removeObject(forKey: sampleQuarantineKey)
+    }
+
+    /// True when a scope change landed after the batch being committed was fetched. Calls with no
+    /// preceding fetch (the mark paths tested directly) stay valid.
+    private var isStaleFetch: Bool {
+        guard let fetchedGeneration else { return false }
+        return fetchedGeneration != generation
     }
 
     private func storedKeys(forKey key: String) -> [String] {
@@ -253,6 +290,9 @@ final class HealthKitActivityService: HealthKitActivityProviding {
     }
 
     func fetchBatch(now: Date = Date()) async throws -> HealthKitActivityBatch {
+        // Remember which backend this batch belongs to. A scope switch before the upload finishes
+        // makes the marks no-ops, so an old backend's batch cannot advance the new scope.
+        fetchedGeneration = generation
         guard isAvailable else { throw HealthKitActivityError.unavailable }
         // Never query before the export cutoff: those workouts already exist under a content key,
         // and sending them here would create a second row for the same session.

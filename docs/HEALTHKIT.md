@@ -62,7 +62,9 @@ There is still no write path from the phone to HealthKit beyond the watch's sing
 - **VO₂max** as a standalone metric, sent without a cutoff because the server deduplicates on time,
   value and method — that lets a sync fill a gap in the exported history without duplicating it.
 - **Workout effort** (`HKMetadataKeyAverageMETs` and the effort score, 1–10) read from metadata and
-  matched to its workout by interval; stored as `avg_mets` and `srpe`.
+  matched to its workout by interval; stored as `avg_mets` and `srpe`. Apple supplies them only for
+  some recordings (the effort score is athlete-rated on the watch), so a missing value is stored as
+  absent and the backend's cardio classification falls back to heart rate.
 - **Steps per day and sitting time** as one already-averaged measurement per completed calendar
   week (Monday–Sunday), sent in the metrics array. Daily totals come from a
   `HKStatisticsCollectionQuery` (`cumulativeSum`) over that week. The window digest is the key, so
@@ -109,8 +111,6 @@ last workout.
 
 - **Deletion detection.** A workout deleted in Health is never removed; the web panel's **Hide**
   action is the substitute.
-- **Observed METs/effort on a new upload.** The fields are read and stored, but no post-cutoff
-  workout has been uploaded yet, so their presence is unconfirmed.
 - **Per-workout heart-rate charts on the phone**, and the web time-in-zone chart. Detailed traces
   remain a web concern that is not built. The phone shows aggregated time-in-zone with covered and
   unobserved minutes; zone time is elapsed-time integration over workout-interval samples, so a

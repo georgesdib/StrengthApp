@@ -143,9 +143,11 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   work offline, configuration is cached for the app session, e1RM/history are fetched on entry,
   with explicit refresh.
 
-HealthKit is read-only, off by default and limited to HRV, resting heart rate and bodyweight. There is no
-workout-HR import, review/rubric or Apple Intelligence/PCC UI. Execution telemetry is queued through
-the Phase 4 offline capture path; plan edits remain online-only.
+HealthKit is read-only and off by default. Readiness reads HRV, resting heart rate and bodyweight;
+the separate, opt-in activity sync reads workouts, workout heart rate, active energy, VO₂max
+estimates, steps per day and sitting time (derived from Apple Watch stand time) for the last
+completed calendar week. There is no sleep import, review/rubric or Apple Intelligence/PCC UI. Execution telemetry is
+queued through the Phase 4 offline capture path; plan edits remain online-only.
 
 ## Storage and networking
 

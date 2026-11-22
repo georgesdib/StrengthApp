@@ -10,7 +10,7 @@ enum HealthKitActivityError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable: return "Health data is not available on this device."
-        case .denied: return "Health access was not granted for workouts, heart rate and active energy."
+        case .denied: return "Health access was not granted for workouts, heart rate, active energy and daily activity."
         case .query(let message): return message
         }
     }
@@ -234,6 +234,10 @@ final class HealthKitActivityService: HealthKitActivityProviding {
             read.insert(activeEnergy)
         }
         if let vo2max = HKObjectType.quantityType(forIdentifier: .vo2Max) { read.insert(vo2max) }
+        // Steps and standing time feed the periodic measurement log, not readiness. They ride the
+        // activity sync so the same consent switch and the same per-item tolerance cover them.
+        if let steps = HKObjectType.quantityType(forIdentifier: .stepCount) { read.insert(steps) }
+        if let stand = HKObjectType.quantityType(forIdentifier: .appleStandTime) { read.insert(stand) }
         if let effort = HKObjectType.quantityType(forIdentifier: .workoutEffortScore) {
             read.insert(effort)
         }
@@ -290,6 +294,7 @@ final class HealthKitActivityService: HealthKitActivityProviding {
         // Metrics are content-deduplicated on the server, so they are sent without a cutoff: that
         // lets a sync fill any gap in the exported history instead of only appending forward.
         let metrics = try await fetchMetrics()
+            + fetchWindowMetrics(now: now, calendar: .current)
         return HealthKitActivityBatch(workouts: workouts, samples: samples, metrics: metrics)
     }
 
@@ -445,6 +450,93 @@ final class HealthKitActivityService: HealthKitActivityProviding {
                 value: value,
                 method: sample.sourceRevision.source.name
             )
+        }
+    }
+
+    /// Steps and standing time are periodic assessments, so HealthKit is asked for daily totals
+    /// over the last completed calendar week and the phone sends the mean. A day without data
+    /// stays absent: an unworn watch is missing, not zero.
+    private func fetchWindowMetrics(
+        now: Date,
+        calendar: Calendar
+    ) async throws -> [HealthKitActivityMetric] {
+        let window = HealthKitWindowMetric.window(now: now, calendar: calendar)
+        var metrics: [HealthKitActivityMetric] = []
+
+        if let type = HKQuantityType.quantityType(forIdentifier: .stepCount) {
+            let totals = await dailySums(
+                type: type, unit: .count(), window: window, calendar: calendar
+            )
+            if let metric = totals.flatMap({
+                HealthKitWindowMetric.stepsMetric(
+                    dailyTotals: $0, window: window, calendar: calendar
+                )
+            }) {
+                metrics.append(metric)
+            }
+        }
+        if let type = HKQuantityType.quantityType(forIdentifier: .appleStandTime) {
+            let minutes = await dailySums(
+                type: type, unit: .minute(), window: window, calendar: calendar
+            )
+            if let metric = minutes.flatMap({
+                HealthKitWindowMetric.sittingMetric(
+                    dailyStandMinutes: $0, window: window, calendar: calendar
+                )
+            }) {
+                metrics.append(metric)
+            }
+        }
+        return metrics
+    }
+
+    /// One value per day in the window, `nil` where HealthKit holds no data.
+    ///
+    /// A failed query yields `nil` instead of an empty series: an access problem must stay
+    /// distinguishable from a week of zero steps, and a steps failure must not cost the heart-rate
+    /// samples travelling in the same sync.
+    private func dailySums(
+        type: HKQuantityType,
+        unit: HKUnit,
+        window: HealthKitWindowMetric.Window,
+        calendar: Calendar
+    ) async -> [Double?]? {
+        let end = calendar.date(byAdding: .day, value: 1, to: window.end) ?? window.end
+        let predicate = HKQuery.predicateForSamples(
+            withStart: window.start, end: end, options: .strictStartDate
+        )
+        let query = HKStatisticsCollectionQuery(
+            quantityType: type,
+            quantitySamplePredicate: predicate,
+            options: .cumulativeSum,
+            anchorDate: window.start,
+            intervalComponents: HealthKitWindowMetric.interval(window: window, calendar: calendar)
+        )
+        let byDay = await withCheckedContinuation { (
+            continuation: CheckedContinuation<[Date: Double]?, Never>
+        ) in
+            query.initialResultsHandler = { _, results, error in
+                guard error == nil, let results else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                var values: [Date: Double] = [:]
+                results.enumerateStatistics(from: window.start, to: end) { statistics, _ in
+                    if let sum = statistics.sumQuantity() {
+                        values[calendar.startOfDay(for: statistics.startDate)] =
+                            sum.doubleValue(for: unit)
+                    }
+                }
+                continuation.resume(returning: .some(values))
+            }
+            store.execute(query)
+        }
+        guard let byDay else { return nil }
+        return (0..<window.days).map { offset in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: window.start) else {
+                return nil
+            }
+            return byDay[calendar.startOfDay(for: day)]
         }
     }
 

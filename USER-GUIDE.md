@@ -270,9 +270,17 @@ HealthKit readiness is optional and off by default. When enabled, the app reads 
 - bodyweight.
 
 Manual readiness takes precedence over HealthKit, which takes precedence over imported
-readiness. The app never writes to HealthKit and does not import sleep or workouts. The recovery
-series is backfilled once from Health (up to five years) and then updated nightly; the import runs
-on an app refresh and after enabling HealthKit.
+readiness. The app never writes to HealthKit and does not import sleep. The recovery series is
+backfilled once from Health (up to five years) and then updated nightly; the import runs on an app
+refresh and after enabling HealthKit.
+
+A separate, opt-in activity sync sends the workouts, workout heart rate, active energy, VO₂max
+estimates, steps per day and sitting time the app reads from Health. Steps and sitting travel as
+**one value per completed calendar week (Monday to Sunday)**: the phone averages those seven days
+and sends the mean, because both are periodic assessments rather than daily state. Sitting is derived as 24 hours
+minus Apple Watch stand time, so it only exists for days a watch was worn — an iPhone-only athlete
+records no sitting value at all, which is missing rather than zero. Neither value changes a load,
+a prescription or a readiness score.
 
 **Workout heart rate is read only on Apple Watch**, for the live session display and the one
 saved HealthKit workout. It is not used for readiness, fatigue, progression or prescriptions.

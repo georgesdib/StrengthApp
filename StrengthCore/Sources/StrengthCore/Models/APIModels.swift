@@ -252,6 +252,9 @@ public struct HistoryDetailSet: Decodable, Identifiable {
     public let reps: Int?
     public let rir: Int?
     public let velocityMps: Double?
+    /// Heart-rate drop 60 s after this set. Display only: it tracks effort, not recovery, which
+    /// is why the label carries the caveat instead of a rating.
+    public let hrr60Bpm: Int?
 
     public var id: String { "\(setId ?? 0)-\(exerciseId)" }
 
@@ -262,6 +265,9 @@ public struct HistoryDetailSet: Decodable, Identifiable {
         if let rir { value += " · RIR \(rir)" }
         if let velocityMps, velocityMps > 0 {
             value += " · \(String(format: "%.2f", velocityMps)) m/s"
+        }
+        if let hrr60Bpm {
+            value += " · HRR \(hrr60Bpm > 0 ? "−" : "") \(abs(hrr60Bpm)) bpm"
         }
         return value
     }

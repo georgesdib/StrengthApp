@@ -227,7 +227,7 @@ xcodebuild -list -project StrengthApp.xcodeproj
 
 # Build the app for a simulator. This also builds and embeds StrengthWatch.app.
 xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \
-  -destination 'platform=iOS Simulator,name=iPhone 17' build
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' build
 
 # Build the watch app on its own (use an available watch simulator id).
 xcodebuild -project StrengthApp.xcodeproj -scheme StrengthWatch \
@@ -235,11 +235,11 @@ xcodebuild -project StrengthApp.xcodeproj -scheme StrengthWatch \
 
 # Run every unit test.
 xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
-  -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:StrengthAppTests
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' -only-testing:StrengthAppTests
 
 # Run one test while iterating.
 xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
-  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' \
   -only-testing:StrengthAppTests/Phase2AppModelTests/testIssueStartSetAndCompleteFlow
 ```
 
@@ -249,9 +249,9 @@ what CI runs. Set `WATCH_DESTINATION` to override the first available Apple Watc
 Install and launch the built app by hand (the UI test does this itself when it is enabled):
 
 ```bash
-xcrun simctl boot 'iPhone 17'
-xcrun simctl install 'iPhone 17' <DerivedData>/Build/Products/Debug-iphonesimulator/StrengthApp.app
-xcrun simctl launch 'iPhone 17' com.georgesdibpersonalteam.StrengthApp
+xcrun simctl boot 'iPhone 18 Pro'
+xcrun simctl install 'iPhone 18 Pro' <DerivedData>/Build/Products/Debug-iphonesimulator/StrengthApp.app
+xcrun simctl launch 'iPhone 18 Pro' com.georgesdibpersonalteam.StrengthApp
 ```
 
 Install on the paired physical iPhone (device build plus CoreDevice):
@@ -316,7 +316,7 @@ that only types when the field "looks wrong" will happily pair against the real 
 value before launching instead:
 
 ```bash
-xcrun simctl spawn 'iPhone 17' defaults write com.georgesdibpersonalteam.StrengthApp \
+xcrun simctl spawn 'iPhone 18 Pro' defaults write com.georgesdibpersonalteam.StrengthApp \
   ios.serverURL "http://127.0.0.1:8001"
 ```
 

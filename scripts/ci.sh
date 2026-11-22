@@ -3,7 +3,7 @@
 #
 # This is the single entry point used by .github/workflows/ios-ci.yml; run it directly to
 # reproduce CI locally. Environment overrides:
-#   DESTINATION        xcodebuild destination (default: platform=iOS Simulator,name=iPhone 17)
+#   DESTINATION        xcodebuild destination (default: platform=iOS Simulator,name=iPhone 18 Pro)
 #   WATCH_DESTINATION  watch xcodebuild destination (default: first available Apple Watch)
 #   DERIVED_DATA       derived-data path (default: .build/DerivedData)
 #   ONLY_TESTING       test target or class filter (default: StrengthAppTests)
@@ -18,7 +18,7 @@ export PATH="$DEVELOPER_DIR/usr/bin:$PATH"
 
 cd "$(dirname "$0")/.."
 
-DESTINATION="${DESTINATION:-platform=iOS Simulator,name=iPhone 17}"
+DESTINATION="${DESTINATION:-platform=iOS Simulator,name=iPhone 18 Pro}"
 DERIVED_DATA="${DERIVED_DATA:-$PWD/.build/DerivedData}"
 ONLY_TESTING="${ONLY_TESTING:-StrengthAppTests}"
 

@@ -3,9 +3,17 @@ import Foundation
 /// File storage for captured sets.
 ///
 /// One JSON file per set, in the app container. Nothing is uploaded: the study exports files
-/// deliberately and production discards them on a bounded schedule.
+/// deliberately and then deletes them.
+///
+/// Retention is **not** a timer on capture. A recording is the only copy of its data until it
+/// has been exported, so an unexported file is never deleted automatically, however old it is.
+/// Once exported, a copy exists elsewhere and the watch copy may be purged after a long
+/// backstop window. Deleting the irreplaceable copy on a clock would destroy exactly the data
+/// that makes re-analysis possible.
 public struct MotionRecordingStore: Sendable {
     public let directory: URL
+    public static let retentionDays = 30
+    private var indexURL: URL { directory.appendingPathComponent(".index.json") }
 
     public init(directory: URL) {
         self.directory = directory
@@ -56,6 +64,63 @@ public struct MotionRecordingStore: Sendable {
 
     public func delete(_ url: URL) throws {
         try FileManager.default.removeItem(at: url)
+        var index = readIndex()
+        index.removeValue(forKey: url.lastPathComponent)
+        try writeIndex(index)
+    }
+
+    // MARK: - Export bookkeeping
+
+    /// Records that a copy of this recording exists off the watch.
+    public func markExported(_ url: URL, at date: Date = Date()) throws {
+        var index = readIndex()
+        index[url.lastPathComponent] = date
+        try writeIndex(index)
+    }
+
+    public func exportedAt(_ url: URL) -> Date? {
+        readIndex()[url.lastPathComponent]
+    }
+
+    /// Deletes exported recordings older than the backstop window and drops stale index rows.
+    /// Unexported recordings are never touched.
+    @discardableResult
+    public func purgeExported(
+        now: Date = Date(), retentionDays: Int = MotionRecordingStore.retentionDays
+    ) -> [URL] {
+        var index = readIndex()
+        let cutoff = now.addingTimeInterval(-Double(retentionDays) * 86_400)
+        var removed: [URL] = []
+        for filename in index.keys {
+            let url = directory.appendingPathComponent(filename)
+            if !FileManager.default.fileExists(atPath: url.path) {
+                index.removeValue(forKey: filename)
+                continue
+            }
+            guard let exported = index[filename], exported < cutoff else { continue }
+            if (try? FileManager.default.removeItem(at: url)) != nil {
+                removed.append(url)
+                index.removeValue(forKey: filename)
+            }
+        }
+        try? writeIndex(index)
+        return removed
+    }
+
+    // MARK: - Index
+
+    private func readIndex() -> [String: Date] {
+        guard let data = try? Data(contentsOf: indexURL) else { return [:] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([String: Date].self, from: data)) ?? [:]
+    }
+
+    private func writeIndex(_ index: [String: Date]) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(index).write(to: indexURL, options: .atomic)
     }
 
     private func uniqueURL(for recording: MotionSetRecording) -> URL {

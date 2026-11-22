@@ -69,7 +69,15 @@ the watch got warm. Both decide whether 100 Hz is sustainable for a full session
 - **Missing file** — the app was killed mid-set; the recording is lost by design rather than
   written partially.
 
-## Privacy
+## Retention
 
-Recordings stay on the watch. They are never attached to an API request and never uploaded. After
-exporting for the study, delete them from the debug list. Nothing in this feature reads HealthKit.
+A recording is the only copy of its data until it has been exported, so **age alone never deletes
+one**. When you confirm a copy exists elsewhere, mark the file exported; only exported files become
+eligible for automatic removal, and only after a 30-day backstop. Unexported files stay until you
+delete them by hand.
+
+"Clean up exported" purges on demand and also runs when the list opens. It never touches an
+unexported file, however old.
+
+Recordings stay on the watch: never attached to an API request, never uploaded. Nothing in this
+feature reads HealthKit.

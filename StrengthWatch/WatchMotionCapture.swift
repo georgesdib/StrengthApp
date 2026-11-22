@@ -18,6 +18,7 @@ final class WatchMotionCapture: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var lastSaved: URL?
     @Published private(set) var lastSummary: String?
+    @Published private(set) var exportedNames: Set<String> = []
 
     private let store = MotionRecordingStore(directory: MotionRecordingStore.defaultDirectory())
     private let sampler = WatchMotionSampler()
@@ -44,6 +45,32 @@ final class WatchMotionCapture: ObservableObject {
 
     func delete(_ url: URL) {
         try? store.delete(url)
+        refreshExportState()
+    }
+
+    func markExported(_ url: URL) {
+        try? store.markExported(url)
+        refreshExportState()
+    }
+
+    func isExported(_ url: URL) -> Bool {
+        exportedNames.contains(url.lastPathComponent)
+    }
+
+    /// Deletes only recordings already exported and older than the backstop window.
+    @discardableResult
+    func purgeExported() -> Int {
+        let removed = store.purgeExported().count
+        refreshExportState()
+        return removed
+    }
+
+    func refreshExportState() {
+        exportedNames = Set(
+            store.recordings()
+                .filter { store.exportedAt($0) != nil }
+                .map { $0.lastPathComponent }
+        )
     }
 
     func begin(context: MotionCaptureContext) {
@@ -90,6 +117,7 @@ final class WatchMotionCapture: ObservableObject {
         do {
             let url = try store.save(recording)
             lastSaved = url
+            refreshExportState()
             lastSummary = recording.gap.isHealthy
                 ? "\(recording.samples.count) samples, no gaps"
                 : "gaps: \(recording.gap.gaps), dropped \(Int(recording.gap.droppedFraction * 100))%"

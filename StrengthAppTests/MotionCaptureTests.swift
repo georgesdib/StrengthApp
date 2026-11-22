@@ -87,4 +87,68 @@ final class MotionCaptureTests: XCTestCase {
         XCTAssertEqual(store.recordings().count, 2)
         XCTAssertEqual(store.recordings().first?.lastPathComponent, url.lastPathComponent)
     }
+
+    func testRetentionNeverDeletesAnUnexportedRecording() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MotionRecordingStore(directory: root)
+        _ = try store.save(recording(startedAt: Date(timeIntervalSince1970: 1_000)))
+
+        // Way past the backstop window, and still the only copy.
+        let removed = store.purgeExported(now: Date(timeIntervalSince1970: 10_000_000))
+        XCTAssertTrue(removed.isEmpty)
+        XCTAssertEqual(store.recordings().count, 1)
+    }
+
+    func testRetentionRemovesExportedRecordingsAfterTheBackstop() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MotionRecordingStore(directory: root)
+        let url = try store.save(recording(startedAt: Date(timeIntervalSince1970: 1_000)))
+        let oldExport = Date(timeIntervalSinceNow: -40 * 86_400)
+        try store.markExported(url, at: oldExport)
+
+        let removed = store.purgeExported()
+        XCTAssertEqual(removed.count, 1)
+        XCTAssertTrue(store.recordings().isEmpty)
+    }
+
+    func testRetentionKeepsARecentExport() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MotionRecordingStore(directory: root)
+        let url = try store.save(recording(startedAt: Date(timeIntervalSince1970: 1_000)))
+        try store.markExported(url, at: Date(timeIntervalSinceNow: -2 * 86_400))
+
+        XCTAssertTrue(store.purgeExported().isEmpty)
+        XCTAssertEqual(store.recordings().count, 1)
+    }
+
+    func testExportStateSurvivesANewStoreInstance() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = MotionRecordingStore(directory: root)
+        let url = try first.save(recording(startedAt: Date(timeIntervalSince1970: 1_000)))
+        try first.markExported(url, at: Date(timeIntervalSince1970: 2_000))
+
+        let second = MotionRecordingStore(directory: root)
+        XCTAssertNotNil(second.exportedAt(url))
+    }
+
+    private func recording(startedAt: Date) -> MotionSetRecording {
+        MotionSetRecording(
+            context: MotionCaptureContext(
+                workoutId: "w1", exerciseId: "bench_press", planItemIndex: 0,
+                setOrdinal: 1, axis: .vertical, startedAt: startedAt
+            ),
+            endedAt: startedAt.addingTimeInterval(2),
+            nominalRateHz: 100,
+            gap: MotionGapReport.measure(samples(count: 10, hz: 100), nominalRateHz: 100),
+            samples: samples(count: 10, hz: 100)
+        )
+    }
 }

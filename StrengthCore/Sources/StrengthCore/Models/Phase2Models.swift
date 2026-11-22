@@ -230,6 +230,9 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
     public let velocityTarget: Double?
     /// Ordered planned set groups; nil or empty is straight sets (DEC-RESOLVER-18).
     public let setGroups: [SetGroup]?
+    /// Axis the watch measures rep phases along, supplied by the server from the exercise
+    /// taxonomy. Nil means the server is not asking for motion capture on this item.
+    public let motionAxis: String?
 
     public init(
         orderIndex: Int?,
@@ -248,7 +251,8 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         essential: Bool?,
         warmup: [WarmupSet]? = nil,
         velocityTarget: Double? = nil,
-        setGroups: [SetGroup]? = nil
+        setGroups: [SetGroup]? = nil,
+        motionAxis: String? = nil
     ) {
         self.orderIndex = orderIndex
         self.exerciseId = exerciseId
@@ -267,6 +271,13 @@ public struct PrescriptionItem: Codable, Sendable, Identifiable {
         self.warmup = warmup
         self.velocityTarget = velocityTarget
         self.setGroups = setGroups
+        self.motionAxis = motionAxis
+    }
+
+    /// The decoded axis, or nil when absent or unrecognised. An unknown value must behave like
+    /// "no capture" rather than silently defaulting to vertical.
+    public var motionAxisValue: MotionAxis? {
+        motionAxis.flatMap(MotionAxis.init(rawValue:))
     }
 
     public var id: String { "\(orderIndex ?? 0)-\(exerciseId ?? "")" }

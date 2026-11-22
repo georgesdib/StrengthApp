@@ -6,6 +6,7 @@ import SwiftUI
 struct WatchSettingsView: View {
     @ObservedObject private var scenes = WatchSceneAutomation.shared
     @Environment(\.dismiss) private var dismiss
+    @State private var showingMotion = false
 
     var body: some View {
         ScrollView {
@@ -53,12 +54,28 @@ struct WatchSettingsView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                 }
+#if DEBUG
+                Divider()
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Motion capture")
+                        .font(.caption2)
+                    Text(WatchMotionCapture.isEnabled ? "On (debug build)" : "Off")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Button("Open") { showingMotion = true }
+                        .font(.caption2)
+                        .accessibilityIdentifier("watch-motion-open")
+                }
+#endif
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task {
             await scenes.preload()
             scenes.refresh()
+        }
+        .sheet(isPresented: $showingMotion) {
+            NavigationStack { WatchMotionDebugView() }
         }
     }
 }

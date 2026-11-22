@@ -417,6 +417,9 @@ struct WatchExerciseView: View {
         let perRep = parsedRepVelocities
         let completedAt = completionStamp
         completionStamp = nil
+        // Close the capture at End set, before the network call: a failed upload must not cost
+        // the recording.
+        WatchMotionCapture.shared.end()
         Task {
             await execution.logSet(
                 loadKg: enteredLoadKg,

@@ -21,6 +21,12 @@ app presents and records that authority.
   exactly-once workout save rule and the privacy limits (denied read is indistinguishable from no
   data) that constrain every future import. Read it before changing any HealthKit code.
 
+## Watch motion capture
+
+- [WATCH-MOTION-CAPTURE.md](WATCH-MOTION-CAPTURE.md) — debug-only per-rep motion recording on the
+  watch: what it stores, how to turn it on, and the owner-run physical-device check, which has not
+  yet been performed.
+
 ## Client plan and contracts
 
 - [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) — phased iPhone implementation plan, architecture

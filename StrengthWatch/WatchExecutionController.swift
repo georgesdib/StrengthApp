@@ -495,6 +495,16 @@ final class WatchExecutionController: ObservableObject {
             )
             draftLoad = loadKg
             draftReps = reps
+            if WatchMotionCapture.isEnabled, let active = engine.activeSet {
+                WatchMotionCapture.shared.begin(context: MotionCaptureContext(
+                    workoutId: workout?.workoutId ?? active.localSetID,
+                    exerciseId: active.exerciseId ?? row.exerciseId,
+                    planItemIndex: active.planItemIndex >= 0 ? active.planItemIndex : nil,
+                    setOrdinal: active.setIndex,
+                    axis: selectedItemForRow?.motionAxisValue,
+                    startedAt: active.startedAt
+                ))
+            }
         } catch {
             lastError = "The set could not be started on the watch."
         }

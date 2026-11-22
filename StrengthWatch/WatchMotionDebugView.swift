@@ -31,6 +31,14 @@ struct WatchMotionDebugView: View {
             }
 
             Section {
+                NavigationLink("Record without workout") {
+                    WatchMotionStandaloneView()
+                }
+                .font(.caption2)
+                .accessibilityIdentifier("watch-motion-standalone")
+            }
+
+            Section {
                 if files.isEmpty {
                     Text("No recordings yet")
                         .font(.caption2)

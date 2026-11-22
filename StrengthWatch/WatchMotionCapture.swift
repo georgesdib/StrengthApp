@@ -73,6 +73,23 @@ final class WatchMotionCapture: ObservableObject {
         )
     }
 
+    /// Starts a recording that belongs to no workout. The identity is local only: the analysis
+    /// pairs these files with the LPT by hand, and the Python tool reads the same schema.
+    func beginStandalone(label: String, axis: MotionAxis) {
+        guard Self.isEnabled else { return }
+        let counter = UserDefaults.standard.integer(forKey: "motionAdhocCounter") + 1
+        UserDefaults.standard.set(counter, forKey: "motionAdhocCounter")
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        begin(context: MotionCaptureContext(
+            workoutId: "adhoc",
+            exerciseId: trimmed.isEmpty ? "adhoc" : trimmed,
+            planItemIndex: nil,
+            setOrdinal: counter,
+            axis: axis,
+            startedAt: Date()
+        ))
+    }
+
     func begin(context: MotionCaptureContext) {
         guard Self.isEnabled else { return }
         lock.lock()

@@ -32,6 +32,19 @@ The switch only exists in a Debug build:
 Leaving a Release build installed cannot enable it: the toggle is compiled out and the
 coordinator returns "off" regardless of stored defaults.
 
+## Recording without a workout
+
+Debug → Motion capture → **Record without workout**. Set a label, pick the axis, Start, perform the
+set, Stop. The file is identical to an in-workout capture: same sampler, same schema, same store,
+same export, same analysis on the Mac.
+
+The identity is local — `workoutId: "adhoc"`, your label as the exercise, an incrementing set
+number — and the axis is chosen by hand because no plan item supplies it. That makes it usable for
+pairing against the LPT anywhere: no session, no plan, no server.
+
+The axis is not cosmetic. A row recorded as vertical is segmented along gravity, which is the wrong
+direction and produces a plausible-looking wrong number.
+
 ## Device check (owner-run)
 
 Not yet performed. It requires a physical Apple Watch; the simulator has no motion sensor.

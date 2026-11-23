@@ -21,6 +21,14 @@ app presents and records that authority.
   exactly-once workout save rule and the privacy limits (denied read is indistinguishable from no
   data) that constrain every future import. Read it before changing any HealthKit code.
 
+## In-flight work
+
+- **Unified offline execution (2026-11-23, branch `offline-execution`).** Device-independent offline
+  execution is planned and its server half is implemented. Read
+  [the canonical plan](https://github.com/georgesdib/strength-app/blob/offline-execution/docs/plans/UNIFIED-OFFLINE-EXECUTION.md),
+  then its **§18 MacBook handout** for the Swift work (C1/C2) and its §16 for the one HTTP
+  conversation the client must match. The plan is the source of truth; do not copy it here.
+
 ## Client plan and contracts
 
 - [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) — phased iPhone implementation plan, architecture

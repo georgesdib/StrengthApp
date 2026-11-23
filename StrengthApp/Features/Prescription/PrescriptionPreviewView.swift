@@ -143,44 +143,37 @@ struct PrescriptionPreviewView: View {
             }
 
             Section {
-                if issued.executionTarget == "watch" {
-                    Text("Requested for Apple Watch. Start this workout on the watch.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("watch-targeted-plan")
-                } else {
-                    Button {
-                        start()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if model.isSaving {
-                                ProgressView()
-                            } else {
-                                Text("Start workout")
-                            }
-                            Spacer()
+                Button {
+                    start()
+                } label: {
+                    HStack {
+                        Spacer()
+                        if model.isSaving {
+                            ProgressView()
+                        } else {
+                            Text("Start workout")
                         }
+                        Spacer()
                     }
-                    .accessibilityIdentifier("preview-start")
-                    .disabled(
-                        model.isSaving
-                            || model.hasPendingOfflineCapture
-                            || (model.isOffline && issued.executionID == nil)
-                    )
-                    if model.hasPendingOfflineCapture {
-                        Text("Resolve the pending capture before starting.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if model.isOffline && issued.executionID != nil {
-                        Text("Offline. The start is saved and binds the plan's execution id when the server is reachable.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if model.isOffline {
-                        Text("Starting requires the server for this plan.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                }
+                .accessibilityIdentifier("preview-start")
+                .disabled(
+                    model.isSaving
+                        || model.hasPendingOfflineCapture
+                        || (model.isOffline && issued.executionID == nil)
+                )
+                if model.hasPendingOfflineCapture {
+                    Text("Resolve the pending capture before starting.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if model.isOffline && issued.executionID != nil {
+                    Text("Offline. The start is saved and binds the plan's execution id when the server is reachable.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if model.isOffline {
+                    Text("Starting requires the server for this plan.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }

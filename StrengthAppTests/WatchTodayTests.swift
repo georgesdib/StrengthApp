@@ -66,7 +66,6 @@ final class WatchTodayTests: XCTestCase {
         }
         XCTAssertEqual(plan.issuedPlanID, "plan-1")
         XCTAssertEqual(plan.sessionType, "lower")
-        XCTAssertEqual(plan.executionTarget, "watch")
         XCTAssertEqual(plan.items.count, 1)
         XCTAssertEqual(plan.items[0].exerciseLabel, "Back Squat")
         XCTAssertEqual(plan.items[0].setsLabel, "3")
@@ -133,22 +132,6 @@ final class WatchTodayTests: XCTestCase {
         XCTAssertTrue(item.isTimeBased)
     }
 
-    func testPhoneTargetedPlanIsHidden() throws {
-        XCTAssertEqual(
-            WatchTodayMapper.map(try planState(target: "phone")),
-            .phonePlan
-        )
-    }
-
-    func testMissingOrUnknownExecutionTargetFailsClosedWithoutPlanDetails() throws {
-        let missing = WatchTodayMapper.map(try planState(target: nil))
-        XCTAssertEqual(missing, .unsupportedTarget)
-
-        let unknown = WatchTodayMapper.map(try planState(target: "tablet"))
-        XCTAssertEqual(unknown, .unsupportedTarget)
-        XCTAssertFalse(String(describing: unknown).contains("back_squat"))
-    }
-
     func testNoPlanAndBuildingStates() throws {
         XCTAssertEqual(
             WatchTodayMapper.map(try planState(status: "none", withPlan: false)),
@@ -157,10 +140,6 @@ final class WatchTodayTests: XCTestCase {
         XCTAssertEqual(
             WatchTodayMapper.map(try planState(status: "building", withPlan: false, elapsed: 12)),
             .generating(elapsedSeconds: 12)
-        )
-        XCTAssertEqual(
-            WatchTodayMapper.map(try planState(status: "building", target: "phone", withPlan: false)),
-            .phonePlan
         )
     }
 
@@ -250,7 +229,6 @@ final class WatchTodayTests: XCTestCase {
             WatchTodayCopy.empty(for: .noPlan)?.action,
             "Request one on your iPhone."
         )
-        XCTAssertEqual(WatchTodayCopy.empty(for: .phonePlan)?.identifier, "phone-plan")
         XCTAssertEqual(WatchTodayCopy.empty(for: .missingCredentials)?.identifier, "unpaired")
         XCTAssertNil(WatchTodayCopy.empty(for: .loading))
         XCTAssertNil(WatchTodayCopy.empty(for: .generating(elapsedSeconds: 3)))

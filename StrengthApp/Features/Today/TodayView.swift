@@ -9,9 +9,7 @@ struct TodayView: View {
     @State private var lastIssueAck = false
     @State private var lastIssueConfirmations: [String: Bool]?
     @State private var lastIssueSettings = PlanSettings()
-    @State private var lastIssueTarget: PrescriptionExecutionTarget = .phone
     @State private var draftSettings = PlanSettings()
-    @State private var draftTarget: PrescriptionExecutionTarget = .phone
     @State private var showingPlanSettings = false
     @State private var showingWorkout = false
     @State private var showingReview = false
@@ -357,12 +355,9 @@ struct TodayView: View {
                 ActiveWorkoutView(model: model)
             }
             .sheet(isPresented: $showingPlanSettings) {
-                PlanSettingsView(
-                    settings: $draftSettings,
-                    executionTarget: $draftTarget
-                ) {
+                PlanSettingsView(settings: $draftSettings) {
                     showingPlanSettings = false
-                    beginPrescription(with: draftSettings, target: draftTarget)
+                    beginPrescription(with: draftSettings)
                 }
             }
             .sheet(isPresented: $showingReview, onDismiss: {
@@ -490,12 +485,6 @@ struct TodayView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
-            if issued.executionTarget == "watch" {
-                Text("Requested for Apple Watch. Review it here; start it on the watch.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("watch-targeted-plan")
-            }
             // Borderless keeps the two buttons independent; the default list style made
             // either tap fire both of them.
             Button {
@@ -596,26 +585,20 @@ struct TodayView: View {
             return
         }
         draftSettings = model.planSettings
-        draftTarget = .phone
         showingPlanSettings = true
     }
 
-    private func beginPrescription(
-        with settings: PlanSettings,
-        target: PrescriptionExecutionTarget
-    ) {
+    private func beginPrescription(with settings: PlanSettings) {
         pendingReadinessAck = false
         lastIssueAck = false
         lastIssueConfirmations = nil
         lastIssueSettings = settings
-        lastIssueTarget = target
         lastIssueKey = UUID().uuidString.lowercased()
         guard let key = lastIssueKey else { return }
         Task {
             await model.issuePrescription(
                 readinessAck: false,
                 settings: settings,
-                executionTarget: target,
                 idempotencyKey: key
             )
         }
@@ -631,7 +614,6 @@ struct TodayView: View {
             await model.issuePrescription(
                 readinessAck: acknowledge,
                 settings: lastIssueSettings,
-                executionTarget: lastIssueTarget,
                 idempotencyKey: key
             )
         }
@@ -654,7 +636,6 @@ struct TodayView: View {
                 readinessAck: pendingReadinessAck,
                 confirmations: confirmations,
                 settings: lastIssueSettings,
-                executionTarget: lastIssueTarget,
                 idempotencyKey: key
             )
         }
@@ -667,7 +648,6 @@ struct TodayView: View {
                 readinessAck: lastIssueAck,
                 confirmations: lastIssueConfirmations,
                 settings: lastIssueSettings,
-                executionTarget: lastIssueTarget,
                 idempotencyKey: key
             )
         }
@@ -882,7 +862,6 @@ struct TodayView: View {
 /// with the server; this only picks which session and whether a minimum session is acceptable.
 struct PlanSettingsView: View {
     @Binding var settings: PlanSettings
-    @Binding var executionTarget: PrescriptionExecutionTarget
     var onRequest: () -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -933,17 +912,6 @@ struct PlanSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Device") {
-                    Picker("Run on", selection: $executionTarget) {
-                        ForEach(PrescriptionExecutionTarget.allCases, id: \.self) { target in
-                            Text(target.label).tag(target)
-                        }
-                    }
-                    .accessibilityIdentifier("prescription-execution-target")
-                    Text("Watch-targeted plans appear on the Apple Watch Today screen and cannot be started on the iPhone.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
                 Section("Session") {
                     Picker("Session type", selection: $settings.sessionType) {
                         ForEach(sessionTypes) { option in

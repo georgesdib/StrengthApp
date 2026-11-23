@@ -314,8 +314,7 @@ final class WatchPairingCoordinator: ObservableObject {
             expiresAt: issued.expiresAt,
             plan: issued.plan,
             loadCatalogue: issued.loadCatalogue,
-            warnings: issued.warnings,
-            executionTarget: issued.executionTarget
+            warnings: issued.warnings
         )
         do {
             let url = FileManager.default.temporaryDirectory

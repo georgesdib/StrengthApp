@@ -258,7 +258,6 @@ final class AppModelTests: XCTestCase {
 
         await model.onLaunch()
         XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
-        XCTAssertTrue(model.isMirroringWatchSession)
 
         let recorded = await model.recordExecutionChange(
             workoutId: "workout-1",

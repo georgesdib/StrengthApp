@@ -159,7 +159,7 @@ final class Phase2ClientTests: XCTestCase {
         XCTAssertEqual(json["note"] as? String, "felt good")
     }
 
-    func testIssuePrescriptionSendsWatchExecutionTarget() async throws {
+    func testIssuePrescriptionDoesNotSendAnExecutionTarget() async throws {
         let transport = StubTransport { _ in
             (202, Data(Fixtures.planAck.utf8))
         }
@@ -168,15 +168,14 @@ final class Phase2ClientTests: XCTestCase {
             IssuePrescriptionRequest(
                 readinessAck: false,
                 confirmations: nil,
-                settings: nil,
-                executionTarget: .watch
+                settings: nil
             ),
             session: session,
-            idempotencyKey: "key-watch-issue"
+            idempotencyKey: "key-pairing-issue"
         )
         let issueRequest = try XCTUnwrap(transport.requests.first)
         let json = body(issueRequest)
-        XCTAssertEqual(json["execution_target"] as? String, "watch")
+        XCTAssertNil(json["execution_target"])
     }
 
     func testIssuePrescriptionSendsAcknowledgementAndSettings() async throws {
@@ -211,7 +210,7 @@ final class Phase2ClientTests: XCTestCase {
         XCTAssertEqual(settings?["session_type"] as? String, "squat")
         XCTAssertEqual(settings?["minimum_session"] as? Bool, true)
         XCTAssertNil(json["plan"])
-        XCTAssertEqual(json["execution_target"] as? String, "phone")
+        XCTAssertNil(json["execution_target"])
 
         // The plan itself comes from the authoritative read, never from the POST response.
         let state = try await client.planState(session: session)
@@ -1227,7 +1226,7 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertFalse(plan.topSet?.isApplied ?? true)
     }
 
-    func testAppModelForwardsWatchExecutionTarget() async {
+    func testAppModelIssuesAPairingPlanWithoutAnExecutionTarget() async {
         let transport = StubTransport { request in
             switch request.url?.path {
             case "/api/ios/v1/bootstrap":
@@ -1246,11 +1245,7 @@ final class Phase2AppModelTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         await model.onLaunch()
 
-        await model.issuePrescription(
-            readinessAck: false,
-            executionTarget: .watch,
-            idempotencyKey: "issue-watch"
-        )
+        await model.issuePrescription(readinessAck: false, idempotencyKey: "issue-pairing")
 
         guard let issue = transport.requests.first(where: {
             $0.url?.path == "/api/ios/v1/prescriptions"
@@ -1260,121 +1255,7 @@ final class Phase2AppModelTests: XCTestCase {
         let object = issue.httpBody.flatMap {
             try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
         } ?? [:]
-        XCTAssertEqual(object["execution_target"] as? String, "watch")
-    }
-
-    func testWatchOwnedSessionIsReadOnlyOnThePhoneUntilTakeOver() async {
-        let transport = StubTransport { request in
-            switch request.url?.path {
-            case "/api/ios/v1/bootstrap":
-                return (200, Data(Fixtures.bootstrapPhase2.utf8))
-            case "/api/ios/v1/today":
-                return (200, Data(Fixtures.today.utf8))
-            case "/api/ios/v1/prescriptions":
-                return (202, Data(Fixtures.planAck.utf8))
-            case "/api/ios/v1/plans/current":
-                return (200, Data(Fixtures.plansReady.utf8))
-            case "/api/ios/v1/workouts":
-                return (200, Data(Fixtures.watchOwnedWorkout.utf8))
-            case "/api/ios/v1/workouts/workout-1/takeover":
-                return (200, Data(Fixtures.workoutInProgress.utf8))
-            case "/api/ios/v1/workouts/workout-1/sets":
-                return (200, Data(Fixtures.workoutWithSet.utf8))
-            default:
-                return (404, Data())
-            }
-        }
-        let (model, defaults, suite, _) = pairedModel(transport: transport)
-        defer { defaults.removePersistentDomain(forName: suite) }
-        await model.onLaunch()
-        await model.issuePrescription(readinessAck: false, idempotencyKey: "issue-mirror")
-        let started = await model.startWorkout(idempotencyKey: "start-mirror")
-        XCTAssertTrue(started)
-        XCTAssertTrue(model.isMirroringWatchSession)
-
-        let set = AddSetRequest(
-            exerciseId: "competition_squat", loadKg: 140, reps: 3,
-            rir: 2, velocityMps: 0.62, setIndex: 1, planItemIndex: 0
-        )
-        let added = await model.addSet(set, idempotencyKey: "mirror-set")
-        XCTAssertFalse(added, "the phone must not log into a watch-owned session")
-        XCTAssertEqual(
-            model.mutationError,
-            "Logging is on the Apple Watch. Take over logging to record sets here."
-        )
-        let rated = await model.rateForm(
-            FormRatingRequest(exerciseId: "competition_squat", rating: 4, note: nil),
-            idempotencyKey: "mirror-form"
-        )
-        XCTAssertFalse(rated)
-        XCTAssertFalse(transport.requests.contains {
-            $0.url?.path == "/api/ios/v1/workouts/workout-1/sets"
-        }, "no set may reach the server while mirroring")
-
-        let tookOver = await model.takeOverLogging()
-        XCTAssertTrue(tookOver)
-        XCTAssertFalse(model.isMirroringWatchSession)
-        XCTAssertNil(model.mutationError)
-
-        let addedAfter = await model.addSet(set, idempotencyKey: "mirror-set-after")
-        XCTAssertTrue(addedAfter, "the phone owns the session after take-over")
-        XCTAssertEqual(model.activeWorkout?.sets?.count, 1)
-    }
-
-    func testWatchMirrorRejectsFormBeforeTheOfflineQueue() async throws {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mirror-offline-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: url) }
-        let offlineStore = OfflineCaptureStore(fileURL: url)
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let workout = try decoder.decode(
-            WorkoutDetail.self, from: Data(Fixtures.watchOwnedWorkout.utf8)
-        )
-        _ = try offlineStore.setActiveWorkout(workout)
-        _ = try offlineStore.record(
-            OfflineOperation(
-                operationId: "pending-set",
-                workoutId: workout.workoutId,
-                body: .addSet(
-                    AddSetRequest(
-                        exerciseId: "competition_squat",
-                        loadKg: 140,
-                        reps: 3,
-                        rir: 2,
-                        velocityMps: nil,
-                        setIndex: 1,
-                        planItemIndex: 0
-                    )
-                ),
-                createdAt: Date(),
-                localSetId: -1
-            ),
-            activeWorkout: workout
-        )
-
-        let transport = StubTransport { _ in (404, Data()) }
-        let (model, defaults, suite, _) = pairedModel(
-            transport: transport,
-            offlineStore: offlineStore
-        )
-        defer { defaults.removePersistentDomain(forName: suite) }
-        await model.onLaunch()
-        XCTAssertTrue(model.isMirroringWatchSession)
-        let before = model.pendingOfflineCount
-        XCTAssertGreaterThan(before, 0)
-
-        let rated = await model.rateForm(
-            FormRatingRequest(exerciseId: "competition_squat", rating: 4, note: nil),
-            idempotencyKey: "mirror-offline-form"
-        )
-
-        XCTAssertFalse(rated)
-        XCTAssertEqual(model.pendingOfflineCount, before, "a mirror must not queue a rating")
-        XCTAssertEqual(
-            model.mutationError,
-            "Form ratings are recorded on the Apple Watch. Take over logging to rate here."
-        )
+        XCTAssertNil(object["execution_target"])
     }
 
     func testThePhoneCanAbandonAWatchOwnedSession() async {
@@ -1398,7 +1279,6 @@ final class Phase2AppModelTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         await model.onLaunch()
         XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
-        XCTAssertTrue(model.isMirroringWatchSession)
 
         let result = await model.abandonWorkout(idempotencyKey: "abandon-mirror")
 

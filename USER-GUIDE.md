@@ -86,8 +86,8 @@ raw 100.x address.
    competition date/countdown. Trained week and deload week are different definitions: trained
    weeks count only weeks with a session, while the deload calendar counts every week since the
    block anchor.
-2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
-   is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
+2. When requesting a new workout, the plan belongs to the iPhone/watch pairing. It appears on
+   both devices and either device can start it.
    The main-lift structure offers **Server default**, **Prefer top set + back-off**,
    **Require top set + back-off** or **Straight sets**. Preferred accepts a straight-set fallback
    with a recorded reason; required marks an unexpected fallback as unsatisfied, but the plan stays
@@ -369,7 +369,7 @@ Changing the Home Server and tapping **Save server settings** increments the wat
 version. When the watch has no active session, it updates its Home address without receiving a new
 token.
 
-The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR.
+The watch runs its own session: fetch the pairing's plan, **Start set**, log load/reps/RIR.
 A warm-up is an ordinary set: tap **Use** on a warm-up row to fill its load and reps, then log it
 with RIR 6. RIR 6 is what records it as warm-up work, so it stays out of working-set volume and
 does not open a rest. When the plan supplies a velocity target it appears beside RIR and in the
@@ -398,9 +398,8 @@ those numbers; it never computes them. **Not scored yet** means the day has no s
 on the iPhone.
 
 When there is nothing to start, the screen says why and what fixes it: **No workout today** (request
-one on the iPhone), **Planned for iPhone** (start it there), **Not for Apple Watch**, **Not paired**
-(open Strength on the iPhone to pair), or **Can't reach your Home Server** with the host that was
-tried. The gear opens **Settings**.
+one on the iPhone), **Not paired** (open Strength on the iPhone to pair), or **Can't reach your
+Home Server** with the host that was tried. The gear opens **Settings**.
 
 **Home scenes on the watch.** The watch runs the start and end Home scene you chose under
 **Settings → Workout automation** on the iPhone. The choice reaches the watch shortly after you pick
@@ -410,13 +409,11 @@ discarded, the watch names the case on that screen instead of failing silently: 
 Apple Watch** (allow Home access when the watch asks, or check the app's HomeKit entitlement),
 **Home … not on watch**, **Scene … not in …**, or **HomeKit: …** with the system error.
 
-While the watch owns the session the phone shows **Logged on Apple Watch** and does not accept sets,
-form ratings or velocity. Use the phone to edit the plan; the change is queued until the server
-accepts it, then reaches the watch at its next idle point, never mid-set. If the watch has already
-logged sets for that exercise, the server refuses the change and the workout screen says so; those
-sets stay recorded, and the phone marks any set that could not be attached to its plan item.
-**Take over logging** asks for confirmation, moves the session to the phone and leaves the watch
-read-only; sets the watch already recorded stay in the session.
+Either device can log while a session is open: ownership is provenance, not permission. Use the
+phone to edit the plan; the change is queued until the server accepts it, then reaches the watch at
+its next idle point, never mid-set. If the watch has already logged sets for that exercise, the
+server refuses the change and the workout screen says so; those sets stay recorded, and the phone
+marks any set that could not be attached to its plan item.
 
 If the server address changes, save the settings and let the app recheck. If you change to a
 different server/database, pair again.

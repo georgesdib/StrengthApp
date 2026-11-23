@@ -240,8 +240,7 @@ final class OfflineLedgerMergeTests: XCTestCase {
             loadCatalogue: LoadCatalogue(
                 catalogueVersion: "load-catalogue/v1", asOf: "2026-11-23"
             ),
-            warnings: [],
-            executionTarget: "watch"
+            warnings: []
         )
         let data = try JSONEncoder().encode(cache)
         let decoded = try JSONDecoder().decode(WatchPlanCache.self, from: data)

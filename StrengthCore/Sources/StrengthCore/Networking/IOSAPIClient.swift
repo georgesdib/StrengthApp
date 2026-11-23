@@ -948,27 +948,6 @@ public final class IOSAPIClient {
         }
     }
 
-    /// Transfers ownership of an in-progress workout to the calling device (contract §9).
-    /// Never journaled: queuing an ownership change would flip the owner minutes or hours after
-    /// the lifter was told it failed. The caller refreshes instead.
-    public func takeover(
-        workoutId: String,
-        session: IOSSession,
-        idempotencyKey: String
-    ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/takeover",
-            // The server refuses a take-over that is not explicitly confirmed; the user has
-            // already confirmed in the UI, so the request carries that acknowledgement.
-            body: ["confirm": true],
-            kind: .takeover,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey,
-            journaling: false
-        )
-    }
-
     public func abandonWorkout(
         workoutId: String,
         session: IOSSession,

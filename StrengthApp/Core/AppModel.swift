@@ -113,7 +113,6 @@ final class AppModel: ObservableObject {
     /// keeps them as extra work; in a mirror they normally mean the set was captured before a
     /// phone-authored substitution reached the watch.
     var unlinkedWatchSets: [WorkoutSet] {
-        guard isMirroringWatchSession else { return [] }
         let rowExercises = Set(executionRows.map(\.exerciseId))
         return (activeWorkout?.sets ?? []).filter {
             ($0.setId ?? 0) > 0
@@ -1605,8 +1604,6 @@ final class AppModel: ObservableObject {
             offlineTelemetryError = "Execution timing was not recorded because offline recovery needs attention."
             return
         }
-        // A watch-owned session owns its telemetry as well; the phone mirror is read-only.
-        guard !isMirroringWatchSession else { return }
         guard !events.isEmpty, let activeWorkout else { return }
         do {
             offlineCapture = try offlineStore.appendExecutionEvents(
@@ -1633,7 +1630,7 @@ final class AppModel: ObservableObject {
     /// The first set starts the exercise; a warm-up counts, because RIR 6 classifies the set, it
     /// does not decide whether an exercise is under way.
     func startExercise(planItemIndex: Int?, exerciseId: String, at date: Date = Date()) {
-        guard activeWorkout != nil, !isMirroringWatchSession else { return }
+        guard activeWorkout != nil else { return }
         let key = ActiveExercise.key(planItemIndex: planItemIndex, exerciseId: exerciseId)
         guard !activeExercises.contains(where: { $0.key == key }) else { return }
         activeExercises.append(
@@ -2003,7 +2000,6 @@ final class AppModel: ObservableObject {
         readinessAck: Bool,
         confirmations: [String: Bool]? = nil,
         settings: PlanSettings? = nil,
-        executionTarget: PrescriptionExecutionTarget = .phone,
         idempotencyKey: String
     ) async {
         guard !isSaving, let session else { return }
@@ -2028,8 +2024,7 @@ final class AppModel: ObservableObject {
                 IssuePrescriptionRequest(
                     readinessAck: readinessAck,
                     confirmations: confirmations,
-                    settings: settings,
-                    executionTarget: executionTarget
+                    settings: settings
                 ),
                 session: session,
                 idempotencyKey: idempotencyKey
@@ -2209,7 +2204,6 @@ final class AppModel: ObservableObject {
             plan: issued.plan,
             readiness: issued.readiness,
             warnings: issued.warnings,
-            executionTarget: issued.executionTarget,
             loadCatalogue: issued.loadCatalogue
         )
         do {
@@ -2331,10 +2325,6 @@ final class AppModel: ObservableObject {
 
     func addSet(_ body: AddSetRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
-        guard !isMirroringWatchSession else {
-            mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
-            return false
-        }
         if offlineCaptureActive {
             return queueAddSet(body, idempotencyKey: idempotencyKey, workout: workout)
         }
@@ -2374,10 +2364,6 @@ final class AppModel: ObservableObject {
         idempotencyKey: String
     ) async -> Bool {
         guard !isSaving, let session else { return false }
-        guard !isMirroringWatchSession else {
-            mutationError = "Sets are recorded on the Apple Watch. Take over logging to change them here."
-            return false
-        }
         guard !offlineCaptureActive else {
             mutationError = "Removing a server-confirmed set requires a connection. Pending local sets can still be removed."
             return false
@@ -2410,12 +2396,6 @@ final class AppModel: ObservableObject {
 
     func rateForm(_ body: FormRatingRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
-        // Ownership is checked before the offline branch: a mirror must not queue a phone-side
-        // form rating that the server would reject later.
-        guard !isMirroringWatchSession else {
-            mutationError = "Form ratings are recorded on the Apple Watch. Take over logging to rate here."
-            return false
-        }
         if offlineCaptureActive {
             return queueForm(body, idempotencyKey: idempotencyKey, workout: workout)
         }
@@ -2692,10 +2672,6 @@ final class AppModel: ObservableObject {
         // If the watch is unreachable or still holds unsent work, this finish must not declare
         // the session final. The server records the window and accepts the late sets.
         let body = request.withPendingDevices(pendingWatchDevices(for: workout.workoutId))
-        guard !isMirroringWatchSession else {
-            mutationError = "This workout is logged on the Apple Watch. Take over logging to finish it here."
-            return false
-        }
         guard !offlineFinishPending else {
             mutationError = "This workout is already queued for finish."
             return false
@@ -2961,7 +2937,7 @@ final class AppModel: ObservableObject {
                     let ack: PlanAckEnvelope = try await client.replay(entry, session: session)
                     _ = ack
                     await reconcilePlanState()
-                case .startWorkout, .addSet, .removeSet, .rateForm, .takeover:
+                case .startWorkout, .addSet, .removeSet, .rateForm:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = true
                 case .executionChange:
@@ -3681,60 +3657,16 @@ final class AppModel: ObservableObject {
         return [deviceID]
     }
 
-    /// A watch-owned session is logged on the watch; the phone mirrors it and may edit the plan.
-    var isMirroringWatchSession: Bool {
-        MirrorPolicy.isMirror(workout: activeWorkout, phoneDeviceID: device?.deviceID)
-    }
-
     /// Nudges the watch with the new plan after a phone edit. Best effort and redundant by
     /// design: the watch also refreshes on foreground and after each set (contract §10.2), so a
     /// dropped payload costs one stale view, never a lost edit.
     @discardableResult
     private func pushExecutionToWatch() -> Bool {
-        // Push after an execution change, whether the watch owns capture or is read-only; the
-        // watch mirrors the plan in both states and merges the execution view by watermark.
         guard let workout = activeWorkout else { return false }
         return watchPairing.pushExecution(workout, execution: executionView)
     }
 
-    /// Takes logging back from the watch. The watch turns read-only on its next refresh.
-    func takeOverLogging() async -> Bool {
-        guard let session, let workout = activeWorkout, !isSaving else { return false }
-        guard !offlineCaptureActive else {
-            mutationError = "Taking over logging requires the server."
-            return false
-        }
-        _ = apply(.operationBegan)
-        defer { _ = apply(.operationEnded) }
-        do {
-            let updated = try await client.takeover(
-                workoutId: workout.workoutId,
-                session: session,
-                idempotencyKey: UUID().uuidString.lowercased()
-            )
-            _ = apply(.operationSucceeded(updated))
-            workoutRefreshGrace = true
-            persistActiveWorkout()
-            // Tell an open watch immediately; otherwise it keeps writing until its next
-            // foreground/refresh, even though the server now assigns ownership to the phone.
-            watchPairing.pushExecution(updated, execution: executionView)
-            mutationError = nil
-            return true
-        } catch {
-            mutationError = (error as? LocalizedError)?.errorDescription
-                ?? "Logging could not be taken over."
-            return false
-        }
-    }
-
     private func permitsMutation(kind: MutationKind, operationId: String) -> Bool {
-        // The server allows abandonment from any device (contract §9), and the watch turns
-        // read-only on the next refresh. Everything else that writes to a watch-owned session
-        // needs the take-over first.
-        if isMirroringWatchSession, kind != .executionChange, kind != .abandonWorkout {
-            mutationError = "Logging is on the Apple Watch. Take over logging to record sets here."
-            return false
-        }
         // A HealthKit import is read-derived, idempotent and independent of queued writes. Blocking
         // it behind an unrelated pending operation would strand the owner with nothing to retry.
         if kind == .healthkitReadiness {

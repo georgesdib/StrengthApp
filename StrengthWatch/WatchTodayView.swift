@@ -149,7 +149,7 @@ struct WatchTodayView: View {
             } else if let copy = WatchTodayCopy.empty(for: today.state) {
                 emptyState(copy)
             }
-        case .missingCredentials, .noPlan, .phonePlan, .unsupportedTarget, .unavailable:
+        case .missingCredentials, .noPlan, .unavailable:
             if let copy = WatchTodayCopy.empty(for: today.state) {
                 emptyState(copy)
             }

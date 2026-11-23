@@ -198,7 +198,6 @@ struct ExerciseWorkoutView: View {
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                             .accessibilityIdentifier("log-warmup-\(index)")
-                            .disabled(model.isMirroringWatchSession)
                         }
                         .accessibilityIdentifier("warmup-\(index)")
                     }
@@ -208,19 +207,7 @@ struct ExerciseWorkoutView: View {
                 }
             }
 
-            if model.isMirroringWatchSession {
-                Section("Logged on Apple Watch") {
-                    Label(
-                        "Form ratings are recorded on the Apple Watch.",
-                        systemImage: "applewatch"
-                    )
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("mirror-form-disabled")
-                    Text("Take over logging to log or end exercises here.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            } else if let active = activeExercise {
+            if let active = activeExercise {
                 Section("In progress") {
                     TimelineView(.periodic(from: active.startedAt, by: 1)) { context in
                         LabeledContent(
@@ -274,7 +261,6 @@ struct ExerciseWorkoutView: View {
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
                                 .accessibilityIdentifier("log-planned-set-\(index)")
-                                .disabled(model.isMirroringWatchSession)
                             }
                         }
                     }
@@ -322,7 +308,7 @@ struct ExerciseWorkoutView: View {
                     Label("Start another set", systemImage: "plus")
                 }
                 .accessibilityIdentifier("exercise-add-set")
-                .disabled(model.isSaving || model.isMirroringWatchSession)
+                .disabled(model.isSaving)
             }
 
             Section {

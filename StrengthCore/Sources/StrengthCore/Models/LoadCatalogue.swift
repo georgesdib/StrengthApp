@@ -172,7 +172,6 @@ public struct CachedIssuedPlan: Codable, Sendable {
     public let plan: PrescriptionPlan
     public let readiness: ReadinessScore?
     public let warnings: [String]
-    public let executionTarget: String?
     public let loadCatalogue: LoadCatalogue?
     public let cachedAt: String
 
@@ -185,7 +184,6 @@ public struct CachedIssuedPlan: Codable, Sendable {
         plan: PrescriptionPlan,
         readiness: ReadinessScore? = nil,
         warnings: [String] = [],
-        executionTarget: String? = nil,
         loadCatalogue: LoadCatalogue? = nil,
         cachedAt: String = ExecutionEvent.nowISO()
     ) {
@@ -197,7 +195,6 @@ public struct CachedIssuedPlan: Codable, Sendable {
         self.plan = plan
         self.readiness = readiness
         self.warnings = warnings
-        self.executionTarget = executionTarget
         self.loadCatalogue = loadCatalogue
         self.cachedAt = cachedAt
     }
@@ -211,7 +208,6 @@ public struct CachedIssuedPlan: Codable, Sendable {
             plan: plan,
             readiness: readiness,
             warnings: warnings,
-            executionTarget: executionTarget,
             executionID: executionId,
             loadCatalogue: loadCatalogue
         )
@@ -237,7 +233,6 @@ public struct WatchPlanCache: Codable, Sendable {
     public let plan: PrescriptionPlan
     public let loadCatalogue: LoadCatalogue?
     public let warnings: [String]
-    public let executionTarget: String?
     public let deliveredAt: String
 
     public init(
@@ -249,7 +244,6 @@ public struct WatchPlanCache: Codable, Sendable {
         plan: PrescriptionPlan,
         loadCatalogue: LoadCatalogue? = nil,
         warnings: [String] = [],
-        executionTarget: String? = nil,
         deliveredAt: String = ExecutionEvent.nowISO()
     ) {
         self.version = Self.envelopeVersion
@@ -261,7 +255,6 @@ public struct WatchPlanCache: Codable, Sendable {
         self.plan = plan
         self.loadCatalogue = loadCatalogue
         self.warnings = warnings
-        self.executionTarget = executionTarget
         self.deliveredAt = deliveredAt
     }
 
@@ -274,8 +267,7 @@ public struct WatchPlanCache: Codable, Sendable {
             expiresAt: cached.expiresAt,
             plan: cached.plan,
             loadCatalogue: cached.loadCatalogue,
-            warnings: cached.warnings,
-            executionTarget: cached.executionTarget
+            warnings: cached.warnings
         )
     }
 
@@ -312,7 +304,6 @@ public enum WatchPlanMapper {
             },
             warnings: cache.warnings,
             expiresAt: cache.expiresAt,
-            executionTarget: cache.executionTarget ?? "watch",
             executionID: cache.executionId
         )
     }

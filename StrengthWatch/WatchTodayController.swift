@@ -38,15 +38,14 @@ final class WatchTodayController: ObservableObject {
     /// The plan-only cache delivered by the phone is enough to show and start a workout while
     /// the server is unreachable.
     func applyPlanCache(_ cache: WatchPlanCache) {
-        guard !cache.isExpired, cache.executionTarget == "watch" else { return }
+        guard !cache.isExpired else { return }
         lastPlan = cache.summary
         state = .ready(cache.summary)
     }
 
     private func applyCachedPlanIfAvailable() {
         guard let cache = WatchSessionController.cachedPlan(),
-              !cache.isExpired,
-              cache.executionTarget == "watch" else { return }
+              !cache.isExpired else { return }
         lastPlan = cache.summary
         state = .ready(cache.summary)
     }

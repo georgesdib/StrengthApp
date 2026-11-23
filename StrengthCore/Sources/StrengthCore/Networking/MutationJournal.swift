@@ -61,7 +61,6 @@ public enum MutationKind: String, Codable, CaseIterable {
     case completeWorkout
     case reconciliation
     case abandonWorkout
-    case takeover
 
     public var label: String {
         switch self {
@@ -78,7 +77,6 @@ public enum MutationKind: String, Codable, CaseIterable {
         case .completeWorkout: return "Complete workout"
         case .reconciliation: return "Reconciliation"
         case .abandonWorkout: return "Abandon workout"
-        case .takeover: return "Take over logging"
         }
     }
 }

@@ -61,10 +61,21 @@ portfolio repository; this file records only what the app does.
   set (`409 reconciliation_window_closed`) remains visible on the device as unsent; the server has
   preserved it for audit only.
 
+## S5 — pairing-scoped execution
+
+- An issued plan belongs to the iPhone/watch pairing. The request screen no longer has a device
+  picker and the client no longer sends `execution_target`.
+- Either device in the pairing can start the plan. `owner_device_id` is provenance only.
+- The phone no longer enters mirror mode: it can log, rate form, edit and finish whenever a session
+  is open. The takeover button, its confirmation sheet and the takeover request are gone.
+- The watch no longer turns read-only because another device owns the session.
+- The watch keeps its read-only credential. Direct watch execution writes and the generic relay
+  remain in place for this slice; retiring them needs the phone-commit transport and is the
+  remaining S5 engineering item.
+
 ## What is not done here
 
 - Physical-device acceptance is still required: watch-only with the phone off, both devices
   partitioned, termination mid-set, a version-1 capture upgraded mid-workout, and the visible
   technique-throttle effect.
-- S5 (ownership gate, takeover, mirror mode, `execution_target`, and the iPhone/watch picker
-  removal) is intentionally untouched.
+- Watch direct execution writes and the generic relay are not yet retired.

@@ -495,23 +495,6 @@ public final class WatchExecutionEngine {
     public func applyRemote(_ payload: RemoteExecutionPayload, deviceID: String?) -> Bool {
         guard let workout, payload.workoutId == workout.workoutId else { return false }
         let executionApplied = applyExecutionIfNeeded(payload.execution)
-        let phoneOwns = payload.ownerDeviceId.flatMap { owner in
-            guard !owner.isEmpty, let deviceID, !deviceID.isEmpty else { return false }
-            return owner != deviceID
-        } ?? false
-        if phoneOwns {
-            // The phone owns capture, but the watch still mirrors the plan read-only.
-            if payload.planRevision > (sessionRecord?.planRevision ?? 0) {
-                if activeSet == nil {
-                    apply(plan: payload.plan, revision: payload.planRevision)
-                } else {
-                    deferredPlan = (payload.planRevision, payload.plan)
-                    planUpdated = true
-                }
-            }
-            phase = .readOnly
-            return true
-        }
         guard payload.planRevision > (sessionRecord?.planRevision ?? 0) else {
             return executionApplied
         }
@@ -573,24 +556,7 @@ public final class WatchExecutionEngine {
             return .nothingToSend
         }
         _ = applyExecutionIfNeeded(envelope.execution)
-        // Missing ownership is never permission to write (fail closed).
-        guard let owner = envelope.ownerDeviceId, !owner.isEmpty else {
-            phase = .readOnly
-            lastError = "Ownership could not be confirmed, so the watch is read-only."
-            return .nothingToSend
-        }
-        guard let device = session.deviceID, !device.isEmpty else {
-            phase = .readOnly
-            lastError = "This watch's device identity is missing, so the watch is read-only."
-            return .nothingToSend
-        }
-        guard owner == device else {
-            // A read-only watch still reflects phone edits; it just cannot write.
-            applyRevisionIfNeeded(envelope)
-            phase = .readOnly
-            return .nothingToSend
-        }
-        // Confirmed ownership restores writing after a read-only or reconciliation-required state.
+        // owner_device_id is provenance only; any pairing device may write.
         if case .readOnly = phase {
             phase = .active
             lastError = nil
@@ -741,16 +707,8 @@ public final class WatchExecutionEngine {
                 capture.session = record
                 capture.activeWorkout = detail
             }
-            if let owner = detail.ownerDeviceId,
-               let device = session.deviceID,
-               !owner.isEmpty,
-               owner == device {
-                phase = .active
-            } else {
-                // The session exists server-side, but this watch cannot prove it may write.
-                phase = .readOnly
-                lastError = "Ownership could not be confirmed, so logging is disabled on this watch."
-            }
+            phase = .active
+            lastError = nil
             nextRetryAt = nil
             ladder.succeeded()
             markOnline(session)
@@ -1542,9 +1500,7 @@ public final class WatchExecutionEngine {
             if status >= 500 || status == 408 || status == 429 {
                 return transient(error)
             }
-            if code == "not_owner" {
-                phase = .readOnly
-            } else if code == "workout_not_active" || code == "workout_not_found" {
+            if code == "workout_not_active" || code == "workout_not_found" {
                 phase = .ended(.unavailable)
             }
             _ = try? store.updateState(

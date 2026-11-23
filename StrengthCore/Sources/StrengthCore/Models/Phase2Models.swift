@@ -403,7 +403,6 @@ public struct PlansStateResponse: Decodable {
     public let planExpiresAt: String?
     public let retryAfterMs: Int?
     public let settings: PlanSettings?
-    public let executionTarget: String?
     public let sessionType: String?
     public let plan: PrescriptionPlan?
     /// The server-built catalogue shipped with the plan; nil for a plan built before it existed.
@@ -415,7 +414,7 @@ public struct PlansStateResponse: Decodable {
     public static let none = PlansStateResponse(
         status: "none", issuedPlanId: nil, executionId: nil, forDate: nil,
         elapsedSeconds: nil, requestExpiresAt: nil, planExpiresAt: nil, retryAfterMs: nil,
-        settings: nil, executionTarget: nil, sessionType: nil, plan: nil,
+        settings: nil, sessionType: nil, plan: nil,
         loadCatalogue: nil, readiness: nil, warnings: nil, error: nil
     )
 
@@ -430,7 +429,6 @@ public struct PlansStateResponse: Decodable {
             plan: plan,
             readiness: readiness,
             warnings: warnings ?? [],
-            executionTarget: executionTarget,
             executionID: executionId,
             loadCatalogue: loadCatalogue
         )
@@ -446,7 +444,6 @@ public struct IssuedPlanResponse: Identifiable {
     public let plan: PrescriptionPlan
     public let readiness: ReadinessScore?
     public let warnings: [String]
-    public let executionTarget: String?
     /// The plan's execution identity. It becomes the workout id when the plan is started.
     public let executionID: String?
     public let loadCatalogue: LoadCatalogue?
@@ -780,34 +777,19 @@ public struct ReadinessWriteRequest: Encodable, Equatable {
     }
 }
 
-public enum PrescriptionExecutionTarget: String, Codable, CaseIterable, Hashable, Sendable {
-    case phone
-    case watch
-
-    public var label: String {
-        switch self {
-        case .phone: return "iPhone"
-        case .watch: return "Apple Watch"
-        }
-    }
-}
-
 public struct IssuePrescriptionRequest: Encodable {
     public let readinessAck: Bool
     public let confirmations: [String: Bool]?
     public let settings: PlanSettings?
-    public let executionTarget: PrescriptionExecutionTarget
 
     public init(
         readinessAck: Bool,
         confirmations: [String: Bool]?,
-        settings: PlanSettings?,
-        executionTarget: PrescriptionExecutionTarget = .phone
+        settings: PlanSettings?
     ) {
         self.readinessAck = readinessAck
         self.confirmations = confirmations
         self.settings = settings
-        self.executionTarget = executionTarget
     }
 }
 

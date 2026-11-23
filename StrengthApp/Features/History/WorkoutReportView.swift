@@ -35,6 +35,13 @@ struct WorkoutReportView: View {
                 guard !didLoad else { return }
                 didLoad = true
                 await load()
+                // While another device's events are still expected, the totals are not final.
+                // Refresh until the server settles the window, or the view goes away.
+                while !Task.isCancelled, summary?.reconciliation?.isOpen == true {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if Task.isCancelled { return }
+                    await load(silent: true)
+                }
             }
         }
     }
@@ -60,6 +67,22 @@ struct WorkoutReportView: View {
                 LabeledContent("Type", value: Self.label(summary.sessionType ?? "workout"))
                 if let status = summary.status {
                     LabeledContent("Status", value: Self.label(status))
+                }
+                if let reconciliation = summary.reconciliation, reconciliation.isOpen {
+                    Label("Apple Watch data pending", systemImage: "applewatch")
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("reconciliation-pending")
+                    Text("This session is not final yet. Sets recorded on the watch are still expected; the totals update when they arrive.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if let closesAt = reconciliation.closesAt {
+                        Text("Window closes \(closesAt)")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Button("Refresh now") { Task { await load(silent: true) } }
+                        .font(.footnote)
+                        .accessibilityIdentifier("reconciliation-refresh")
                 }
             }
 
@@ -350,16 +373,19 @@ struct WorkoutReportView: View {
         }
     }
 
-    private func load() async {
+    private func load(silent: Bool = false) async {
         guard !isLoading else { return }
-        isLoading = true
+        if !silent { isLoading = true }
         error = nil
         defer { isLoading = false }
         do {
             summary = try await model.workoutSummary(workoutId: workoutId)
         } catch {
-            summary = nil
-            self.error = error.localizedDescription
+            // A polling refresh must not replace a readable report with an error screen.
+            if !silent {
+                summary = nil
+                self.error = error.localizedDescription
+            }
         }
     }
 

@@ -57,6 +57,49 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertNil(try? store.load().session)
     }
 
+    func testOfflineStartUsesTheCachedPlanExecutionID() async throws {
+        let transport = AsyncStubTransport { _ in throw APIError.transport("offline") }
+        let engine = makeEngine(transport: transport)
+        let plan = PrescriptionPlan(
+            forDate: "2026-11-07",
+            sessionType: "squat",
+            sessionLabel: "Squat",
+            items: [
+                PrescriptionItem(
+                    orderIndex: 0, exerciseId: "competition_squat", sets: 3,
+                    repsLow: 5, repsHigh: 5, loadKg: 140, loadBasis: "external",
+                    rirTarget: 2, effortModel: "rir", refs: nil, restS: 180,
+                    essential: true
+                )
+            ],
+            warnings: nil, issues: nil
+        )
+        engine.cachedPlan = WatchPlanCache(
+            issuedPlanId: "plan-1",
+            executionId: "exec-1",
+            forDate: "2026-11-07",
+            sessionType: "squat",
+            expiresAt: "2026-11-07T17:00:00Z",
+            plan: plan,
+            executionTarget: "watch"
+        )
+
+        let started = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        XCTAssertTrue(started)
+        XCTAssertEqual(engine.phase, .active)
+        XCTAssertEqual(engine.workout?.workoutId, "exec-1")
+        let capture = try store.load()
+        XCTAssertEqual(capture.session?.sessionUUID.count, 36)
+        XCTAssertEqual(capture.operations.first?.kind, .start)
+        guard case .start(let body) = capture.operations.first?.body else {
+            return XCTFail("expected a queued start")
+        }
+        XCTAssertEqual(body.executionId, "exec-1")
+        XCTAssertEqual(body.issuedPlanId, "plan-1")
+        XCTAssertNotNil(body.startedAt)
+    }
+
     // MARK: - Sets
 
     func testAddSetIsPerformedWhenTheSetStartedNotWhenItWasSaved() async throws {

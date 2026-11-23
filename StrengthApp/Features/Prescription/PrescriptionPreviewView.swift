@@ -57,6 +57,17 @@ struct PrescriptionPreviewView: View {
                 }
             }
 
+            if issued.techniqueThrottleInForce {
+                Section("Technique throttle") {
+                    Label("MOD-TECH-001 is in force for this session", systemImage: "gauge.with.dots.needle.33percent")
+                        .font(.subheadline)
+                    Text("Main-work loads are lower than a full session because you asked for a technique throttle. The server applied it when this plan was built; accessory work is unchanged. Every affected exercise is marked below.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("technique-throttle-in-force")
+            }
+
             if let topSet = issued.plan.topSet, topSet.reasonCode != "intent_off" {
                 Section("Top set") {
                     LabeledContent("Outcome", value: topSet.statusLabel)
@@ -94,6 +105,10 @@ struct PrescriptionPreviewView: View {
                             Text(item.repsLabel)
                             Text(item.loadLabel)
                             Text(item.effortLabel)
+                            if (item.refs ?? []).contains("MOD-TECH-001") {
+                                Text("throttled")
+                                    .foregroundStyle(.orange)
+                            }
                             if let velocity = item.velocityTargetLabel {
                                 Text("target \(velocity)")
                             }

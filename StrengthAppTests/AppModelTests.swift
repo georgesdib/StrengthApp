@@ -416,6 +416,7 @@ private final class RecordingWatchConnectivity: WatchConnectivitySession {
     var receivedApplicationContext: [String: Any] = [:]
     private(set) var updates: [[String: Any]] = []
     private(set) var userInfos: [[String: Any]] = []
+    private(set) var fileTransfers: [(URL, [String: Any])] = []
 
     func activate() {}
     func updateApplicationContext(_ context: [String: Any]) throws {
@@ -423,6 +424,10 @@ private final class RecordingWatchConnectivity: WatchConnectivitySession {
     }
     func transferUserInfo(_ userInfo: [String: Any]) {
         userInfos.append(userInfo)
+    }
+
+    func transferFile(_ fileURL: URL, metadata: [String: Any]) {
+        fileTransfers.append((fileURL, metadata))
     }
 
     func sendMessage(

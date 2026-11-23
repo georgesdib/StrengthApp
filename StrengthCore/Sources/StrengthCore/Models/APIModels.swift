@@ -169,7 +169,7 @@ public struct HealthKitReadinessProvenance: Decodable, Equatable {
     public let importedAt: String
 }
 
-public struct ReadinessScore: Decodable {
+public struct ReadinessScore: Codable, Equatable, Sendable {
     public let onDate: String?
     public let status: String
     public let score: Double?
@@ -182,19 +182,19 @@ public struct ReadinessScore: Decodable {
     public let deviceSuppressed: Bool?
 }
 
-public struct ReadinessComponent: Decodable {
+public struct ReadinessComponent: Codable, Equatable, Sendable {
     public let field: String
     public let value: Double
     public let normalised: Double
     public let weight: Double
 }
 
-public struct ReadinessOverride: Decodable {
+public struct ReadinessOverride: Codable, Equatable, Sendable {
     public let value: Double?
     public let reason: String?
 }
 
-public struct CategoryFactor: Decodable {
+public struct CategoryFactor: Codable, Equatable, Sendable {
     public let factor: Double
     public let rirBump: Int
 }

@@ -40,6 +40,8 @@ public struct WatchPlanSummary: Equatable, Sendable {
     public let warnings: [String]
     public let expiresAt: String?
     public let executionTarget: String
+    /// The plan's execution identity; an offline watch start names it. Nil for an older server.
+    public let executionID: String?
 
     public init(
         issuedPlanID: String,
@@ -48,7 +50,8 @@ public struct WatchPlanSummary: Equatable, Sendable {
         items: [WatchPlanItemSummary],
         warnings: [String],
         expiresAt: String?,
-        executionTarget: String
+        executionTarget: String,
+        executionID: String? = nil
     ) {
         self.issuedPlanID = issuedPlanID
         self.forDate = forDate
@@ -57,6 +60,7 @@ public struct WatchPlanSummary: Equatable, Sendable {
         self.warnings = warnings
         self.expiresAt = expiresAt
         self.executionTarget = executionTarget
+        self.executionID = executionID
     }
 }
 
@@ -270,7 +274,8 @@ public enum WatchTodayMapper {
                 items: items,
                 warnings: state.warnings ?? plan.warnings ?? [],
                 expiresAt: state.planExpiresAt,
-                executionTarget: "watch"
+                executionTarget: "watch",
+                executionID: state.executionId
             ))
         default:
             return .unavailable("The server returned an unknown plan state.")

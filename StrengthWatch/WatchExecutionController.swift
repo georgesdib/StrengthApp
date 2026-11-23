@@ -30,6 +30,12 @@ final class WatchExecutionController: ObservableObject {
 
     /// Called whenever the open rest changes, so the phone can mirror it as a Live Activity.
     var onRestChanged: ((WatchRestSnapshot) -> Void)?
+    /// A small status heartbeat so the phone can name this watch in `pending_devices`.
+    var onStatusChanged: ((WatchWorkoutStatus) -> Void)?
+    /// Whether WatchConnectivity currently has a reachable phone.
+    var phoneReachable: (() -> Bool)? {
+        didSet { engine.phoneReachable = phoneReachable }
+    }
     /// The last rest state sent, so a sync that changed nothing does not re-send it.
     private var sentRest: (sessionId: String, endsAt: Date?)?
     private var restSequence = 0
@@ -136,6 +142,9 @@ final class WatchExecutionController: ObservableObject {
         } catch {
             lastError = "The saved session could not be read."
         }
+        if let cache = WatchSessionController.cachedPlan(), !cache.isExpired {
+            engine.cachedPlan = cache
+        }
         sync()
         startPathMonitor()
         Task {
@@ -230,6 +239,13 @@ final class WatchExecutionController: ObservableObject {
     }
 
     // MARK: - Start
+
+    /// Applies the plan-only cache delivered by the phone (transferFile). It is the start input
+    /// when the server is unreachable; an online start still reads the plan from the server.
+    func applyPlanCache(_ cache: WatchPlanCache) {
+        guard !cache.isExpired else { return }
+        engine.cachedPlan = cache
+    }
 
     func start(issuedPlanID: String) async {
         guard let session = currentSession() else {
@@ -829,6 +845,18 @@ final class WatchExecutionController: ObservableObject {
         lastError = engine.lastError
         syncRestNotification()
         syncRestRelay()
+        publishStatus()
+    }
+
+    private func publishStatus() {
+        let status = WatchWorkoutStatus(
+            workoutId: engine.workout?.workoutId,
+            sessionId: engine.sessionRecord?.sessionUUID,
+            pendingCount: engine.pendingCount,
+            phase: String(describing: engine.phase),
+            finishAcknowledged: engine.sessionRecord?.finish?.serverAcked ?? false
+        )
+        onStatusChanged?(status)
     }
 
     /// Publishes the open rest to the phone. The end date is absolute, so a late delivery still

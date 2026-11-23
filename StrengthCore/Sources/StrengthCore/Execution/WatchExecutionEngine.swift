@@ -181,6 +181,12 @@ public final class WatchExecutionEngine {
     public private(set) var nextRetryAt: Date?
     /// A newer plan arrived while the watch was busy; it is applied at the next idle point.
     public private(set) var planUpdated = false
+    /// The plan-only cache delivered by the phone. It lets a watch start with no connection and
+    /// names the execution id the server will bind at first sync.
+    public var cachedPlan: WatchPlanCache?
+    /// True while the phone is reachable. A set committed over WatchConnectivity is provisional
+    /// until the phone acknowledges it; after three seconds the watch proceeds as offline.
+    public var phoneReachable: (() -> Bool)?
     /// Why the last HealthKit save attempt failed, if it did.
     public private(set) var healthKitFailure: String?
     /// The server considers this session idle (contract §16 idle warning); display only.
@@ -749,11 +755,79 @@ public final class WatchExecutionEngine {
             markOnline(session)
             return true
         } catch {
+            // No server, but a plan the phone already delivered: start locally under the plan's
+            // execution id and queue the start for the first sync.
+            if (error as? APIError)?.isTransport == true,
+               let cache = cachedPlan,
+               (cache.issuedPlanId == issuedPlanID || cache.executionId == issuedPlanID),
+               !cache.executionId.isEmpty {
+                return startOffline(cache, session: session, receivedAt: receivedAt)
+            }
             phase = .ready
             lastError = message(for: error)
             markOfflineIfTransport(error)
             return false
         }
+    }
+
+    private func startOffline(
+        _ cache: WatchPlanCache,
+        session: IOSSession,
+        receivedAt: Date
+    ) -> Bool {
+        let record = WatchSessionRecord(
+            sessionUUID: UUID().uuidString.lowercased(),
+            startedAt: receivedAt,
+            planRevision: 0,
+            clockOffsetSeconds: 0
+        )
+        let detail = WorkoutDetail(
+            workoutId: cache.executionId,
+            prescriptionId: cache.issuedPlanId,
+            forDate: cache.forDate,
+            sessionType: cache.sessionType,
+            status: "in_progress",
+            plan: cache.plan,
+            sets: [],
+            forms: [],
+            elapsedSeconds: 0,
+            sessionRpe: nil,
+            startedAt: ServerClock.encodedISO(receivedAt),
+            ownerDeviceId: session.deviceID,
+            planRevision: 0
+        )
+        let request = StartWorkoutRequest(
+            issuedPlanId: cache.issuedPlanId,
+            executionId: cache.executionId,
+            startedAt: ServerClock.encodedISO(receivedAt)
+        )
+        let operation = OfflineOperation(
+            operationId: OperationID.derived("start:" + cache.issuedPlanId),
+            workoutId: cache.executionId,
+            body: .start(request),
+            createdAt: receivedAt,
+            deviceId: session.deviceID,
+            clockOffsetSeconds: 0
+        )
+        do {
+            try mutate { capture in
+                capture.session = record
+                capture.activeWorkout = detail
+                if !capture.operations.contains(where: {
+                    $0.operationId == operation.operationId
+                }) {
+                    try self.appendOperation(operation, to: &capture)
+                }
+            }
+        } catch {
+            lastError = message(for: error)
+            return false
+        }
+        phase = .active
+        lastError = nil
+        nextRetryAt = nil
+        markOfflineIfTransport(APIError.transport("offline start"))
+        return true
     }
 
     // MARK: - Sets
@@ -1240,7 +1314,7 @@ public final class WatchExecutionEngine {
             }
             do {
                 _ = try store.markAttempted(operation.operationId)
-                let detail = try await send(operation, session: session)
+                let detail = try await sendWithAckDeadline(operation, session: session)
                 _ = try store.remove(operation.operationId)
                 if let detail {
                     _ = try store.setActiveWorkout(detail)
@@ -1302,18 +1376,47 @@ public final class WatchExecutionEngine {
 
     // MARK: - Private
 
+    /// Ack-before-commit. With the phone reachable, a watch set is provisional until the phone
+    /// acknowledges it. No acknowledgement within three seconds means the set proceeds as
+    /// offline: it stays in the ledger and is replayed later under the same idempotency key.
+    private func sendWithAckDeadline(
+        _ operation: OfflineOperation,
+        session: IOSSession
+    ) async throws -> WorkoutDetail? {
+        guard operation.kind == .addSet, phoneReachable?() == true else {
+            return try await send(operation, session: session)
+        }
+        do {
+            return try await AsyncDeadline.run(seconds: 3) {
+                try await self.send(operation, session: session)
+            }
+        } catch is AsyncDeadline.Exceeded {
+            markOfflineIfTransport(APIError.transport("The phone did not acknowledge the set."))
+            throw APIError.transport("The phone did not acknowledge the set within 3 seconds.")
+        }
+    }
+
     private func send(
         _ operation: OfflineOperation,
         session: IOSSession
     ) async throws -> WorkoutDetail? {
         switch operation.body {
+        case .start(let body):
+            return try await client.startWorkout(
+                issuedPlanId: body.issuedPlanId,
+                executionId: body.executionId,
+                startedAt: body.startedAt,
+                session: session,
+                idempotencyKey: operation.operationId
+            )
         case .addSet(let body):
             return try await client.addSet(
                 workoutId: operation.workoutId,
                 body: body,
                 session: session,
                 idempotencyKey: operation.operationId,
-                journaling: false
+                journaling: false,
+                preferRelay: phoneReachable?() == true
             )
         case .completeWorkout(let body):
             return try await client.completeWorkout(
@@ -1364,15 +1467,20 @@ public final class WatchExecutionEngine {
 
     private func rememberSetID(for operation: OfflineOperation, in detail: WorkoutDetail) {
         guard case .addSet(let body) = operation.body,
-              let setIndex = body.setIndex,
               var record = sessionRecord else { return }
-        // The newest set with this exercise and index is the one just created. The plan-item
-        // match is preferred when the server reports it; otherwise exercise + index is used.
-        let candidates = (detail.sets ?? []).filter {
-            ($0.setIndex ?? -1) == setIndex && $0.exerciseId == body.exerciseId
+        // The phone may have renumbered the set during merge, so the acknowledged index is not
+        // assumed to equal the one the watch sent. The newest set for this exercise and plan
+        // item is the one just created; the index is only a preference.
+        let byExercise = (detail.sets ?? []).filter {
+            $0.exerciseId == body.exerciseId
         }
-        let sameItem = candidates.filter { ($0.planItemIndex ?? -1) == (body.planItemIndex ?? -2) }
-        let pool = sameItem.isEmpty ? candidates : sameItem
+        let byIndex = byExercise.filter {
+            ($0.setIndex ?? -1) == (body.setIndex ?? -1)
+        }
+        let sameItem = (byIndex.isEmpty ? byExercise : byIndex).filter {
+            ($0.planItemIndex ?? -1) == (body.planItemIndex ?? -2)
+        }
+        let pool = sameItem.isEmpty ? (byIndex.isEmpty ? byExercise : byIndex) : sameItem
         guard let created = pool.max(by: { ($0.setId ?? 0) < ($1.setId ?? 0) }),
               let setId = created.setId else { return }
         var mapping = record.eventSetIDs ?? [:]
@@ -1489,7 +1597,13 @@ public final class WatchExecutionEngine {
         guard capture.operations.count < OfflineCaptureStore.maxOperations else {
             throw OfflineCaptureStoreError.full
         }
-        capture.operations.append(operation)
+        var entry = operation
+        if entry.deviceSeq == nil {
+            entry.deviceSeq = (capture.operations.compactMap(\.deviceSeq).max() ?? -1) + 1
+        }
+        if entry.createdAtLocal == nil { entry.createdAtLocal = entry.createdAt }
+        if entry.ackState == nil { entry.ackState = .pending }
+        capture.operations.append(entry)
     }
 
     private func dropEvents(localSetID: String, from capture: inout OfflineCapture) {

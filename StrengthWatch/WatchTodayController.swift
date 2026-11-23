@@ -31,7 +31,24 @@ final class WatchTodayController: ObservableObject {
     }
 
     func start() {
+        applyCachedPlanIfAvailable()
         Task { await refresh() }
+    }
+
+    /// The plan-only cache delivered by the phone is enough to show and start a workout while
+    /// the server is unreachable.
+    func applyPlanCache(_ cache: WatchPlanCache) {
+        guard !cache.isExpired, cache.executionTarget == "watch" else { return }
+        lastPlan = cache.summary
+        state = .ready(cache.summary)
+    }
+
+    private func applyCachedPlanIfAvailable() {
+        guard let cache = WatchSessionController.cachedPlan(),
+              !cache.isExpired,
+              cache.executionTarget == "watch" else { return }
+        lastPlan = cache.summary
+        state = .ready(cache.summary)
     }
 
     /// Names the server the watch tried before the reason, because "cannot reach it" is a very
@@ -73,6 +90,7 @@ final class WatchTodayController: ObservableObject {
             if case .ready(let plan) = snapshot.state {
                 lastPlan = plan
             } else {
+                // The server answered definitively; a stale cached plan must not linger.
                 lastPlan = nil
             }
             state = snapshot.state

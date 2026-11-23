@@ -91,7 +91,9 @@ raw 100.x address.
    The main-lift structure offers **Server default**, **Prefer top set + back-off**,
    **Require top set + back-off** or **Straight sets**. Preferred accepts a straight-set fallback
    with a recorded reason; required marks an unexpected fallback as unsatisfied, but the plan stays
-   startable. The server owns eligibility and every load.
+   startable. **Technique throttle (main work)** asks the server to lighten main-work loads for
+   this session only; the issued plan marks the affected exercises and explains why. The server
+   owns eligibility and every load.
 3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
    load, RIR, any velocity target, rest and any warnings. **Start workout** is on that screen, so the plan is always
    visible before it is consumed. The server issues the plan; the phone never invents plan content.
@@ -108,12 +110,16 @@ raw 100.x address.
    and logging the working sets is valid. To record one, tap **Start set** on its warm-up row: it
    fills that row's load and reps, and RIR 6 is what records the set as a warm-up.
    A working set starts the rest timer automatically; logged warm-ups (RIR 6) do not.
-7. Repeat for the remaining sets and exercises. When an exercise is done, tap **End exercise**:
+7. Repeat for the remaining sets and exercises. If the server becomes unreachable after a
+   plan has been downloaded, **Start workout** still starts it: the plan's execution id and your
+   start time are kept locally and bound on the next sync. When an exercise is done, tap **End exercise**:
    it closes any running rest, records the exercise's completion and offers the optional 1–5 form
    rating. Leaving the screen does not end the exercise.
 8. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
 9. Review the **Session report** that opens after completion: prescription adherence, velocity,
-   session feedback, quality flags and evidence. It is read-only. **Done** returns to Today.
+   session feedback, quality flags and evidence. It is read-only. If the Apple Watch still owes
+   sets, the report says **Apple Watch data pending** and refreshes until the server settles the
+   window; do not treat those totals as final until then. **Done** returns to Today.
 10. The same report is available later from the session's **History** detail. An imported session
     with no workout record explains that no report exists.
 

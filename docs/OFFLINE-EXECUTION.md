@@ -1,0 +1,66 @@
+# Unified offline execution — client implementation
+
+This is the client-owned implementation note for the cross-repository plan
+[Unified offline workout execution](https://github.com/georgesdib/strength-app/blob/offline-execution/docs/plans/UNIFIED-OFFLINE-EXECUTION.md)
+(C1 and C2 of its MacBook handout). The plan and the iOS/watch contract stay canonical in the
+portfolio repository; this file records only what the app does.
+
+## C1 — S0 client
+
+- **Technique throttle.** The request sheet has a main-work-only toggle. It is sent as
+  `settings.technique_throttle`. The issued plan marks every item whose rationale refs contain
+  `MOD-TECH-001` and explains that main-work loads were reduced for this session only. Accessory
+  work is untouched by the server.
+- **Execution identity.** `execution_id` is decoded from `POST /prescriptions` and
+  `GET /plans/current`. It is stored with the cached plan and sent as `execution_id` on
+  `POST /workouts`. A start from the cached plan also sends the athlete's `started_at`; a live
+  start does not.
+- **Cached plan.** The issued plan (plan body, execution id, warnings, readiness and the
+  `load-catalogue/v1` catalogue) is stored in `OfflineCapture.cachedPlan`. It is cleared when the
+  start is accepted or the plan is reported consumed/expired/superseded.
+- **Catalogue prefill.** A substitution for an essential slot uses
+  `round_down(base / (1 + (reps + rir) / 30), increment)`; an addition or non-essential slot uses
+  the accessory value. Missing RIR falls back to plain Epley. Rounding is decimal, not binary
+  floating point. The request carries `prefill_load_kg`, `prefill_catalogue_version` and
+  `prefill_as_of`. A `prefill_verified: false` response is logged as a diagnostic; the value the
+  athlete saw is never replaced.
+- **Pending devices and finality.** Finishing a phone-owned workout names the watch in
+  `pending_devices` when its events may still be missing. The report shows
+  "Apple Watch data pending" and refreshes while `reconciliation.state == "open"`; it never treats
+  those totals as final.
+
+## C2 — S1 client
+
+- **Capture version 2.** `OfflineCapture` decodes version 1 and migrates it in place (ledger
+  fields filled, plan cache added as absent). The version-1 file is readable after an app update
+  mid-workout.
+- **Ledger entries.** Every queued write carries `entry_id`, `workout_id`, `device_id`,
+  `device_seq`, `kind`, payload, local creation time, clock offset, plan watermark and
+  acknowledgement state. Entries are not aged out before acknowledgement; only an acknowledgement
+  or a deliberate discard removes one.
+- **Plan-only watch cache.** The phone sends a `WatchPlanCache` file with `transferFile`
+  (`kind: plan_cache`), not the application context. The watch copies it to
+  `Application Support/StrengthWatch/plan-cache.json` and can show and start a watch-targeted
+  plan with no server connection.
+- **Offline start.** On either device, a transport failure during start writes a local session
+  under the plan's `execution_id` and queues a `start` ledger entry. The first sync calls
+  `POST /workouts` with the original `started_at`; subsequent sets already target that id.
+- **Ack-before-commit.** With the phone reachable, the watch commits a set through the existing
+  phone relay and waits for its acknowledgement. No acknowledgement within three seconds leaves
+  the set in the ledger as offline work; it is retried later under the same idempotency key.
+- **Merge.** The phone merges a relayed set against its committed sets: a colliding
+  `(exercise, set_index)` is renumbered after the current maximum in capture order, warm-up
+  indexes `>= 1000` stay in their band, and device/plan provenance is retained. No set is rejected.
+  The acknowledged server id is recorded in a per-device `LocalSetMap`.
+- **Late reconciliation.** The phone settles the window through
+  `POST /workouts/{id}/reconciliation` when the watch reports nothing left to send. A refused late
+  set (`409 reconciliation_window_closed`) remains visible on the device as unsent; the server has
+  preserved it for audit only.
+
+## What is not done here
+
+- Physical-device acceptance is still required: watch-only with the phone off, both devices
+  partitioned, termination mid-set, a version-1 capture upgraded mid-workout, and the visible
+  technique-throttle effect.
+- S5 (ownership gate, takeover, mirror mode, `execution_target`, and the iPhone/watch picker
+  removal) is intentionally untouched.

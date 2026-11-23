@@ -683,10 +683,16 @@ public final class IOSAPIClient {
 
     public func startWorkout(
         issuedPlanId: String,
+        executionId: String? = nil,
+        startedAt: String? = nil,
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> WorkoutDetail {
-        let body = StartWorkoutRequest(issuedPlanId: issuedPlanId)
+        let body = StartWorkoutRequest(
+            issuedPlanId: issuedPlanId,
+            executionId: executionId,
+            startedAt: startedAt
+        )
         do {
             return try await post(
                 path: "api/ios/v1/workouts",
@@ -713,8 +719,24 @@ public final class IOSAPIClient {
         body: AddSetRequest,
         session: IOSSession,
         idempotencyKey: String,
-        journaling: Bool = true
+        journaling: Bool = true,
+        preferRelay: Bool = false
     ) async throws -> WorkoutDetail {
+        // Ack-before-commit: with the phone reachable, the watch commits through it so the phone
+        // can merge the index and acknowledge the set. The direct path remains the fallback.
+        if preferRelay, relay != nil {
+            do {
+                return try await relayed(
+                    .addSet,
+                    session: session,
+                    workoutId: workoutId,
+                    idempotencyKey: idempotencyKey,
+                    payload: try? encoder.encode(body)
+                )
+            } catch let error as APIError where error.isTransport {
+                // The phone stopped answering; the direct path is still available.
+            }
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/sets",
@@ -876,6 +898,25 @@ public final class IOSAPIClient {
                 payload: try? encoder.encode(body)
             )
         }
+    }
+
+    /// Records that an expected device has nothing left to send. This settles an open
+    /// reconciliation window without waiting for its deadline.
+    public func reconcileDevice(
+        workoutId: String,
+        deviceId: String,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutReconciliationResponse {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/reconciliation",
+            body: ReconciliationDeviceRequest(deviceId: deviceId),
+            kind: .reconciliation,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey,
+            journaling: false
+        )
     }
 
     public func completeWorkout(

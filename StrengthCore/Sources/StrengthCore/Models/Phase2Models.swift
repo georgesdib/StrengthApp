@@ -331,23 +331,31 @@ public struct PlanSettings: Codable, Equatable {
     public var minimumTargetMinutes: Int?
     /// nil follows the settings profile; otherwise this request overrides it.
     public var topSetIntent: PrescriptionTopSetIntent? = nil
+    /// MOD-TECH-001: applies a user-declared technique throttle to main work when the server
+    /// builds the plan. A per-session request, never stored state. Off is sent explicitly so the
+    /// server can distinguish "not throttled" from an older client that omitted the field.
+    public var techniqueThrottle: Bool = false
 
     public init(
         sessionType: String = "auto",
         minimumSession: Bool = false,
         minimumTargetMinutes: Int? = nil,
-        topSetIntent: PrescriptionTopSetIntent? = nil
+        topSetIntent: PrescriptionTopSetIntent? = nil,
+        techniqueThrottle: Bool = false
     ) {
         self.sessionType = sessionType
         self.minimumSession = minimumSession
         self.minimumTargetMinutes = minimumTargetMinutes
         self.topSetIntent = topSetIntent
+        self.techniqueThrottle = techniqueThrottle
     }
 }
 
 /// The 202 acknowledgement: the request exists, the plan does not yet.
 public struct PlanRequestAck: Decodable {
     public let issuedPlanId: String
+    /// The workout this plan will become, minted at issue so an offline start can name it.
+    public let executionId: String?
     public let status: String
     public let forDate: String
     public let requestExpiresAt: String
@@ -365,6 +373,7 @@ public struct PlanErrorBody: Decodable, Equatable {
 public struct PlansStateResponse: Decodable {
     public let status: String
     public let issuedPlanId: String?
+    public let executionId: String?
     public let forDate: String?
     public let elapsedSeconds: Int?
     public let requestExpiresAt: String?
@@ -374,15 +383,17 @@ public struct PlansStateResponse: Decodable {
     public let executionTarget: String?
     public let sessionType: String?
     public let plan: PrescriptionPlan?
+    /// The server-built catalogue shipped with the plan; nil for a plan built before it existed.
+    public let loadCatalogue: LoadCatalogue?
     public let readiness: ReadinessScore?
     public let warnings: [String]?
     public let error: PlanErrorBody?
 
     public static let none = PlansStateResponse(
-        status: "none", issuedPlanId: nil, forDate: nil, elapsedSeconds: nil,
-        requestExpiresAt: nil, planExpiresAt: nil, retryAfterMs: nil, settings: nil,
-        executionTarget: nil, sessionType: nil, plan: nil, readiness: nil, warnings: nil,
-        error: nil
+        status: "none", issuedPlanId: nil, executionId: nil, forDate: nil,
+        elapsedSeconds: nil, requestExpiresAt: nil, planExpiresAt: nil, retryAfterMs: nil,
+        settings: nil, executionTarget: nil, sessionType: nil, plan: nil,
+        loadCatalogue: nil, readiness: nil, warnings: nil, error: nil
     )
 
     /// A ready state is the only one that can be previewed and started.
@@ -396,7 +407,9 @@ public struct PlansStateResponse: Decodable {
             plan: plan,
             readiness: readiness,
             warnings: warnings ?? [],
-            executionTarget: executionTarget
+            executionTarget: executionTarget,
+            executionID: executionId,
+            loadCatalogue: loadCatalogue
         )
     }
 }
@@ -411,8 +424,20 @@ public struct IssuedPlanResponse: Identifiable {
     public let readiness: ReadinessScore?
     public let warnings: [String]
     public let executionTarget: String?
+    /// The plan's execution identity. It becomes the workout id when the plan is started.
+    public let executionID: String?
+    public let loadCatalogue: LoadCatalogue?
 
     public var id: String { issuedPlanId }
+
+    /// MOD-TECH-001 is frozen into the plan at build time; the item rationale refs carry it.
+    public var techniqueThrottledItems: [PrescriptionItem] {
+        plan.items.filter { ($0.refs ?? []).contains("MOD-TECH-001") }
+    }
+
+    public var techniqueThrottleInForce: Bool {
+        !techniqueThrottledItems.isEmpty
+    }
 }
 
 /// Permissive envelope for a journalled prescription response: a Phase 2 receipt may return the
@@ -763,11 +788,17 @@ public struct IssuePrescriptionRequest: Encodable {
     }
 }
 
-public struct StartWorkoutRequest: Encodable {
+public struct StartWorkoutRequest: Codable, Equatable {
     public let issuedPlanId: String
+    /// The plan's execution identity; it binds the workout id. Omitted by older clients.
+    public let executionId: String?
+    /// The athlete's recorded start, required when the start came from a cached plan.
+    public let startedAt: String?
 
-    public init(issuedPlanId: String) {
+    public init(issuedPlanId: String, executionId: String? = nil, startedAt: String? = nil) {
         self.issuedPlanId = issuedPlanId
+        self.executionId = executionId
+        self.startedAt = startedAt
     }
 }
 
@@ -818,6 +849,21 @@ public struct AddSetRequest: Codable, Equatable {
         self.repVelocities = repVelocities
         self.performedAt = performedAt
     }
+
+    public func withSetIndex(_ setIndex: Int) -> AddSetRequest {
+        AddSetRequest(
+            exerciseId: exerciseId,
+            loadKg: loadKg,
+            reps: reps,
+            rir: rir,
+            velocityMps: velocityMps,
+            setIndex: setIndex,
+            planItemIndex: planItemIndex,
+            substitutesPlanItemIndex: substitutesPlanItemIndex,
+            repVelocities: repVelocities,
+            performedAt: performedAt
+        )
+    }
 }
 
 public struct FormRatingRequest: Codable, Equatable {
@@ -847,6 +893,9 @@ public struct CompleteWorkoutRequest: Codable, Equatable {
     public let notes: String?
     public let endedAt: String?
     public let productivity: Int?
+    /// Devices whose events had not arrived when this device finished. A non-empty list opens
+    /// the server's late-reconciliation window.
+    public let pendingDevices: [String]?
 
     public init(
         sessionRpe: Double?,
@@ -854,7 +903,8 @@ public struct CompleteWorkoutRequest: Codable, Equatable {
         durationMin: Double?,
         notes: String?,
         endedAt: String? = nil,
-        productivity: Int? = nil
+        productivity: Int? = nil,
+        pendingDevices: [String]? = nil
     ) {
         self.sessionRpe = sessionRpe
         self.notRecorded = notRecorded
@@ -862,7 +912,32 @@ public struct CompleteWorkoutRequest: Codable, Equatable {
         self.notes = notes
         self.endedAt = endedAt
         self.productivity = productivity
+        self.pendingDevices = pendingDevices
     }
+
+    public func withPendingDevices(_ devices: [String]?) -> CompleteWorkoutRequest {
+        CompleteWorkoutRequest(
+            sessionRpe: sessionRpe,
+            notRecorded: notRecorded,
+            durationMin: durationMin,
+            notes: notes,
+            endedAt: endedAt,
+            productivity: productivity,
+            pendingDevices: devices
+        )
+    }
+}
+
+public struct ReconciliationDeviceRequest: Encodable, Equatable {
+    public let deviceId: String
+
+    public init(deviceId: String) {
+        self.deviceId = deviceId
+    }
+}
+
+public struct WorkoutReconciliationResponse: Decodable, Equatable {
+    public let reconciliation: WorkoutReconciliation
 }
 
 public struct EmptyRequest: Encodable {

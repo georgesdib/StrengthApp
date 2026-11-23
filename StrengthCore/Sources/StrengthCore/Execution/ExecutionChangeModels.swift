@@ -14,6 +14,11 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
     public let rirTarget: Int?
     public let prefillLoadKg: Double?
     public let prefillReason: String?
+    /// The server's verification of the number the athlete saw. A false value is a log
+    /// diagnostic, never a reason to replace the displayed load.
+    public let prefillVerified: Bool?
+    public let prefillExpectedLoadKg: Double?
+    public let prefillMismatchReason: String?
     public let createdAt: String?
 
     public init(
@@ -27,6 +32,9 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
         rirTarget: Int? = nil,
         prefillLoadKg: Double? = nil,
         prefillReason: String? = nil,
+        prefillVerified: Bool? = nil,
+        prefillExpectedLoadKg: Double? = nil,
+        prefillMismatchReason: String? = nil,
         createdAt: String? = nil
     ) {
         self.eventId = eventId
@@ -39,6 +47,9 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
         self.rirTarget = rirTarget
         self.prefillLoadKg = prefillLoadKg
         self.prefillReason = prefillReason
+        self.prefillVerified = prefillVerified
+        self.prefillExpectedLoadKg = prefillExpectedLoadKg
+        self.prefillMismatchReason = prefillMismatchReason
         self.createdAt = createdAt
     }
 
@@ -277,6 +288,10 @@ public struct ExecutionChangeRequest: Encodable, Equatable, Sendable {
     public let repsLow: Int?
     public let repsHigh: Int?
     public let rirTarget: Int?
+    /// The client-applied load from the shipped catalogue, and the snapshot it came from.
+    public let prefillLoadKg: Double?
+    public let prefillCatalogueVersion: String?
+    public let prefillAsOf: String?
     public let prefillRequested: Bool?
 
     public init(
@@ -288,6 +303,9 @@ public struct ExecutionChangeRequest: Encodable, Equatable, Sendable {
         repsLow: Int? = nil,
         repsHigh: Int? = nil,
         rirTarget: Int? = nil,
+        prefillLoadKg: Double? = nil,
+        prefillCatalogueVersion: String? = nil,
+        prefillAsOf: String? = nil,
         prefillRequested: Bool? = nil
     ) {
         self.eventId = eventId
@@ -298,6 +316,9 @@ public struct ExecutionChangeRequest: Encodable, Equatable, Sendable {
         self.repsLow = repsLow
         self.repsHigh = repsHigh
         self.rirTarget = rirTarget
+        self.prefillLoadKg = prefillLoadKg
+        self.prefillCatalogueVersion = prefillCatalogueVersion
+        self.prefillAsOf = prefillAsOf
         self.prefillRequested = prefillRequested
     }
 }

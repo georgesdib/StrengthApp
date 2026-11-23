@@ -962,6 +962,13 @@ struct PlanSettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                Section("Technique") {
+                    Toggle("Technique throttle (main work)", isOn: $settings.techniqueThrottle)
+                        .accessibilityIdentifier("technique-throttle")
+                    Text("MOD-TECH-001 lightens main-work loads for this session only and explains the reduction on the issued plan. Accessory work is unchanged. The server applies it when the plan is built.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Section("Length") {
                     Toggle("Allow a minimum session", isOn: $settings.minimumSession)
                     if settings.minimumSession {

@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 import StrengthCore
 
 struct OfflineRecoveryConflict: Equatable {
@@ -189,6 +190,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var prescriptionState: PrescriptionState = .idle
     /// Settings the owner chose for the current request, kept for retry after a lost response.
     @Published private(set) var planSettings = PlanSettings()
+    /// The issued plan's execution identity; the workout id it will bind at start.
+    @Published private(set) var planExecutionID: String?
+    /// The catalogue shipped with the current plan, used only for the documented prefill tail.
+    @Published private(set) var loadCatalogue: LoadCatalogue?
+    /// True when the shown plan came from the local cache rather than this launch's request.
+    private var planIsFromCache = false
+    private let logger = Logger(subsystem: "StrengthApp", category: "offline-execution")
     private var planPollTask: Task<Void, Never>?
     private var planPollFailures = 0
     private static let maxPlanPollFailures = 10
@@ -377,6 +385,12 @@ final class AppModel: ObservableObject {
         self.offlineCapture = initialCapture
         self.offlineRecoveryError = initialRecoveryError
         self.activeWorkout = initialCapture?.activeWorkout
+        if let cached = initialCapture?.cachedPlan, !cached.isExpired {
+            self.prescriptionState = .issued(cached.issued)
+            self.planExecutionID = cached.executionId
+            self.loadCatalogue = cached.loadCatalogue
+            self.planIsFromCache = true
+        }
         restTimer.onFinish = { [weak self] result in
             self?.recordRestResult(result)
         }
@@ -759,6 +773,17 @@ final class AppModel: ObservableObject {
         pairingLabelText = pairedDevice.label
         phase = .paired
         if let session {
+            watchPairing.currentWorkout = { [weak self] in self?.activeWorkout }
+            watchPairing.onRelayedWorkout = { [weak self] workout in
+                guard let self else { return }
+                self.activeWorkout = workout
+                self.persistActiveWorkout()
+            }
+            watchPairing.onWatchStatus = { [weak self] status in
+                Task { @MainActor in
+                    await self?.settleWatchReconciliation(status)
+                }
+            }
             watchPairing.start(session: session, homeBaseURL: store.homeServerURL)
         }
         let refreshed = await refresh()
@@ -1990,6 +2015,7 @@ final class AppModel: ObservableObject {
             return
         }
         let settings = settings ?? PlanSettings()
+        planIsFromCache = false
         isSaving = true
         mutationFailureAmbiguous = false
         defer {
@@ -2009,6 +2035,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             planSettings = ack.settings ?? settings
+            planExecutionID = ack.executionId ?? planExecutionID
             prescriptionState = .generating(
                 PlanProgress(
                     issuedPlanId: ack.issuedPlanId,
@@ -2127,7 +2154,12 @@ final class AppModel: ObservableObject {
         case "ready":
             if let issued = state.issuedPlan {
                 stopPlanPolling()
+                planIsFromCache = false
+                planExecutionID = issued.executionID
+                loadCatalogue = issued.loadCatalogue
                 prescriptionState = .issued(issued)
+                cacheIssuedPlan(issued)
+                watchPairing.pushPlanCache(issued)
             } else {
                 stopPlanPolling()
                 prescriptionState = .failed("The server reported a ready plan without a plan body.")
@@ -2147,15 +2179,55 @@ final class AppModel: ObservableObject {
                 state.error?.message ?? "The plan could not be generated."
             )
         default:
-            // "none": no live request. Drop a stale preview instead of offering Start on it.
+            // "none": no live request. Drop a stale preview instead of offering Start on it,
+            // unless it is the unexpired plan this launch loaded from the cache. That cache is
+            // exactly what makes an offline start possible.
             stopPlanPolling()
+            if planIsFromCache, let cached = offlineCapture?.cachedPlan, !cached.isExpired {
+                return
+            }
             if case .issued = prescriptionState {
                 prescriptionState = .idle
             }
             if case .generating = prescriptionState {
                 prescriptionState = .idle
             }
+            planExecutionID = nil
+            loadCatalogue = nil
+            planIsFromCache = false
         }
+    }
+
+    private func cacheIssuedPlan(_ issued: IssuedPlanResponse) {
+        guard let executionID = issued.executionID, !executionID.isEmpty else { return }
+        let cached = CachedIssuedPlan(
+            issuedPlanId: issued.issuedPlanId,
+            executionId: executionID,
+            forDate: issued.forDate,
+            sessionType: issued.sessionType,
+            expiresAt: issued.expiresAt,
+            plan: issued.plan,
+            readiness: issued.readiness,
+            warnings: issued.warnings,
+            executionTarget: issued.executionTarget,
+            loadCatalogue: issued.loadCatalogue
+        )
+        do {
+            offlineCapture = try offlineStore.setCachedPlan(cached)
+        } catch {
+            offlinePersistenceError = message(for: error)
+        }
+    }
+
+    private func clearCachedPlan() {
+        do {
+            offlineCapture = try offlineStore.setCachedPlan(nil)
+        } catch {
+            offlinePersistenceError = message(for: error)
+        }
+        planExecutionID = nil
+        loadCatalogue = nil
+        planIsFromCache = false
     }
 
     private var planElapsedSettingsID: String {
@@ -2193,15 +2265,25 @@ final class AppModel: ObservableObject {
         }
         _ = apply(.operationBegan)
         defer { _ = apply(.operationEnded) }
+        let recordedStart = Date()
         do {
             let workout = try await client.startWorkout(
                 issuedPlanId: issued.issuedPlanId,
+                executionId: issued.executionID ?? planExecutionID,
+                // A cached plan is the athlete's recorded start: the server binds by that
+                // instant, not by when the sync happened to arrive.
+                startedAt: planIsFromCache ? ServerClock.encodedISO(recordedStart) : nil,
                 session: session,
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(workout))
             await automation.handle(.started, sessionID: workout.workoutId)
+            let catalogue = issued.loadCatalogue ?? loadCatalogue
             clearOfflineCaptureAfterServerCompletion()
+            clearCachedPlan()
+            if let catalogue {
+                offlineCapture = try? offlineStore.setActiveCatalogue(catalogue)
+            }
             persistActiveWorkout()
             recoveryIssue = nil
             workoutRefreshGrace = true
@@ -2217,9 +2299,22 @@ final class AppModel: ObservableObject {
                 return false
             }
             if let api = error as? APIError {
+                if api.isTransport,
+                   let executionID = (issued.executionID ?? planExecutionID),
+                   !executionID.isEmpty,
+                   await queueStart(
+                        issued: issued,
+                        executionID: executionID,
+                        startedAt: recordedStart,
+                        idempotencyKey: idempotencyKey
+                   ) {
+                    RestNotificationManager.shared.requestAuthorizationIfNeeded()
+                    return true
+                }
                 let code = api.code ?? ""
                 if ["plan_consumed", "plan_expired", "plan_superseded"].contains(code) {
                     prescriptionState = .idle
+                    clearCachedPlan()
                     recoveryIssue = .prescriptionUnavailable(
                         reason: "This prescription is no longer available. Refresh to load the current server state."
                     )
@@ -2473,6 +2568,18 @@ final class AppModel: ObservableObject {
         guard permitsMutation(kind: .executionChange, operationId: idempotencyKey) else {
             return false
         }
+        let prefill = cataloguePrefill(
+            exerciseId: exerciseId,
+            planItemIndex: planItemIndex,
+            repsLow: repsLow,
+            repsHigh: repsHigh,
+            rirTarget: rirTarget
+        )
+        if let prefill, let load = prefill.loadKg {
+            logger.debug("prefill \(exerciseId, privacy: .public): \(load, privacy: .public) kg (\(prefill.reason, privacy: .public))")
+        } else if let prefill {
+            logger.notice("prefill unavailable for \(exerciseId, privacy: .public): \(prefill.reason, privacy: .public)")
+        }
         let body = ExecutionChangeRequest(
             eventId: idempotencyKey,
             change: planItemIndex == nil ? "addition" : "substitution",
@@ -2482,7 +2589,10 @@ final class AppModel: ObservableObject {
             repsLow: repsLow,
             repsHigh: repsHigh,
             rirTarget: rirTarget,
-            prefillRequested: !isOffline
+            prefillLoadKg: prefill?.loadKg,
+            prefillCatalogueVersion: loadCatalogue?.version,
+            prefillAsOf: loadCatalogue?.asOf,
+            prefillRequested: loadCatalogue == nil ? !isOffline : false
         )
         _ = apply(.operationBegan)
         defer { _ = apply(.operationEnded) }
@@ -2494,6 +2604,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             executionView = response.execution
+            logPrefillVerification(response.execution)
             if executionChangeRejection?.workoutID == workoutId {
                 executionChangeRejection = nil
             }
@@ -2507,6 +2618,56 @@ final class AppModel: ObservableObject {
             handleMutation(error)
             return false
         }
+    }
+
+    /// A mismatch is recorded by the server as a diagnostic. The number the athlete saw is
+    /// kept; this only makes the drift visible in the device log.
+    private func logPrefillVerification(_ execution: ExecutionView?) {
+        guard let execution else { return }
+        for change in execution.substitutions + execution.additions {
+            guard change.prefillVerified == false else { continue }
+            logger.notice(
+                "prefill mismatch for \(change.exerciseId ?? "exercise", privacy: .public): kept \(change.prefillLoadKg ?? 0, privacy: .public) kg, expected \(change.prefillExpectedLoadKg ?? 0, privacy: .public) kg (\(change.prefillMismatchReason ?? "unknown", privacy: .public))"
+            )
+        }
+    }
+
+    /// The only arithmetic the client may do: the documented D9 tail over the shipped catalogue.
+    private func cataloguePrefill(
+        exerciseId: String,
+        planItemIndex: Int?,
+        repsLow: Int?,
+        repsHigh: Int?,
+        rirTarget: Int?
+    ) -> LoadPrefill? {
+        guard let catalogue = loadCatalogue ?? cachedCatalogueForActiveWorkout() else {
+            return nil
+        }
+        let item = planItemIndex.flatMap { index in
+            activeWorkout?.plan?.items.first { ($0.orderIndex ?? -1) == index }
+        }
+        let essential = planItemIndex != nil && item?.essential == true
+        let reps = repsLow ?? item?.repsLow ?? 0
+        let rir = rirTarget ?? item?.rirTarget
+        guard reps > 0 else { return LoadPrefill(loadKg: nil, reason: "no_reps") }
+        return catalogue.prefill(
+            exerciseId: exerciseId,
+            essential: essential,
+            reps: reps,
+            rir: rir
+        )
+    }
+
+    private func cachedCatalogueForActiveWorkout() -> LoadCatalogue? {
+        if let catalogue = offlineCapture?.activeCatalogue {
+            return catalogue
+        }
+        guard let workoutID = activeWorkout?.workoutId,
+              let cached = offlineCapture?.cachedPlan,
+              cached.executionId == workoutID || cached.issuedPlanId == workoutID else {
+            return nil
+        }
+        return cached.loadCatalogue
     }
 
     /// Reads the current execution view so a reopened workout shows the changes.
@@ -2524,10 +2685,13 @@ final class AppModel: ObservableObject {
     }
 
     func completeWorkout(
-        _ body: CompleteWorkoutRequest,
+        _ request: CompleteWorkoutRequest,
         idempotencyKey: String
     ) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        // If the watch is unreachable or still holds unsent work, this finish must not declare
+        // the session final. The server records the window and accepts the late sets.
+        let body = request.withPendingDevices(pendingWatchDevices(for: workout.workoutId))
         guard !isMirroringWatchSession else {
             mutationError = "This workout is logged on the Apple Watch. Take over logging to finish it here."
             return false
@@ -2814,6 +2978,8 @@ final class AppModel: ObservableObject {
                 case .completeWorkout, .abandonWorkout:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = false
+                case .reconciliation:
+                    let _: JournalReplayAck = try await client.replay(entry, session: session)
                 case .executionEvents, .healthkitActivity:
                     // Both are idempotent batch uploads. Leaving them unreplayed stranded the
                     // entry forever and blocked every later write; replay resolves it, and a
@@ -3023,6 +3189,57 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Starts locally under the plan's execution id when the server is unreachable. Nothing is
+    /// invented: the frozen plan, its execution id and the recorded start are exactly what the
+    /// server will bind at the first sync.
+    private func queueStart(
+        issued: IssuedPlanResponse,
+        executionID: String,
+        startedAt: Date,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard !offlineRecoveryBlocksWrites() else { return false }
+        let startedISO = ServerClock.encodedISO(startedAt)
+        let workout = WorkoutDetail(
+            workoutId: executionID,
+            prescriptionId: issued.issuedPlanId,
+            forDate: issued.forDate,
+            sessionType: issued.sessionType,
+            status: "in_progress",
+            plan: issued.plan,
+            sets: [],
+            forms: [],
+            elapsedSeconds: 0,
+            sessionRpe: nil,
+            startedAt: startedISO,
+            ownerDeviceId: device?.deviceID,
+            planRevision: 0
+        )
+        let operation = OfflineOperation(
+            operationId: idempotencyKey,
+            workoutId: executionID,
+            body: .start(StartWorkoutRequest(
+                issuedPlanId: issued.issuedPlanId,
+                executionId: executionID,
+                startedAt: startedISO
+            )),
+            createdAt: startedAt,
+            deviceId: device?.deviceID,
+            clockOffsetSeconds: 0
+        )
+        do {
+            offlineCapture = try offlineStore.record(operation, activeWorkout: workout)
+            _ = apply(.operationQueued(workout))
+            isOffline = true
+            prescriptionState = .idle
+            await automation.handle(.started, sessionID: executionID)
+            return true
+        } catch {
+            _ = apply(.operationFailed(message: message(for: error), ambiguous: false))
+            return false
+        }
+    }
+
     private func queueForm(
         _ body: FormRatingRequest,
         idempotencyKey: String,
@@ -3079,7 +3296,9 @@ final class AppModel: ObservableObject {
             notRecorded: body.notRecorded,
             durationMin: body.durationMin,
             notes: body.notes,
-            endedAt: body.endedAt ?? nowISO()
+            endedAt: body.endedAt ?? nowISO(),
+            productivity: body.productivity,
+            pendingDevices: body.pendingDevices
         )
         do {
             let operation = OfflineOperation(
@@ -3114,6 +3333,28 @@ final class AppModel: ObservableObject {
         offlineSyncError = nil
         defer { isSyncingOffline = false }
         do {
+            // An offline start must bind the plan's execution id before any set references it.
+            if let start = pendingOfflineOperations.first(where: {
+                $0.kind == .start && $0.isReplayable(now: Date())
+            }), case .start(let body) = start.body {
+                let detail = try await client.startWorkout(
+                    issuedPlanId: body.issuedPlanId,
+                    executionId: body.executionId,
+                    startedAt: body.startedAt,
+                    session: session,
+                    idempotencyKey: start.operationId
+                )
+                activeWorkout = detail
+                let catalogue = offlineCapture?.cachedPlan?.loadCatalogue
+                offlineCapture = try offlineStore.remove(start.operationId)
+                offlineCapture = try offlineStore.setActiveWorkout(detail)
+                if let catalogue {
+                    offlineCapture = try offlineStore.setActiveCatalogue(catalogue)
+                }
+                offlineCapture = try offlineStore.setCachedPlan(nil)
+                planExecutionID = nil
+                planIsFromCache = false
+            }
             let serverToday = try await client.today(session: session)
             guard let serverActive = serverToday.activeWorkout,
                   serverActive.workoutId == cached.workoutId else {
@@ -3147,6 +3388,10 @@ final class AppModel: ObservableObject {
                 _ = try offlineStore.markAttempted(operation.operationId)
                 do {
                     switch operation.body {
+                    case .start:
+                        // A start is handled before the server-active check above; reaching
+                        // here means it was already acknowledged and removed.
+                        offlineCapture = try offlineStore.remove(operation.operationId)
                     case .addSet(let body):
                         let updated = try await client.addSet(
                             workoutId: operation.workoutId,
@@ -3393,6 +3638,35 @@ final class AppModel: ObservableObject {
             $0.kind == .completeWorkout
         }) else { return false }
         return await cancelOfflineOperation(operation.operationId)
+    }
+
+    /// A synced watch has nothing left to send, so settle the window explicitly instead of
+    /// leaving the finished session "pending" for the rest of the seven days.
+    private func settleWatchReconciliation(_ status: WatchWorkoutStatus) async {
+        guard let session,
+              let workout = activeWorkout,
+              workout.status == "completed",
+              let deviceID = watchPairing.watchDeviceID,
+              status.workoutId == workout.workoutId,
+              status.pendingCount == 0,
+              status.finishAcknowledged else {
+            return
+        }
+        _ = try? await client.reconcileDevice(
+            workoutId: workout.workoutId,
+            deviceId: deviceID,
+            session: session,
+            idempotencyKey: UUID().uuidString.lowercased()
+        )
+    }
+
+    /// The watch device whose events have not arrived, or nil when the phone can account for it.
+    private func pendingWatchDevices(for workoutId: String) -> [String]? {
+        guard let deviceID = watchPairing.watchDeviceID,
+              watchPairing.watchMayHavePendingWork(for: workoutId) else {
+            return nil
+        }
+        return [deviceID]
     }
 
     /// A watch-owned session is logged on the watch; the phone mirrors it and may edit the plan.

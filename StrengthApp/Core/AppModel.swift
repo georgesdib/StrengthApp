@@ -8,6 +8,13 @@ struct OfflineRecoveryConflict: Equatable {
     let pendingOperationCount: Int
 }
 
+/// A phone-authored plan change the server refused. The journal entry is already gone, so the
+/// message has to outlive the replay attempt for the workout screen to explain the outcome.
+struct ExecutionChangeRejection: Equatable {
+    let workoutID: String
+    let message: String
+}
+
 enum AppTab: Hashable {
     case today
     case history
@@ -91,6 +98,44 @@ final class AppModel: ObservableObject {
     func executionRow(forPlanIndex index: Int) -> ExecutionRow? {
         executionRows.first { $0.kind != .added && $0.planItemIndex == index }
     }
+
+    /// Phone-authored plan changes for the active workout that the server has not confirmed yet
+    /// and that can still be replayed. The watch only learns about a change after the server
+    /// accepts it, so these are still local.
+    var pendingExecutionChanges: [PendingMutation] {
+        executionChanges(for: activeWorkout?.workoutId, state: .pending)
+    }
+
+    /// Execution changes for the active workout that the journal could not resolve. They cannot be
+    /// replayed, so the workout screen explains the conflict and offers only a discard.
+    var conflictedExecutionChanges: [PendingMutation] {
+        executionChanges(for: activeWorkout?.workoutId, state: .conflict)
+    }
+
+    private func executionChanges(
+        for workoutId: String?,
+        state: PendingMutation.State
+    ) -> [PendingMutation] {
+        guard let workoutId else { return [] }
+        return pendingMutations.filter {
+            $0.kind == .executionChange && $0.targetId == workoutId && $0.state == state
+        }
+    }
+
+    /// Server-acknowledged sets a watch-owned session could not attach to a plan item. The server
+    /// keeps them as extra work; in a mirror they normally mean the set was captured before a
+    /// phone-authored substitution reached the watch.
+    var unlinkedWatchSets: [WorkoutSet] {
+        guard isMirroringWatchSession else { return [] }
+        let rowExercises = Set(executionRows.map(\.exerciseId))
+        return (activeWorkout?.sets ?? []).filter {
+            ($0.setId ?? 0) > 0
+                && $0.planItemIndex == nil
+                && $0.substitutesPlanItemIndex == nil
+                && !rowExercises.contains($0.exerciseId)
+        }
+    }
+
     @Published var narrativeEnabled: Bool = UserDefaults.standard.bool(
         forKey: "intelligence.narrative.enabled"
     ) {
@@ -205,6 +250,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var mutationError: String?
     @Published private(set) var mutationFailureAmbiguous = false
     @Published private(set) var pendingMutations: [PendingMutation] = []
+    @Published private(set) var executionChangeRejection: ExecutionChangeRejection?
     @Published private(set) var recoveryMessage: String?
     @Published private(set) var recoveryIssue: RecoveryIssue?
     @Published private(set) var isRecovering = false
@@ -2462,10 +2508,16 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             executionView = response.execution
+            if executionChangeRejection?.workoutID == workoutId {
+                executionChangeRejection = nil
+            }
             mutationError = nil
             pushExecutionToWatch()
             return true
         } catch {
+            // A transport failure leaves the body in the journal. Refresh the published list so
+            // the workout screen can show the change as queued instead of only an error.
+            refreshPendingMutations()
             handleMutation(error)
             return false
         }
@@ -2730,6 +2782,7 @@ final class AppModel: ObservableObject {
             refreshPendingMutations()
         }
         var message: String?
+        var pendingWatchPush = false
         for entry in entries {
             // A queued HealthKit import is always superseded: the next import carries today's
             // values, while the queued body may carry a date the server no longer accepts. Left
@@ -2766,6 +2819,12 @@ final class AppModel: ObservableObject {
                         entry, session: session
                     )
                     executionView = response.execution
+                    if executionChangeRejection?.workoutID == (entry.targetId ?? "") {
+                        executionChangeRejection = nil
+                    }
+                    // A replayed change has not been sent to the watch yet: the direct path
+                    // pushes after the server accepts it, but recovery bypassed that path.
+                    pendingWatchPush = !pushExecutionToWatch()
                 case .completeWorkout, .abandonWorkout:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = false
@@ -2776,6 +2835,15 @@ final class AppModel: ObservableObject {
                     let _: JournalReplayAck = try await client.replay(entry, session: session)
                 }
             } catch let api as APIError {
+                if entry.kind == .executionChange,
+                   !Self.isAmbiguous(api),
+                   !api.isAuthenticationFailure {
+                    executionChangeRejection = ExecutionChangeRejection(
+                        workoutID: entry.targetId ?? "",
+                        message: api.errorDescription
+                            ?? "The plan change could not be applied."
+                    )
+                }
                 if api.code == "idempotency_conflict" {
                     message = "A pending \(entry.kind.label.lowercased()) conflicts with a previous request. Discard it and refresh."
                     break
@@ -2793,6 +2861,11 @@ final class AppModel: ObservableObject {
         }
         recoveryMessage = message
         await refresh()
+        // If the active workout was not loaded when the change replayed, try the nudge once the
+        // authoritative read has restored it. A successful early push is not sent twice.
+        if pendingWatchPush {
+            _ = pushExecutionToWatch()
+        }
     }
 
     func retryPendingMutations() async {
@@ -2806,6 +2879,16 @@ final class AppModel: ObservableObject {
         recoveryMessage = nil
         mutationError = nil
         mutationFailureAmbiguous = false
+    }
+
+    /// Drops one queued plan change without touching the other pending operations.
+    func discardPendingMutation(_ entry: PendingMutation) {
+        client.discard(entry)
+        refreshPendingMutations()
+    }
+
+    func dismissExecutionChangeRejection() {
+        executionChangeRejection = nil
     }
 
     func clearRecoveryIssue() {
@@ -3334,11 +3417,12 @@ final class AppModel: ObservableObject {
     /// Nudges the watch with the new plan after a phone edit. Best effort and redundant by
     /// design: the watch also refreshes on foreground and after each set (contract §10.2), so a
     /// dropped payload costs one stale view, never a lost edit.
-    private func pushExecutionToWatch() {
+    @discardableResult
+    private func pushExecutionToWatch() -> Bool {
         // Push after an execution change, whether the watch owns capture or is read-only; the
         // watch mirrors the plan in both states and merges the execution view by watermark.
-        guard let workout = activeWorkout else { return }
-        watchPairing.pushExecution(workout, execution: executionView)
+        guard let workout = activeWorkout else { return false }
+        return watchPairing.pushExecution(workout, execution: executionView)
     }
 
     /// Takes logging back from the watch. The watch turns read-only on its next refresh.

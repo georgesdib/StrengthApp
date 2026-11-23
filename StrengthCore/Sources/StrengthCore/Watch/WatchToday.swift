@@ -60,6 +60,145 @@ public struct WatchPlanSummary: Equatable, Sendable {
     }
 }
 
+/// What today's readiness says, reduced to what a glance needs. The server owns every number
+/// here; this type only formats them for the wrist.
+public struct WatchReadinessSummary: Equatable, Sendable {
+    public let statusWord: String
+    /// The server's score, as a percentage. nil when the day has no score yet.
+    public let scoreText: String?
+    /// At most two drivers, heaviest first, e.g. "Sleep 7.4 h".
+    public let drivers: [String]
+
+    public init(statusWord: String, scoreText: String?, drivers: [String]) {
+        self.statusWord = statusWord
+        self.scoreText = scoreText
+        self.drivers = drivers
+    }
+
+    public static func make(_ score: ReadinessScore?) -> WatchReadinessSummary? {
+        guard let score else { return nil }
+        let drivers = (score.components ?? [])
+            .sorted { $0.weight > $1.weight }
+            .prefix(2)
+            .map { component in
+                let value = Self.valueText(component)
+                let name = Self.fieldLabel(component.field)
+                return value.isEmpty ? name : "\(name) \(value)"
+            }
+        return WatchReadinessSummary(
+            statusWord: Self.statusWord(score.status),
+            scoreText: score.score.map { "\(Int(($0 * 100).rounded()))%" },
+            drivers: Array(drivers)
+        )
+    }
+
+    /// The server's word, not a client-made judgement.
+    static func statusWord(_ status: String) -> String {
+        switch status {
+        case "ready": return "Ready"
+        case "insufficient": return "Not scored yet"
+        case "unknown": return "Not scored yet"
+        default: return status.capitalized
+        }
+    }
+
+    static func fieldLabel(_ field: String) -> String {
+        switch field {
+        case "sleep_hours", "sleep": return "Sleep"
+        case "hrv_ms", "hrv": return "HRV"
+        case "rhr_bpm", "rhr", "resting_hr": return "RHR"
+        case "bodyweight_kg", "bodyweight": return "Weight"
+        default:
+            return field
+                .split(separator: "_")
+                .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+                .joined(separator: " ")
+        }
+    }
+
+    static func valueText(_ component: ReadinessComponent) -> String {
+        switch component.field {
+        case "sleep_hours", "sleep":
+            return String(format: "%.1f h", component.value)
+        case "hrv_ms", "hrv":
+            return "\(Int(component.value.rounded())) ms"
+        case "rhr_bpm", "rhr", "resting_hr":
+            return "\(Int(component.value.rounded())) bpm"
+        case "bodyweight_kg", "bodyweight":
+            return String(format: "%.1f kg", component.value)
+        default:
+            return String(format: "%.1f", component.value)
+        }
+    }
+}
+
+/// The three questions an empty Today has to answer: how am I, why is there nothing, what now.
+public struct WatchTodayEmptyCopy: Equatable, Sendable {
+    public let title: String
+    public let detail: String?
+    public let action: String?
+    public let identifier: String
+
+    public init(title: String, detail: String?, action: String?, identifier: String) {
+        self.title = title
+        self.detail = detail
+        self.action = action
+        self.identifier = identifier
+    }
+}
+
+public enum WatchTodayCopy {
+    /// nil when the screen is not empty: a plan is there, or the screen is still working.
+    public static func empty(for state: WatchTodayState) -> WatchTodayEmptyCopy? {
+        switch state {
+        case .ready, .loading, .generating:
+            return nil
+        case .missingCredentials:
+            return WatchTodayEmptyCopy(
+                title: "Not paired",
+                detail: "This watch has no credential for your Home Server.",
+                action: "Open Strength on your iPhone to pair it.",
+                identifier: "unpaired"
+            )
+        case .noPlan:
+            return WatchTodayEmptyCopy(
+                title: "No workout today",
+                detail: "No workout has been requested for this date.",
+                action: "Request one on your iPhone.",
+                identifier: "no-plan"
+            )
+        case .phonePlan:
+            return WatchTodayEmptyCopy(
+                title: "Planned for iPhone",
+                detail: "Today's workout is set to run on your iPhone.",
+                action: "Start it there.",
+                identifier: "phone-plan"
+            )
+        case .unsupportedTarget:
+            return WatchTodayEmptyCopy(
+                title: "Not for Apple Watch",
+                detail: "This plan was issued for another device.",
+                action: nil,
+                identifier: "unsupported"
+            )
+        case .offline(_, let detail):
+            return WatchTodayEmptyCopy(
+                title: "Can't reach your Home Server",
+                detail: detail,
+                action: nil,
+                identifier: "offline"
+            )
+        case .unavailable(let text):
+            return WatchTodayEmptyCopy(
+                title: "Plan unavailable",
+                detail: text,
+                action: nil,
+                identifier: "unavailable"
+            )
+        }
+    }
+}
+
 public enum WatchTodayState: Equatable, Sendable {
     case loading
     case missingCredentials
@@ -150,10 +289,17 @@ public enum WatchTodayMapper {
 public struct WatchTodaySnapshot: Equatable, Sendable {
     public let state: WatchTodayState
     public let serverDate: String?
+    /// The readiness the plan read already carries, so no extra request is needed.
+    public let readiness: WatchReadinessSummary?
 
-    public init(state: WatchTodayState, serverDate: String?) {
+    public init(
+        state: WatchTodayState,
+        serverDate: String?,
+        readiness: WatchReadinessSummary? = nil
+    ) {
         self.state = state
         self.serverDate = serverDate
+        self.readiness = readiness
     }
 }
 
@@ -173,7 +319,8 @@ public final class WatchTodayService {
         let (server, planState) = try await (bootstrap, plan)
         return WatchTodaySnapshot(
             state: WatchTodayMapper.map(planState),
-            serverDate: server.serverDate
+            serverDate: server.serverDate,
+            readiness: WatchReadinessSummary.make(planState.readiness)
         )
     }
 }

@@ -27,7 +27,7 @@ progression and scoring. The client displays and records; it must not invent pla
 
 - Never commit a filled `StrengthAppUITests/LiveConfig.swift`; restore it after a live run.
 - Never read, commit or transmit `private/`, `data/`, real training exports, health data, tokens or pairing codes.
-- Record every build/test surprise that costs a retry in `private/BUILD-TEST-QUIRKS.md` in the same turn; read it before an iOS build/test run.
+- Record every build/test surprise that costs a retry in the matching file under `private/quirks/` in the same turn; read `private/BUILD-TEST-QUIRKS.md` plus the topic file for the run before an iOS build/test run.
 - Keep notification/live behaviour honest: simulator success is not physical-device proof.
 - Do not add a Watch app or change scientific training rules without explicit approval.
 

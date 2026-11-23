@@ -7,7 +7,7 @@
     <key>NSLocalNetworkUsageDescription</key>
     <string>StrengthApp connects to your own strength-coach server on your local network.</string>
     <key>NSHealthShareUsageDescription</key>
-    <string>StrengthApp reads your heart-rate variability, resting heart rate, bodyweight, workouts and heart rate to show readiness, activity and fitness trends. These values stay on your own strength-coach server.</string>
+    <string>StrengthApp reads your heart-rate variability, resting heart rate, bodyweight, workouts, heart rate, active energy, VO2max, steps and standing time to show readiness, activity and fitness trends. These values stay on your own strength-coach server.</string>
     <key>StrengthBuildStamp</key>
     <string>$(STRENGTH_BUILD_STAMP)</string>
     <key>NSSupportsLiveActivities</key>

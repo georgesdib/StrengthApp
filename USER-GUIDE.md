@@ -168,6 +168,10 @@ The timer uses the prescription's rest seconds when available.
 
 ### Lock Screen and Control Center
 
+A rest that starts on the Apple Watch is mirrored to the phone: the same countdown appears on the
+Lock Screen and in the Dynamic Island, with **Rest on Apple Watch** instead of the buttons, because
+the wrist owns the interval and ends it.
+
 While a rest is running, the phone shows a Live Activity countdown on the Lock Screen and in the
 Dynamic Island. The countdown is drawn by the system from the rest's end time, so it stays correct
 with the app closed. **+15 s** and **Skip** are buttons on the Lock Screen card and in the expanded
@@ -266,9 +270,17 @@ HealthKit readiness is optional and off by default. When enabled, the app reads 
 - bodyweight.
 
 Manual readiness takes precedence over HealthKit, which takes precedence over imported
-readiness. The app never writes to HealthKit and does not import sleep or workouts. The recovery
-series is backfilled once from Health (up to five years) and then updated nightly; the import runs
-on an app refresh and after enabling HealthKit.
+readiness. The app never writes to HealthKit and does not import sleep. The recovery series is
+backfilled once from Health (up to five years) and then updated nightly; the import runs on an app
+refresh and after enabling HealthKit.
+
+A separate, opt-in activity sync sends the workouts, workout heart rate, active energy, VO₂max
+estimates, steps per day and sitting time the app reads from Health. Steps and sitting travel as
+**one value per completed calendar week (Monday to Sunday)**: the phone averages those seven days
+and sends the mean, because both are periodic assessments rather than daily state. Sitting is derived as 24 hours
+minus Apple Watch stand time, so it only exists for days a watch was worn — an iPhone-only athlete
+records no sitting value at all, which is missing rather than zero. Neither value changes a load,
+a prescription or a readiness score.
 
 **Workout heart rate is read only on Apple Watch**, for the live session display and the one
 saved HealthKit workout. It is not used for readiness, fatigue, progression or prescriptions.
@@ -374,10 +386,31 @@ network the sets queue on the watch and sync when it reconnects.
 Requested a workout for the wrong target? The ready card on Today offers **Request another
 workout**, which supersedes the pending plan; a watch only drops the old plan at its next refresh.
 
+**Today on the watch.** The top line answers how you are: the date, the server's readiness status
+and score, and up to two of the drivers it reports (sleep, HRV, resting heart rate). The watch shows
+those numbers; it never computes them. **Not scored yet** means the day has no score — log readiness
+on the iPhone.
+
+When there is nothing to start, the screen says why and what fixes it: **No workout today** (request
+one on the iPhone), **Planned for iPhone** (start it there), **Not for Apple Watch**, **Not paired**
+(open Strength on the iPhone to pair), or **Can't reach your Home Server** with the host that was
+tried. The gear opens **Settings**.
+
+**Home scenes on the watch.** The watch runs the start and end Home scene you chose under
+**Settings → Workout automation** on the iPhone. The choice reaches the watch shortly after you pick
+it. **Watch Settings** (the gear on Today) lists the chosen start and end scene, the result of the
+last run, and a **Test start scene** button. If a scene fails when a session starts, finishes or is
+discarded, the watch names the case on that screen instead of failing silently: **No Home access on
+Apple Watch** (allow Home access when the watch asks, or check the app's HomeKit entitlement),
+**Home … not on watch**, **Scene … not in …**, or **HomeKit: …** with the system error.
+
 While the watch owns the session the phone shows **Logged on Apple Watch** and does not accept sets,
-form ratings or velocity. Use the phone to edit the plan; an edit reaches the watch at its next idle
-point, never mid-set. **Take over logging** asks for confirmation, moves the session to the phone
-and leaves the watch read-only; sets the watch already recorded stay in the session.
+form ratings or velocity. Use the phone to edit the plan; the change is queued until the server
+accepts it, then reaches the watch at its next idle point, never mid-set. If the watch has already
+logged sets for that exercise, the server refuses the change and the workout screen says so; those
+sets stay recorded, and the phone marks any set that could not be attached to its plan item.
+**Take over logging** asks for confirmation, moves the session to the phone and leaves the watch
+read-only; sets the watch already recorded stay in the session.
 
 If the server address changes, save the settings and let the app recheck. If you change to a
 different server/database, pair again.

@@ -50,6 +50,19 @@ struct TodayView: View {
                     }
                 }
 
+                if let rejection = model.executionChangeRejection {
+                    Section("Plan change not applied") {
+                        Label(rejection.message, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                        Text("The workout kept the sets already recorded.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button("Dismiss") {
+                            model.dismissExecutionChangeRejection()
+                        }
+                    }
+                }
+
                 if case .failed(let message) = model.prescriptionState,
                    lastIssueKey != nil {
                     Section {

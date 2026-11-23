@@ -143,9 +143,11 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   work offline, configuration is cached for the app session, e1RM/history are fetched on entry,
   with explicit refresh.
 
-HealthKit is read-only, off by default and limited to HRV, resting heart rate and bodyweight. There is no
-workout-HR import, review/rubric or Apple Intelligence/PCC UI. Execution telemetry is queued through
-the Phase 4 offline capture path; plan edits remain online-only.
+HealthKit is read-only and off by default. Readiness reads HRV, resting heart rate and bodyweight;
+the separate, opt-in activity sync reads workouts, workout heart rate, active energy, VO₂max
+estimates, steps per day and sitting time (derived from Apple Watch stand time) for the last
+completed calendar week. There is no sleep import, review/rubric or Apple Intelligence/PCC UI. Execution telemetry is
+queued through the Phase 4 offline capture path; plan edits remain online-only.
 
 ## Storage and networking
 
@@ -227,7 +229,7 @@ xcodebuild -list -project StrengthApp.xcodeproj
 
 # Build the app for a simulator. This also builds and embeds StrengthWatch.app.
 xcodebuild -project StrengthApp.xcodeproj -scheme StrengthApp \
-  -destination 'platform=iOS Simulator,name=iPhone 17' build
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' build
 
 # Build the watch app on its own (use an available watch simulator id).
 xcodebuild -project StrengthApp.xcodeproj -scheme StrengthWatch \
@@ -235,11 +237,11 @@ xcodebuild -project StrengthApp.xcodeproj -scheme StrengthWatch \
 
 # Run every unit test.
 xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
-  -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:StrengthAppTests
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' -only-testing:StrengthAppTests
 
 # Run one test while iterating.
 xcodebuild test -project StrengthApp.xcodeproj -scheme StrengthApp \
-  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' \
   -only-testing:StrengthAppTests/Phase2AppModelTests/testIssueStartSetAndCompleteFlow
 ```
 
@@ -249,9 +251,9 @@ what CI runs. Set `WATCH_DESTINATION` to override the first available Apple Watc
 Install and launch the built app by hand (the UI test does this itself when it is enabled):
 
 ```bash
-xcrun simctl boot 'iPhone 17'
-xcrun simctl install 'iPhone 17' <DerivedData>/Build/Products/Debug-iphonesimulator/StrengthApp.app
-xcrun simctl launch 'iPhone 17' com.georgesdibpersonalteam.StrengthApp
+xcrun simctl boot 'iPhone 18 Pro'
+xcrun simctl install 'iPhone 18 Pro' <DerivedData>/Build/Products/Debug-iphonesimulator/StrengthApp.app
+xcrun simctl launch 'iPhone 18 Pro' com.georgesdibpersonalteam.StrengthApp
 ```
 
 Install on the paired physical iPhone (device build plus CoreDevice):
@@ -268,19 +270,26 @@ ignored); set `IPHONE_UDID` to override. It is the phone counterpart of
 `scripts/install-watch.sh`, which builds the phone app and installs its embedded watch app on the
 paired watch.
 
-Two failure modes that are environmental rather than code:
+Three failure modes that are environmental rather than code:
 
 - **"Test crashed with signal kill before establishing connection"** means the simulator session
   is wedged, usually after a test run was killed. `xcrun simctl shutdown all` then boot the device
   again, or run on a different simulator. A clean device always works.
+- **"No profiles for 'com.georgesdibpersonalteam.StrengthApp(.watchkitapp)' were found"** means the
+  development profiles lapsed or were pruned on this Mac; the Xcode account is fine and nothing in
+  the project needs changing. `scripts/install-iphone.sh` builds with
+  `-allowProvisioningUpdates`, which reissues them from the portal, so re-run the script rather
+  than editing signing settings. Building for a device without a signed-in Xcode account cannot be
+  fixed this way.
 - **A non-interactive shell has no pseudo-terminal**, which `xcodebuild test` needs. Wrap the
   command: `script -q /dev/null xcodebuild test …` (macOS). The build alone does not need it.
 
-The physical-device Phase 3A checklist and rollback steps are in
+The physical-device Phase 3A checklist and rollback steps are indexed in
 [`DEVICE-ACCEPTANCE.md`](DEVICE-ACCEPTANCE.md). The Phase 6.2 watch credential handshake,
-read-only Today and revocation script is in [`WATCH-ACCEPTANCE.md`](WATCH-ACCEPTANCE.md); it is
-owner-run and has not been performed. The server-side backup, migration and pairing-code runbook
-is in [the canonical iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.3.
+read-only Today and revocation script is indexed in
+[`WATCH-ACCEPTANCE.md`](WATCH-ACCEPTANCE.md); the 6.7 record is owner-confirmed 2026-11-14.
+The server-side backup, migration and pairing-code runbook is in
+[the canonical iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) §13.3.
 
 ### Running the live UI tests
 
@@ -315,7 +324,7 @@ that only types when the field "looks wrong" will happily pair against the real 
 value before launching instead:
 
 ```bash
-xcrun simctl spawn 'iPhone 17' defaults write com.georgesdibpersonalteam.StrengthApp \
+xcrun simctl spawn 'iPhone 18 Pro' defaults write com.georgesdibpersonalteam.StrengthApp \
   ios.serverURL "http://127.0.0.1:8001"
 ```
 
@@ -372,6 +381,6 @@ local gates build with a 27.0 minimum and execute on 27.2.
 
 ## Real-device acceptance
 
-Phase 1 and Phase 2 completed 2026-11-07; the records are in
+Phase 1 and Phase 2 completed 2026-11-07; their records are indexed in
 [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md). Phase 3 needs its own approved contract and has not
 started.

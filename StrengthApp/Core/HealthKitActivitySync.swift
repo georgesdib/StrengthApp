@@ -31,6 +31,23 @@ struct HealthKitActivitySyncReport: Equatable {
     }
 }
 
+/// Stable identity of the backend database an activity sync writes to.
+///
+/// The pairing device id is issued by the backend database, so it is unchanged when the app moves
+/// between its Home and Away routes to the same database, and different once the phone pairs with
+/// another database. A base URL cannot stand in for this: Home and Away are two URLs for one
+/// database, so treating a route change as a new backend would needlessly discard the cursors.
+/// The URL is a defensive fallback for an unpaired session, which activity sync does not use.
+enum HealthKitActivityServerIdentity {
+    static func identity(for session: IOSSession) -> String {
+        if let deviceID = session.deviceID?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !deviceID.isEmpty {
+            return "device:\(deviceID)"
+        }
+        return "url:\(session.baseURL.absoluteString)"
+    }
+}
+
 /// Orchestrates one incremental HealthKit activity sync.
 ///
 /// The server identifies rejected items by key. Those keys are quarantined and the cursor advances
@@ -48,6 +65,8 @@ struct HealthKitActivitySync {
     }
 
     func run(session: IOSSession, at now: Date = Date()) async throws -> HealthKitActivitySyncReport {
+        // Scope the persisted cursors to the backend before reading or committing any of them.
+        activity.prepare(for: HealthKitActivityServerIdentity.identity(for: session))
         let batch = try await activity.fetchBatch(now: now)
         var report = HealthKitActivitySyncReport()
         report.hadActivity = !batch.isEmpty

@@ -238,6 +238,137 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.watchPairing.link)
     }
 
+    func testOfflineExecutionChangeIsQueuedAndVisible() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(executionChangeToday().utf8))
+            case "/api/ios/v1/workouts/workout-1/execution":
+                throw URLError(.notConnectedToInternet)
+            default:
+                return (404, Data())
+            }
+        }
+        let journal = MutationJournal(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("execution-change-\(UUID().uuidString).json"))
+        let (model, suite) = executionChangeModel(transport: transport, journal: journal)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+        XCTAssertTrue(model.isMirroringWatchSession)
+
+        let recorded = await model.recordExecutionChange(
+            workoutId: "workout-1",
+            planItemIndex: 0,
+            exerciseId: "bench_press",
+            idempotencyKey: "change-offline"
+        )
+
+        XCTAssertFalse(recorded)
+        XCTAssertEqual(model.pendingExecutionChanges.count, 1)
+        XCTAssertEqual(model.pendingExecutionChanges.first?.targetId, "workout-1")
+        XCTAssertNil(model.executionChangeRejection)
+    }
+
+    func testReplayedExecutionChangePushesThePlanAndFlagsOffPlanSets() async throws {
+        let journal = MutationJournal(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("execution-change-\(UUID().uuidString).json"))
+        try journal.record(pendingExecutionChange())
+        let connectivity = RecordingWatchConnectivity()
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(executionChangeToday(staleSet: true).utf8))
+            case "/api/ios/v1/workouts/workout-1/execution":
+                return (200, Data(executionChangeResponse.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, suite) = executionChangeModel(
+            transport: transport, journal: journal, connectivity: connectivity
+        )
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+
+        XCTAssertEqual(model.executionView?.watermark, 1)
+        XCTAssertTrue(model.pendingExecutionChanges.isEmpty)
+        XCTAssertEqual(model.unlinkedWatchSets.count, 1)
+        XCTAssertEqual(model.unlinkedWatchSets.first?.exerciseId, "competition_squat")
+
+        let execution = connectivity.userInfos.compactMap { $0["execution"] as? String }
+        XCTAssertEqual(execution.count, 1)
+        let json = try XCTUnwrap(execution.first)
+        let payload = try XCTUnwrap(RemoteExecutionPayload.decode(json))
+        XCTAssertEqual(payload.workoutId, "workout-1")
+        XCTAssertEqual(payload.planRevision, 1)
+        XCTAssertEqual(payload.execution?.substitutions.first?.exerciseId, "bench_press")
+    }
+
+    func testRejectedExecutionChangeIsKeptForTheWorkoutScreen() async throws {
+        let journal = MutationJournal(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("execution-change-\(UUID().uuidString).json"))
+        try journal.record(pendingExecutionChange())
+        let connectivity = RecordingWatchConnectivity()
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(executionChangeToday().utf8))
+            case "/api/ios/v1/workouts/workout-1/execution":
+                return (400, Data(#"{"code":"validation_failed","error":"cannot substitute a plan item after sets have been logged"}"#.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, suite) = executionChangeModel(
+            transport: transport, journal: journal, connectivity: connectivity
+        )
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+
+        XCTAssertEqual(model.executionChangeRejection?.workoutID, "workout-1")
+        XCTAssertTrue(model.executionChangeRejection?.message.contains("cannot substitute") == true)
+        XCTAssertTrue(model.pendingExecutionChanges.isEmpty)
+        XCTAssertFalse(connectivity.userInfos.contains { $0["execution"] != nil })
+    }
+
+    func testConflictedExecutionChangeIsNotOfferedAsQueued() async throws {
+        let journal = MutationJournal(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("execution-change-\(UUID().uuidString).json"))
+        let entry = pendingExecutionChange()
+        try journal.record(entry)
+        try journal.markConflict(entry)
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(executionChangeToday().utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, suite) = executionChangeModel(transport: transport, journal: journal)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+        // A conflict cannot be replayed, so it must not be presented as a queued change with a retry.
+        XCTAssertTrue(model.pendingExecutionChanges.isEmpty)
+        XCTAssertEqual(model.conflictedExecutionChanges.count, 1)
+        XCTAssertEqual(model.conflictedExecutionChanges.first?.targetId, "workout-1")
+    }
+
     func testPairingInputErrorsDoNotCreateADevice() async {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -312,12 +443,15 @@ private final class RecordingWatchConnectivity: WatchConnectivitySession {
     var activationState: WCSessionActivationState = .activated
     var receivedApplicationContext: [String: Any] = [:]
     private(set) var updates: [[String: Any]] = []
+    private(set) var userInfos: [[String: Any]] = []
 
     func activate() {}
     func updateApplicationContext(_ context: [String: Any]) throws {
         updates.append(context)
     }
-    func transferUserInfo(_ userInfo: [String: Any]) {}
+    func transferUserInfo(_ userInfo: [String: Any]) {
+        userInfos.append(userInfo)
+    }
 
     func sendMessage(
         _ message: [String: Any],
@@ -355,3 +489,58 @@ private final class RecordingWatchConnectivity: WatchConnectivitySession {
         model.pairingCodeText = "1234 5678"
         model.pairingLabelText = "Gym iPhone"
     }
+
+@MainActor
+private func executionChangeModel(
+    transport: HTTPTransport,
+    journal: MutationJournal? = nil,
+    connectivity: WatchConnectivitySession? = nil
+) -> (AppModel, String) {
+    let suite = "com.georgesdibpersonalteam.StrengthApp.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    let store = PairedStore(defaults: defaults)
+    store.serverURL = "http://127.0.0.1:8000"
+    store.device = PairingDevice(deviceID: "device-1", label: "iPhone")
+    let tokens = InMemoryTokenStore(token: "token-abc")
+    let capture = OfflineCaptureStore(fileURL: FileManager.default.temporaryDirectory
+        .appendingPathComponent("execution-change-capture-\(UUID().uuidString).json"))
+    let model = AppModel(
+        client: IOSAPIClient(transport: transport, journal: journal),
+        tokens: tokens,
+        store: store,
+        offlineStore: capture,
+        watchConnectivity: connectivity
+    )
+    return (model, suite)
+}
+
+private let executionChangeResponse = #"{"execution":{"workout_id":"workout-1","watermark":1,"substitutions":[{"event_id":1,"kind":"substitution","plan_item_index":0,"exercise_id":"bench_press","reps_low":3,"reps_high":5,"rir_target":2,"prefill_load_kg":null}],"additions":[]}}"#
+
+private func executionChangeToday(staleSet: Bool = false) -> String {
+    var workout = Fixtures.watchOwnedWorkout.replacingOccurrences(
+        of: "\"status\": \"in_progress\",",
+        with: "\"status\": \"in_progress\", \"plan_revision\": 1,"
+    )
+    if staleSet {
+        workout = workout.replacingOccurrences(
+            of: "\"sets\": [],",
+            with: "\"sets\": [{\"set_id\": 1, \"exercise_id\": \"competition_squat\", \"set_index\": 1, \"load_kg\": 140.0, \"reps\": 3, \"rir\": 2, \"source\": \"device\"}],"
+        )
+    }
+    return #"{"date":"2026-11-07","readiness":null,"readiness_score":null,"active_workout":"# + workout + "}"
+}
+
+private func pendingExecutionChange() -> PendingMutation {
+    PendingMutation(
+        operationId: "change-1",
+        deviceId: "device-1",
+        serverURL: "http://127.0.0.1:8000",
+        kind: .executionChange,
+        targetId: "workout-1",
+        path: "api/ios/v1/workouts/workout-1/execution",
+        bodyData: Data(#"{"event_id":"change-1","change":"substitution","plan_item_index":0,"exercise_id":"bench_press","prefill_requested":false}"#.utf8),
+        createdAt: Date(),
+        state: .pending
+    )
+}

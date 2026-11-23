@@ -44,6 +44,11 @@ final class WatchHealthKitRecorder: NSObject, WatchLivenessAnchor, HealthKitSavi
         if let heartRate = HKQuantityType.quantityType(forIdentifier: .heartRate) {
             read.insert(heartRate)
         }
+        // The live data source only supplies active energy for the saved workout when the app
+        // may read it; without this the workout records duration and HR but no calories.
+        if let activeEnergy = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
+            read.insert(activeEnergy)
+        }
         do {
             try await healthStore.requestAuthorization(toShare: share, read: read)
         } catch {

@@ -65,6 +65,11 @@ The plan push carries the frozen plan and the current execution view. If the pho
 unreachable, the watch shows the waiting/timeout copy and keeps its queued work; it does not
 start a session offline. Offline-on-both-devices remains a documented limitation.
 
+When a phone-authored execution change was queued while offline, the phone replays it on the
+next foreground and pushes the accepted execution view to the watch after the replay. The active
+workout shows the change as pending until then, and shows a terminal explanation when the server
+refuses it (for example, because the watch already logged sets for that exercise).
+
 ## Code map
 
 - `StrengthCore/Execution/WatchRelayModels.swift` — envelope and coding.

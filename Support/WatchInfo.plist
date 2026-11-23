@@ -20,7 +20,7 @@
         <true/>
     </dict>
     <key>NSHealthShareUsageDescription</key>
-    <string>Strength reads your heart rate during a watch workout so the screen stays awake while you log sets.</string>
+    <string>Strength reads your heart rate and active energy during a watch workout so the screen stays awake while you log sets and the saved workout includes your calories.</string>
     <key>NSHealthUpdateUsageDescription</key>
     <string>Strength saves one strength-training workout for the session you log on the watch.</string>
 </dict>

@@ -27,7 +27,7 @@ app presents and records that authority.
   implemented on both sides, including phone-committed watch writes, optimistic offline
   substitutions/additions, the dose-aware catalogue and durable set origin. Read
   [the canonical plan](https://github.com/georgesdib/strength-app/blob/offline-execution/docs/plans/UNIFIED-OFFLINE-EXECUTION.md);
-  it is the source of truth. Physical acceptance was closed by owner decision; release is app-first.
+  it is the source of truth. Physical acceptance was closed by owner decision; the server is deployed at `34e7f29` and the app build remains.
 - [Offline execution client implementation](OFFLINE-EXECUTION.md) — what C1/C2 changed in the app,
   the plan-only watch cache, the ledger, merge rules and the follow-up findings.
 

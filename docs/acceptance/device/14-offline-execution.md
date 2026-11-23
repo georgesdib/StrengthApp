@@ -30,8 +30,9 @@ for:
 
 ## Release
 
-App-first per the canonical plan §20: ship the app build, smoke-test phone start/logging, then
-merge/deploy the server and verify the watch/offline surfaces. Deployed-commit and app-build
-verification are recorded in the release notes, not here.
+The server was deployed first at `34e7f29` on 2026-11-23 (migrations `0076`–`0080`, service
+active). The app build remains: ship phone and watch from the same build, then smoke-test phone
+start/logging and the watch offline/late-sync path against the deployed server. Deployed-commit and
+app-build verification are recorded in the release notes, not here.
 
 Owner sign-off: 2026-11-23.

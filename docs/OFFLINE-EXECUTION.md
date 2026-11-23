@@ -121,7 +121,7 @@ change is a phone-side view hint.
 
 **Closed 2026-11-23.** Physical-device acceptance was closed by owner decision
 ([record](acceptance/device/14-offline-execution.md)); no separate §16 matrix run is claimed.
-Release is app-first: ship the app build, then deploy the server and verify.
+The server is deployed at `34e7f29`; the app build remains. Keep the old-app compatibility window short: until the new app ships, the old app cannot request a new plan or substitute.
 
 Accepted limitations:
 

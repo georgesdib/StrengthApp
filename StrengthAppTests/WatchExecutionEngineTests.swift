@@ -1385,6 +1385,100 @@ final class WatchExecutionEngineTests: XCTestCase {
      "received_at":"2026-11-07T16:00:01+00:00"}
     """#
 
+    func testCorrectLastSetUsesTheMappedServerIdentity() async throws {
+        let workout = try decode(Self.watchWorkout)
+        _ = try store.setActiveWorkout(workout)
+        _ = try store.setSession(WatchSessionRecord(
+            sessionUUID: "session-1",
+            startedAt: clock,
+            eventSetIDs: ["local-1": 42],
+            lastConfirmedLocalSetID: "local-1"
+        ))
+        var seenPath: String?
+        var seenSetID: Int?
+        let transport = AsyncStubTransport { request in
+            seenPath = request.url?.path
+            let object = request.httpBody.flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            seenSetID = object?["set_id"] as? Int
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        try engine.restore()
+        let stop = await engine.correctLastSet(
+            loadKg: 145, reps: 3, rir: 1, velocityMps: nil, session: session()
+        )
+        XCTAssertEqual(stop, .allSent)
+        XCTAssertEqual(seenPath, "/api/ios/v1/workouts/workout-1/update-set")
+        XCTAssertEqual(seenSetID, 42)
+    }
+
+    func testRemoveLastSetUsesTheMappedServerIdentity() async throws {
+        let workout = try decode(Self.watchWorkout)
+        _ = try store.setActiveWorkout(workout)
+        _ = try store.setSession(WatchSessionRecord(
+            sessionUUID: "session-1",
+            startedAt: clock,
+            eventSetIDs: ["local-1": 42],
+            lastConfirmedLocalSetID: "local-1"
+        ))
+        var seenPath: String?
+        var seenSetID: Int?
+        let transport = AsyncStubTransport { request in
+            seenPath = request.url?.path
+            let object = request.httpBody.flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            seenSetID = object?["set_id"] as? Int
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        try engine.restore()
+        let stop = await engine.removeLastSet(session: session())
+        XCTAssertEqual(stop, .allSent)
+        XCTAssertEqual(seenPath, "/api/ios/v1/workouts/workout-1/remove-set")
+        XCTAssertEqual(seenSetID, 42)
+    }
+
+    func testLateCorrectionIsRefusedWithoutRetry() async throws {
+        let workout = try decode(Self.watchWorkout)
+        _ = try store.setActiveWorkout(workout)
+        _ = try store.setSession(WatchSessionRecord(
+            sessionUUID: "session-1",
+            startedAt: clock,
+            eventSetIDs: ["local-1": 42],
+            lastConfirmedLocalSetID: "local-1"
+        ))
+        let transport = AsyncStubTransport { _ in
+            (409, Data(#"{"error":"set was removed","code":"late_event_rejected"}"#.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        try engine.restore()
+        let stop = await engine.correctLastSet(
+            loadKg: 145, reps: 3, rir: 1, velocityMps: nil, session: session()
+        )
+        XCTAssertEqual(stop, .conflict(code: "late_event_rejected", message: "set was removed"))
+    }
+
+    func testClosedReconciliationWindowIsRefusedWithoutRetry() async throws {
+        let workout = try decode(Self.watchWorkout)
+        _ = try store.setActiveWorkout(workout)
+        _ = try store.setSession(WatchSessionRecord(
+            sessionUUID: "session-1",
+            startedAt: clock,
+            eventSetIDs: ["local-1": 42],
+            lastConfirmedLocalSetID: "local-1"
+        ))
+        let transport = AsyncStubTransport { _ in
+            (409, Data(#"{"error":"window closed","code":"reconciliation_window_closed"}"#.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        try engine.restore()
+        let stop = await engine.removeLastSet(session: session())
+        XCTAssertEqual(stop, .conflict(code: "reconciliation_window_closed", message: "window closed"))
+    }
+
     /// The shared workout fixture, owned by this watch rather than the phone. The phone suites
     /// need a phone-owned copy because mirror mode blocks their writes.
     private static var watchWorkout: String {

@@ -904,11 +904,20 @@ final class WatchPairingCoordinator: ObservableObject {
     /// with the request is not used for execution writes; the watch keeps it for reads only.
     private func relay(_ request: WatchRelayRequest) async -> WatchRelayResponse {
         do {
-            let _ = try IOSAPIClient.validatedBaseURL(request.baseURL)
-            // The phone is the only writer. Its own session commits the operation; the watch
-            // token is kept only for read-only surfaces.
-            guard let commitSession = homeSession else {
-                throw APIError.transport("The iPhone session is unavailable.")
+            let baseURL = try IOSAPIClient.validatedBaseURL(request.baseURL)
+            let watchSession = IOSSession(
+                baseURL: baseURL, token: request.token, deviceID: request.deviceID
+            )
+            // The phone is the only writer. Its own session commits execution writes; the
+            // watch token is kept only for reads such as the bootstrap clock.
+            let commitSession: IOSSession
+            if request.operation == .bootstrap {
+                commitSession = watchSession
+            } else {
+                guard let phoneSession = homeSession else {
+                    throw APIError.transport("The iPhone session is unavailable.")
+                }
+                commitSession = phoneSession
             }
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -925,7 +934,7 @@ final class WatchPairingCoordinator: ObservableObject {
             }
             switch request.operation {
             case .bootstrap:
-                let value = try await client.bootstrap(session: commitSession)
+                let value = try await client.bootstrap(session: watchSession)
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
                 )

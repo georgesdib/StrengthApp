@@ -2315,7 +2315,6 @@ final class AppModel: ObservableObject {
                     recoveryIssue = .prescriptionUnavailable(
                         reason: "This plan has no execution id. Request a fresh workout."
                     )
-                    await refresh()
                 } else if ["plan_consumed", "plan_expired", "plan_superseded"].contains(code) {
                     prescriptionState = .idle
                     clearCachedPlan()

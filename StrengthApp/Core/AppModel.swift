@@ -3647,9 +3647,14 @@ final class AppModel: ObservableObject {
               let workout = activeWorkout,
               workout.status == "completed",
               let deviceID = watchPairing.watchDeviceID,
-              status.workoutId == workout.workoutId,
-              status.pendingCount == 0,
-              status.finishAcknowledged else {
+              status.pendingCount == 0 else {
+            return
+        }
+        // The watch either finished this workout or has no session at all. A status naming a
+        // different workout must not settle this one.
+        let isThisWorkout = status.workoutId == workout.workoutId
+        let hasNoWorkout = status.workoutId == nil
+        guard (isThisWorkout && status.finishAcknowledged) || hasNoWorkout else {
             return
         }
         _ = try? await client.reconcileDevice(

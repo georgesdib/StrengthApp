@@ -1030,7 +1030,7 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertNil(relaunched.activeWorkout)
     }
 
-    func testExpiredOfflineOperationIsNeverSent() async throws {
+    func testOldLedgerEntryIsSentInsteadOfBeingAgedOut() async throws {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let cached = try decoder.decode(
@@ -1075,11 +1075,12 @@ final class Phase2AppModelTests: XCTestCase {
         )
         defer { defaults.removePersistentDomain(forName: suite) }
         await model.onLaunch()
-        XCTAssertEqual(model.pendingOfflineOperations.first?.state, .expired)
-        XCTAssertTrue(transport.requests.allSatisfy {
-            $0.url?.path != "/api/ios/v1/workouts/workout-1/sets"
+        // Ledger semantics: an unacknowledged entry is never aged out. The old entry is offered
+        // to the server; this stub answers 404, so it stays unresolved rather than expiring.
+        XCTAssertNotEqual(model.pendingOfflineOperations.first?.state, .expired)
+        XCTAssertTrue(transport.requests.contains {
+            $0.url?.path == "/api/ios/v1/workouts/workout-1/sets"
         })
-        XCTAssertFalse(model.offlineSyncError?.isEmpty ?? true)
     }
 
     func testTopSetAndProductivityEncodeForTheServer() throws {

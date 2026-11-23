@@ -34,10 +34,23 @@ public struct WorkoutReconciliation: Decodable, Equatable {
     public let pendingDevices: [String]
     public let closesAt: String?
 
+    private enum CodingKeys: String, CodingKey {
+        case state
+        case pendingDevices
+        case closesAt
+    }
+
     public init(state: String, pendingDevices: [String] = [], closesAt: String? = nil) {
         self.state = state
         self.pendingDevices = pendingDevices
         self.closesAt = closesAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        state = try container.decode(String.self, forKey: .state)
+        pendingDevices = try container.decodeIfPresent([String].self, forKey: .pendingDevices) ?? []
+        closesAt = try container.decodeIfPresent(String.self, forKey: .closesAt)
     }
 
     public var isOpen: Bool { state == "open" }

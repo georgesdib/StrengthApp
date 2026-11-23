@@ -307,7 +307,10 @@ public final class OfflineCaptureStore {
                 workoutId: workoutId,
                 body: .executionEvents(events),
                 createdAt: now,
-                deviceSeq: sequence
+                deviceId: capture.session?.deviceId,
+                deviceSeq: sequence,
+                clockOffsetSeconds: capture.session?.clockOffsetSeconds,
+                planWatermark: capture.session?.execution?.watermark
             ))
         }
     }
@@ -413,6 +416,13 @@ public final class OfflineCaptureStore {
         if entry.ackState == nil {
             entry.ackState = .pending
         }
+        if entry.deviceId == nil { entry.deviceId = capture.session?.deviceId }
+        if entry.clockOffsetSeconds == nil {
+            entry.clockOffsetSeconds = capture.session?.clockOffsetSeconds
+        }
+        if entry.planWatermark == nil {
+            entry.planWatermark = capture.session?.execution?.watermark
+        }
         capture.operations.append(entry)
         try saveUnlocked(capture)
         return try loadUnlocked()
@@ -459,9 +469,38 @@ public final class OfflineCaptureStore {
                 workoutId: workoutId,
                 body: .executionEvents(events),
                 createdAt: now(),
-                deviceSeq: sequence
+                deviceId: capture.session?.deviceId,
+                deviceSeq: sequence,
+                clockOffsetSeconds: capture.session?.clockOffsetSeconds,
+                planWatermark: capture.session?.execution?.watermark
             ))
         }
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Rewrites one queued set's index after the server reports a collision. The rest of the
+    /// request is untouched, so its idempotency identity keeps the same payload apart from the
+    /// index that must change.
+    public func replaceAddSetIndex(
+        operationId: String,
+        setIndex: Int
+    ) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        guard let index = capture.operations.firstIndex(where: {
+            $0.operationId == operationId
+        }) else {
+            throw OfflineCaptureStoreError.operationNotFound(operationId)
+        }
+        guard case .addSet(var body) = capture.operations[index].body else {
+            throw OfflineCaptureStoreError.invalidOperation(
+                "Only an add-set operation has a set index."
+            )
+        }
+        body = body.withSetIndex(setIndex)
+        capture.operations[index].body = .addSet(body)
         try saveUnlocked(capture)
         return try loadUnlocked()
     }

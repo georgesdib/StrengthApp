@@ -39,6 +39,9 @@ public struct ActiveSet: Codable, Equatable, Sendable {
 
 public struct WatchSessionRecord: Codable, Equatable, Sendable {
     public var sessionUUID: String
+    /// The server device that owns this execution, as provenance for the ledger. Optional so a
+    /// record written before the ledger still decodes.
+    public var deviceId: String?
     public var startedAt: Date
     /// The plan revision the snapshot was built from. The watch never writes plan content.
     public var planRevision: Int?
@@ -63,6 +66,7 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
 
     public init(
         sessionUUID: String,
+        deviceId: String? = nil,
         startedAt: Date,
         planRevision: Int? = nil,
         clockOffsetSeconds: TimeInterval? = nil,
@@ -76,6 +80,7 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         execution: ExecutionView? = nil
     ) {
         self.sessionUUID = sessionUUID
+        self.deviceId = deviceId
         self.startedAt = startedAt
         self.planRevision = planRevision
         self.clockOffsetSeconds = clockOffsetSeconds

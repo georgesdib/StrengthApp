@@ -3177,7 +3177,9 @@ final class AppModel: ObservableObject {
                 workoutId: workout.workoutId,
                 body: .addSet(request),
                 createdAt: Date(),
-                localSetId: localId
+                localSetId: localId,
+                deviceId: device?.deviceID,
+                planWatermark: executionView?.watermark
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
             _ = apply(.operationQueued(updated))
@@ -3225,7 +3227,8 @@ final class AppModel: ObservableObject {
             )),
             createdAt: startedAt,
             deviceId: device?.deviceID,
-            clockOffsetSeconds: 0
+            clockOffsetSeconds: 0,
+            planWatermark: executionView?.watermark
         )
         do {
             offlineCapture = try offlineStore.record(operation, activeWorkout: workout)
@@ -3269,7 +3272,9 @@ final class AppModel: ObservableObject {
                 workoutId: workout.workoutId,
                 body: .rateForm(body),
                 createdAt: Date(),
-                localFormId: localId
+                localFormId: localId,
+                deviceId: device?.deviceID,
+                planWatermark: executionView?.watermark
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: updated)
             _ = apply(.operationQueued(updated))
@@ -3305,7 +3310,9 @@ final class AppModel: ObservableObject {
                 operationId: idempotencyKey,
                 workoutId: workout.workoutId,
                 body: .completeWorkout(request),
-                createdAt: Date()
+                createdAt: Date(),
+                deviceId: device?.deviceID,
+                planWatermark: executionView?.watermark
             )
             offlineCapture = try offlineStore.record(operation, activeWorkout: workout)
             _ = apply(.operationQueued(workout))

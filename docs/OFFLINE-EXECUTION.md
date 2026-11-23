@@ -36,8 +36,10 @@ portfolio repository; this file records only what the app does.
   mid-workout.
 - **Ledger entries.** Every queued write carries `entry_id`, `workout_id`, `device_id`,
   `device_seq`, `kind`, payload, local creation time, clock offset, plan watermark and
-  acknowledgement state. Entries are not aged out before acknowledgement; only an acknowledgement
-  or a deliberate discard removes one.
+  acknowledgement state. The provenance falls back to the active session record, so a write queued
+  by the watch or the phone is attributed even when the caller did not pass it explicitly. Entries
+  are not aged out before acknowledgement; only an acknowledgement or a deliberate discard removes
+  one.
 - **Plan-only watch cache.** The phone sends a `WatchPlanCache` file with `transferFile`
   (`kind: plan_cache`), not the application context. The watch copies it to
   `Application Support/StrengthWatch/plan-cache.json` and can show and start a watch-targeted
@@ -51,7 +53,9 @@ portfolio repository; this file records only what the app does.
 - **Merge.** The phone merges a relayed set against its committed sets: a colliding
   `(exercise, set_index)` is renumbered after the current maximum in capture order, warm-up
   indexes `>= 1000` stay in their band, and device/plan provenance is retained. No set is rejected.
-  The acknowledged server id is recorded in a per-device `LocalSetMap`.
+  The acknowledged server id is recorded in a per-device `LocalSetMap`. If the watch has to write
+  directly to the server and receives `set_index_conflict`, it reads the active workout, renumbers
+  the queued set the same way, and retries once instead of dropping it.
 - **Late reconciliation.** The phone settles the window through
   `POST /workouts/{id}/reconciliation` when the watch reports nothing left to send. A refused late
   set (`409 reconciliation_window_closed`) remains visible on the device as unsent; the server has

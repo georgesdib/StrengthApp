@@ -726,6 +726,7 @@ public final class WatchExecutionEngine {
                 .flatMap { $0.isPlausible ? $0 : nil }
             let record = WatchSessionRecord(
                 sessionUUID: UUID().uuidString.lowercased(),
+                deviceId: session.deviceID,
                 startedAt: clock?.serverNow(from: receivedAt) ?? receivedAt,
                 planRevision: 0,
                 clockOffsetSeconds: clock?.offset
@@ -777,6 +778,7 @@ public final class WatchExecutionEngine {
     ) -> Bool {
         let record = WatchSessionRecord(
             sessionUUID: UUID().uuidString.lowercased(),
+            deviceId: session.deviceID,
             startedAt: receivedAt,
             planRevision: 0,
             clockOffsetSeconds: 0
@@ -1295,6 +1297,7 @@ public final class WatchExecutionEngine {
         apply(capture)
         var sentAny = false
         var offPlanRetried: Set<String> = []
+        var collisionRetried: Set<String> = []
         // Each pass reloads the queue so an off-plan rewrite is what gets sent, and so work added
         // while this loop is awaiting cannot be skipped or reordered.
         while true {
@@ -1344,6 +1347,31 @@ public final class WatchExecutionEngine {
                     ladder.succeeded()
                     nextRetryAt = nil
                     continue
+                }
+                // Direct-to-server fallback: if another device already owns this index, move
+                // the set after the server's current maximum and retry once. This is the same
+                // never-reject rule the phone applies on the relay path.
+                if !collisionRetried.contains(operation.operationId),
+                   isSetIndexConflict(error),
+                   case .addSet(let body) = operation.body,
+                   let requested = body.setIndex {
+                    do {
+                        if let assigned = try await renumberAfterCollision(
+                            operation: operation,
+                            body: body,
+                            session: session
+                        ), assigned != requested {
+                            _ = try store.replaceAddSetIndex(
+                                operationId: operation.operationId,
+                                setIndex: assigned
+                            )
+                            collisionRetried.insert(operation.operationId)
+                            continue
+                        }
+                    } catch {
+                        // A read failure leaves the original conflict to be reported; the set
+                        // stays in the ledger.
+                    }
                 }
                 if !offPlanRetried.contains(operation.operationId),
                    isPlanItemMismatch(error),
@@ -1603,6 +1631,13 @@ public final class WatchExecutionEngine {
         }
         if entry.createdAtLocal == nil { entry.createdAtLocal = entry.createdAt }
         if entry.ackState == nil { entry.ackState = .pending }
+        if entry.deviceId == nil { entry.deviceId = sessionRecord?.deviceId }
+        if entry.clockOffsetSeconds == nil {
+            entry.clockOffsetSeconds = sessionRecord?.clockOffsetSeconds
+        }
+        if entry.planWatermark == nil {
+            entry.planWatermark = sessionRecord?.execution?.watermark
+        }
         capture.operations.append(entry)
     }
 
@@ -1619,6 +1654,46 @@ public final class WatchExecutionEngine {
             updated.body = .executionEvents(remaining)
             return updated
         }
+    }
+
+    private func isSetIndexConflict(_ error: Error) -> Bool {
+        guard let api = error as? APIError,
+              case .server(let status, let code, _, _, _) = api else {
+            return false
+        }
+        return status == 400 && code == "set_index_conflict"
+    }
+
+    /// Reads the server's committed sets and returns the next free index in this exercise's
+    /// working band (or the next warm-up slot). Nil means the read did not produce enough
+    /// information to renumber safely.
+    private func renumberAfterCollision(
+        operation: OfflineOperation,
+        body: AddSetRequest,
+        session: IOSSession
+    ) async throws -> Int? {
+        let today = try await client.today(session: session)
+        guard let workout = today.activeWorkout,
+              workout.workoutId == operation.workoutId else {
+            return nil
+        }
+        let existing = (workout.sets ?? []).compactMap { set -> (String, Int)? in
+            guard let index = set.setIndex else { return nil }
+            return (set.exerciseId, index)
+        }
+        let provisional = ProvisionalSet(
+            deviceId: session.deviceID ?? "watch",
+            localSetId: operation.operationId,
+            exerciseId: body.exerciseId,
+            setIndex: body.setIndex ?? 0,
+            planItemIndex: body.planItemIndex,
+            performedAt: body.performedAt
+        )
+        let merged = SetMerge.renumber(
+            [provisional],
+            existing: existing.map { (exerciseId: $0.0, setIndex: $0.1) }
+        )
+        return merged.first?.setIndex
     }
 
     private func isPlanItemMismatch(_ error: Error) -> Bool {

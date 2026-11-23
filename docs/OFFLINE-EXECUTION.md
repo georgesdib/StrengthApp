@@ -117,9 +117,18 @@ additions appear in its plan and can be logged. The watch does not author a new 
 (no watch-side catalogue picker); the performed set remains the durable record and the execution
 change is a phone-side view hint.
 
-## What is not done here
+## Status and accepted limitations
 
-- Physical-device acceptance is still required: watch-only with the phone off, both devices
-  partitioned, termination mid-set, a version-1 capture upgraded mid-workout, and the visible
-  technique-throttle effect.
-- The watch's execution writes are phone-committed; the watch token is read-only.
+**Closed 2026-11-23.** Physical-device acceptance was closed by owner decision
+([record](acceptance/device/14-offline-execution.md)); no separate §16 matrix run is claimed.
+Release is app-first: ship the app build, then deploy the server and verify.
+
+Accepted limitations:
+
+- Watch-authored **new exercise additions** remain phone-only; the watch can log extra sets and
+  consume phone-authored additions.
+- Watch execution writes need a reachable phone. The watch starts and logs offline, queues the
+  writes, and sends them when the phone returns; the watch token is read-only for execution.
+- The phone HealthKit save requires workout write permission granted through the HealthKit opt-in.
+- The phone-committed watch relay cannot run while the watch app is suspended; queued work waits
+  for the next active connection.

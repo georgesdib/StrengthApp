@@ -132,12 +132,10 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   RIR-6 sets,
   form rating, mean velocity for external-load work even without a target, rest with +15s/−15s
   and a local end-of-rest notification, total elapsed time beside heart rate, one HealthKit
-  workout, editable sRPE and optional productivity at finish, local-first outbox);
-  phone-targeted plans are hidden. While
-  the watch owns the session the phone shows a **Logged on Apple Watch** banner, keeps set logging
-  and form ratings disabled, and remains read-only for capture; plan edits still work and are
-  pushed to the watch at its next idle point, never mid-set. **Take over logging** asks for
-  confirmation, moves ownership to the phone and leaves the watch read-only.
+  workout, editable sRPE and optional productivity at finish, local-first outbox). A plan belongs
+  to the iPhone/watch pairing; `owner_device_id` is provenance only, so the phone can log, rate
+  form, substitute, add work and finish even when the watch started the session. There is no
+  take-over button and no read-only mirror mode. Watch execution writes commit through the phone.
 - **Exercise Library** — searchable catalogue, read-only configuration, server-computed e1RM and
   paginated working-set history; the catalogue is cached on disk so browsing and exercise choice
   work offline, configuration is cached for the app session, e1RM/history are fetched on entry,
@@ -146,8 +144,9 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 HealthKit is read-only and off by default. Readiness reads HRV, resting heart rate and bodyweight;
 the separate, opt-in activity sync reads workouts, workout heart rate, active energy, VO₂max
 estimates, steps per day and sitting time (derived from Apple Watch stand time) for the last
-completed calendar week. There is no sleep import, review/rubric or Apple Intelligence/PCC UI. Execution telemetry is
-queued through the Phase 4 offline capture path; plan edits remain online-only.
+completed calendar week. There is no sleep import, review/rubric or Apple Intelligence/PCC UI. Execution
+telemetry is queued through the offline capture path; substitutions and additions are queued
+optimistically with catalogue prefill, while other plan editing remains server-side.
 
 ## Storage and networking
 

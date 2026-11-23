@@ -144,10 +144,11 @@ mid-session changes:
   selectable on the phone and watch, and its sets are recorded as extra work without a plan
   slot.
 
-The server solves the substitute's or addition's prefill, and that value fills the logging
-controls on both devices. The phone never computes a load. A null prefill stays blank and is
-never replaced by the original exercise's load. An offline phone records the change without a
-prefill, and it is not solved later.
+The phone applies the server-built catalogue's prefill, including the live erector dose and set
+cap, and shows it on both devices. The phone never invents a load: a catalogue miss stays blank
+and is never replaced by the original exercise's load. The change is applied locally before the
+server answers; if the phone is offline it stays **Saved on this iPhone** and syncs later. If the
+server rejects it, the row stays visible as **Unresolved** rather than silently reverting.
 
 ![Frozen plan with per-exercise options](docs/images/workout-plan.png)
 
@@ -213,8 +214,8 @@ The app keeps the active workout and pending operations on the phone before ackn
 
 - Sets, form ratings, finish operations and execution events can be queued.
 - The exercise catalogue is cached on the phone: the library and exercise pickers remain usable
-  offline for browsing and logging an exercise outside the plan. Plan edits still require the
-  server and are not queued.
+  offline. Substitutions and additions are applied locally and queued; other plan edits still
+  require the server.
 - Queued work survives app termination and reloads on the next launch.
 - Replay preserves the original occurrence time.
 - The app shows pending, offline and conflict states rather than claiming server acceptance.

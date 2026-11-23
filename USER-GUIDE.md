@@ -110,17 +110,19 @@ raw 100.x address.
    and logging the working sets is valid. To record one, tap **Start set** on its warm-up row: it
    fills that row's load and reps, and RIR 6 is what records the set as a warm-up.
    A working set starts the rest timer automatically; logged warm-ups (RIR 6) do not.
-7. Repeat for the remaining sets and exercises. If the server becomes unreachable after a
+7. A saved set has **Edit**: saving appends one correction and keeps the set's server identity.
+   **Remove set** is a separate action; it never resurrects or re-adds a set.
+8. Repeat for the remaining sets and exercises. If the server becomes unreachable after a
    plan has been downloaded, **Start workout** still starts it: the plan's execution id and your
    start time are kept locally and bound on the next sync. When an exercise is done, tap **End exercise**:
    it closes any running rest, records the exercise's completion and offers the optional 1–5 form
    rating. Leaving the screen does not end the exercise.
-8. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
-9. Review the **Session report** that opens after completion: prescription adherence, velocity,
+9. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
+10. Review the **Session report** that opens after completion: prescription adherence, velocity,
    session feedback, quality flags and evidence. It is read-only. If the Apple Watch still owes
    sets, the report says **Apple Watch data pending** and refreshes until the server settles the
    window; do not treat those totals as final until then. **Done** returns to Today.
-10. The same report is available later from the session's **History** detail. An imported session
+11. The same report is available later from the session's **History** detail. An imported session
     with no workout record explains that no report exists.
 
 ### Substituting and adding work
@@ -288,8 +290,10 @@ minus Apple Watch stand time, so it only exists for days a watch was worn — an
 records no sitting value at all, which is missing rather than zero. Neither value changes a load,
 a prescription or a readiness score.
 
-**Workout heart rate is read only on Apple Watch**, for the live session display and the one
-saved HealthKit workout. It is not used for readiness, fatigue, progression or prescriptions.
+**Workout heart rate is read only on Apple Watch**, for the live session display. The watch saves
+one HealthKit workout for a session it ran; the phone saves one when it finishes a session, so a
+session finished on both can leave two. The app never deletes or merges them, and training data
+still comes from the server's recorded sets.
 
 ## 9. Settings and maintenance
 
@@ -380,8 +384,8 @@ velocity entry happens during the rest, not inside the set. Rest — **+15s** ex
 shortens it, and a local notification fires when it ends if you allowed notifications — rate form
 at **End exercise**, and finish with editable sRPE and optional productivity. Total elapsed time
 and heart rate show at the top of the exercise screen; heart rate follows the latest HealthKit
-sample and clears after 10 seconds without a new one. Exactly one HealthKit workout is saved, and
-the session sRPE is written as the workout's Apple effort score.
+sample and clears after 10 seconds without a new one. The watch saves one HealthKit workout for
+the session and writes the session sRPE as the workout's Apple effort score.
 
 A swap re-solves the replacement from its own history and calibration: load, warm-up ramps and
 VBT target when available. It never copies the old lift's load. If no load can be derived, the

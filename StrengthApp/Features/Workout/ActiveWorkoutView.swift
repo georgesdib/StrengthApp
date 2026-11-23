@@ -198,8 +198,13 @@ struct ActiveWorkoutView: View {
                                                         "plan-group-\(index)-\(groupIndex)"
                                                     )
                                             }
-                                            if let velocity = item.velocityTargetLabel {
+                                            if let velocity = row?.velocityTargetLabel
+                                                ?? item.velocityTargetLabel {
                                                 Text("target " + velocity)
+                                            }
+                                            if let note = row?.topSetNote {
+                                                Text(note)
+                                                    .foregroundStyle(.secondary)
                                             }
                                             if model.isExerciseActive(
                                                 planItemIndex: identity,
@@ -216,8 +221,13 @@ struct ActiveWorkoutView: View {
                                             Text(row?.repsLabel ?? item.repsLabel)
                                             Text(row?.loadLabel ?? item.loadLabel)
                                             Text(row?.effortLabel ?? item.effortLabel)
-                                            if let velocity = item.velocityTargetLabel {
+                                            if let velocity = row?.velocityTargetLabel
+                                                ?? item.velocityTargetLabel {
                                                 Text("target " + velocity)
+                                            }
+                                            if let note = row?.topSetNote {
+                                                Text(note)
+                                                    .foregroundStyle(.secondary)
                                             }
                                             if model.isExerciseActive(
                                                 planItemIndex: identity,

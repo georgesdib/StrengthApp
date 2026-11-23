@@ -61,6 +61,24 @@ portfolio repository; this file records only what the app does.
   set (`409 reconciliation_window_closed`) remains visible on the device as unsent; the server has
   preserved it for audit only.
 
+## Audit remediation (2026-11-23)
+
+- **HealthKit writer policy (C3/D11).** The watch keeps its per-device finaliser keyed by
+  `sessionUUID`. The phone now saves one HealthKit workout when it finishes a session, through a
+  local writer that never deletes, merges or corrects a record and keeps no pending state. Both
+  devices may save; training data still comes from the server's sets.
+- **Execution-change payload.** Substitutions now render the replacement's own `set_groups`,
+  `sets`, `top_set` and `vbt_target`/`vbt`; top-set eligibility is shown as
+  `not_applicable · substituted`, never inherited from the planned lift.
+- **Prefill protocol.** The legacy `prefill_requested` flag is gone. A catalogue value is sent
+  with its version; a catalogue miss sends the version with no value; no catalogue sends neither
+  and the server solves.
+- **Corrections.** A set is corrected with one `POST .../update-set`; it keeps its `set_id`, so
+  the merge map and telemetry stay attached. A `late_event_rejected` or
+  `reconciliation_window_closed` response leaves the correction unsent and shown, never retried.
+- **Plan binding.** `409 plan_not_bindable` clears the unusable cached plan and asks for a fresh
+  one.
+
 ## S5 — pairing-scoped execution
 
 - An issued plan belongs to the iPhone/watch pairing. The request screen no longer has a device

@@ -64,6 +64,39 @@ final class ExecutionChangeModelTests: XCTestCase {
         XCTAssertNil(rows[1].group(forLoggedCount: 0))
     }
 
+    func testSubstitutionCarriesItsOwnGroupsTopSetAndVBT() {
+        let json = """
+        {"workout_id": "w-1", "watermark": 8,
+         "substitutions": [
+           {"event_id": 9, "kind": "substitution", "plan_item_index": 0,
+            "exercise_id": "front_squat", "reps_low": 3, "reps_high": 5,
+            "rir_target": 2, "prefill_load_kg": 90, "prefill_reason": "client_applied",
+            "resolved_by": "catalogue", "sets": 3,
+            "set_groups": [
+              {"group_index": 0, "sets": 1, "load_kg": 100, "reps_low": 3,
+               "reps_high": 3, "rir_target": 1},
+              {"group_index": 1, "sets": 2, "load_kg": 90, "reps_low": 3,
+               "reps_high": 5, "rir_target": 3}
+            ],
+            "top_set": {"status": "not_applicable", "reason_code": "substituted"},
+            "vbt_target": {"target_mps": 0.72, "low_mps": 0.68, "high_mps": 0.76,
+                           "rep_count": 5, "scope": "exercise"},
+            "prefill_verified": true}
+         ],
+         "additions": []}
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let view = try! decoder.decode(ExecutionView.self, from: Data(json.utf8))
+        let row = view.rows(plan: plan())[0]
+        XCTAssertEqual(row.sets, 3)
+        XCTAssertEqual(row.groups.count, 2)
+        XCTAssertEqual(row.groups[0].rowLabel, "1 × 3 @ 100.0 kg · RIR 1")
+        XCTAssertEqual(row.velocityTargetLabel, "0.72 m/s")
+        XCTAssertEqual(row.topSetNote, "Top set not applicable · substituted")
+        XCTAssertEqual(row.change?.resolvedBy, "catalogue")
+    }
+
     func testSubstitutionReplacesTheSlotAndAdditionFollowsItsAnchor() {
         let rows = view().rows(plan: plan())
         XCTAssertEqual(rows.count, 3)

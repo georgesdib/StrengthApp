@@ -891,6 +891,30 @@ public struct RemoveSetRequest: Encodable, Equatable {
     }
 }
 
+/// One correction to a performed set. The server appends a correction event; the set keeps its
+/// `set_id` and `set_index`, which the merge map and telemetry links depend on.
+public struct UpdateSetRequest: Encodable, Equatable {
+    public let setId: Int
+    public let loadKg: Double?
+    public let reps: Int?
+    public let rir: Int?
+    public let velocityMps: Double?
+
+    public init(
+        setId: Int,
+        loadKg: Double? = nil,
+        reps: Int? = nil,
+        rir: Int? = nil,
+        velocityMps: Double? = nil
+    ) {
+        self.setId = setId
+        self.loadKg = loadKg
+        self.reps = reps
+        self.rir = rir
+        self.velocityMps = velocityMps
+    }
+}
+
 public struct CompleteWorkoutRequest: Codable, Equatable {
     public let sessionRpe: Double?
     public let notRecorded: Bool

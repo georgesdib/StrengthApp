@@ -314,6 +314,7 @@ final class AppModel: ObservableObject {
     private var offlineRetryAttempt = 0
     private let exerciseCatalogueCache: ExerciseCatalogueCache
     private let automation: WorkoutAutomation
+    private let phoneHealthKitWriter: any PhoneHealthKitWorkoutWriting
     private var exerciseCatalogueLoadedServerURL: String?
     private var exerciseDetailCache: [String: ExerciseDetailResponse] = [:]
     private var exerciseHistoryExerciseId: String?
@@ -332,7 +333,8 @@ final class AppModel: ObservableObject {
         offlineStore: OfflineCaptureStore? = nil,
         watchConnectivity: WatchConnectivitySession? = nil,
         exerciseCatalogueCache: ExerciseCatalogueCache? = nil,
-        automation: WorkoutAutomation? = nil
+        automation: WorkoutAutomation? = nil,
+        phoneHealthKitWriter: (any PhoneHealthKitWorkoutWriting)? = nil
     ) {
         let store = store ?? PairedStore()
         store.migrateServerConfigurationIfNeeded()
@@ -371,6 +373,7 @@ final class AppModel: ObservableObject {
         self.offlineStore = captureStore
         self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
         self.automation = resolvedAutomation
+        self.phoneHealthKitWriter = phoneHealthKitWriter ?? PhoneHealthKitWorkoutWriter()
         self.deepSeekKeyPresent = ((try? self.deepSeekKeyStore.load()) ?? nil)?.isEmpty == false
         self.healthKitEnabled = enabled
         self.healthKitState = enabled
@@ -2306,7 +2309,14 @@ final class AppModel: ObservableObject {
                     return true
                 }
                 let code = api.code ?? ""
-                if ["plan_consumed", "plan_expired", "plan_superseded"].contains(code) {
+                if code == "plan_not_bindable" {
+                    prescriptionState = .idle
+                    clearCachedPlan()
+                    recoveryIssue = .prescriptionUnavailable(
+                        reason: "This plan has no execution id. Request a fresh workout."
+                    )
+                    await refresh()
+                } else if ["plan_consumed", "plan_expired", "plan_superseded"].contains(code) {
                     prescriptionState = .idle
                     clearCachedPlan()
                     recoveryIssue = .prescriptionUnavailable(
@@ -2358,6 +2368,62 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// One correction event, keeping the server set identity. A refused late correction is
+    /// shown as unsent and never retried automatically.
+    func updateSet(
+        workoutId: String,
+        body: UpdateSetRequest,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard !isSaving, let session else { return false }
+        guard !offlineCaptureActive else {
+            mutationError = "Correcting a server-confirmed set requires a connection. Pending local sets can still be changed."
+            return false
+        }
+        guard permitsMutation(kind: .updateSet, operationId: idempotencyKey) else {
+            return false
+        }
+        _ = apply(.operationBegan)
+        defer { _ = apply(.operationEnded) }
+        do {
+            let updated = try await client.updateSet(
+                workoutId: workoutId,
+                body: body,
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            _ = apply(.operationSucceeded(updated))
+            workoutRefreshGrace = true
+            persistActiveWorkout()
+            return true
+        } catch {
+            if let api = error as? APIError, api.code == "late_event_rejected" {
+                mutationError = "This correction was not sent: the server preserved it for audit and refused to change a removed set. It will not be retried."
+                return false
+            }
+            if let api = error as? APIError,
+               api.code == "reconciliation_window_closed" {
+                mutationError = "This correction was not sent: the reconciliation window has closed. The server preserved it for audit; it will not be retried."
+                return false
+            }
+            if let api = error as? APIError,
+               api.code == "reconciliation_window_closed" {
+                mutationError = "This set was not sent: the reconciliation window has closed. The server preserved it for audit; it will not be retried."
+                return false
+            }
+            if let api = error as? APIError, api.code == "late_event_rejected" {
+                mutationError = "This set was not sent: the server preserved it for audit and refused the change."
+                return false
+            }
+            if let api = error as? APIError,
+               ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
+                await refresh()
+            }
+            handleMutation(error)
+            return false
+        }
+    }
+
     func removeSet(
         workoutId: String,
         setId: Int,
@@ -2385,6 +2451,15 @@ final class AppModel: ObservableObject {
             persistActiveWorkout()
             return true
         } catch {
+            if let api = error as? APIError,
+               api.code == "reconciliation_window_closed" {
+                mutationError = "This removal was not sent: the reconciliation window has closed. The server preserved it for audit; it will not be retried."
+                return false
+            }
+            if let api = error as? APIError, api.code == "late_event_rejected" {
+                mutationError = "This removal was not sent: the server preserved the event for audit and refused the change."
+                return false
+            }
             if let api = error as? APIError,
                ["workout_not_active", "plan_consumed"].contains(api.code ?? "") {
                 await refresh()
@@ -2532,8 +2607,8 @@ final class AppModel: ObservableObject {
     }
 
     /// Appends a phone-authored substitution or addition and refreshes the execution view.
-    /// An offline author queues the body with prefillRequested false and is never retro-solved
-    /// (DEC-RESOLVER-23).
+    /// A catalogue value is verified against the issued snapshot; a catalogue miss sends the
+    /// version with no value; no catalogue sends neither and the server solves (DEC-RESOLVER-23).
     func recordExecutionChange(
         workoutId: String,
         planItemIndex: Int? = nil,
@@ -2570,9 +2645,10 @@ final class AppModel: ObservableObject {
             repsHigh: repsHigh,
             rirTarget: rirTarget,
             prefillLoadKg: prefill?.loadKg,
+            // A version with no value records a catalogue miss; with no catalogue at all both
+            // stay nil and the server solves. There is no legacy request flag.
             prefillCatalogueVersion: loadCatalogue?.version,
-            prefillAsOf: loadCatalogue?.asOf,
-            prefillRequested: loadCatalogue == nil ? !isOffline : false
+            prefillAsOf: loadCatalogue?.asOf
         )
         _ = apply(.operationBegan)
         defer { _ = apply(.operationEnded) }
@@ -2687,6 +2763,7 @@ final class AppModel: ObservableObject {
             restTimer.dismiss()
             let queued = queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
             if queued {
+                await savePhoneHealthKit(workout: workout, endedAt: body.endedAt)
                 await automation.handle(.ended, sessionID: workout.workoutId)
             }
             return queued
@@ -2704,6 +2781,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             _ = apply(.operationSucceeded(updated))
+            await savePhoneHealthKit(workout: updated, endedAt: body.endedAt)
             await automation.handle(.ended, sessionID: workout.workoutId)
             recoveryIssue = nil
             workoutRefreshGrace = false
@@ -2729,6 +2807,27 @@ final class AppModel: ObservableObject {
             handleMutation(error)
             return false
         }
+    }
+
+    /// One phone-side HealthKit workout for a finished session. The watch has its own finaliser;
+    /// both may save, and this never deletes, merges or corrects either record.
+    private func savePhoneHealthKit(workout: WorkoutDetail, endedAt: String?) async {
+        guard let started = Self.parseISO8601(workout.startedAt) else { return }
+        let ended = Self.parseISO8601(endedAt) ?? Date()
+        await phoneHealthKitWriter.save(
+            workoutID: workout.workoutId,
+            startedAt: started,
+            endedAt: max(ended, started)
+        )
+    }
+
+    private static func parseISO8601(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 
     func abandonWorkout(idempotencyKey: String) async -> Bool {
@@ -2937,7 +3036,7 @@ final class AppModel: ObservableObject {
                     let ack: PlanAckEnvelope = try await client.replay(entry, session: session)
                     _ = ack
                     await reconcilePlanState()
-                case .startWorkout, .addSet, .removeSet, .rateForm:
+                case .startWorkout, .addSet, .removeSet, .updateSet, .rateForm:
                     activeWorkout = try await client.replay(entry, session: session)
                     workoutRefreshGrace = true
                 case .executionChange:

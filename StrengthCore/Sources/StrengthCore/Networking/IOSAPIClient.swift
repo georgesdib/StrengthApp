@@ -799,6 +799,23 @@ public final class IOSAPIClient {
         )
     }
 
+    /// One correction event; the set keeps its server identity. Never remove-and-re-add.
+    public func updateSet(
+        workoutId: String,
+        body: UpdateSetRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/update-set",
+            body: body,
+            kind: .updateSet,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     public func removeSet(
         workoutId: String,
         body: RemoveSetRequest,
@@ -851,8 +868,8 @@ public final class IOSAPIClient {
     }
 
     /// Appends one phone-authored execution substitution or addition (DEC-RESOLVER-23).
-    /// Journaling is the offline author: the queued body sets prefillRequested false, so the
-    /// server stores no prefill and never retro-solves.
+    /// A journaled body keeps the same catalogue value or miss; the server never retro-solves a
+    /// catalogue miss.
     public func recordExecutionChange(
         workoutId: String,
         body: ExecutionChangeRequest,

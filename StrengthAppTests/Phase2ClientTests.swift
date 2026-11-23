@@ -1295,7 +1295,8 @@ final class Phase2AppModelTests: XCTestCase {
         journal: MutationJournal? = nil,
         healthKit: (any HealthKitReadinessProviding)? = nil,
         healthKitEnabled: Bool = false,
-        offlineStore: OfflineCaptureStore? = nil
+        offlineStore: OfflineCaptureStore? = nil,
+        phoneHealthKitWriter: (any PhoneHealthKitWorkoutWriting)? = nil
     ) -> (AppModel, UserDefaults, String, InMemoryTokenStore) {
         let (defaults, suite) = makeDefaults()
         if healthKitEnabled {
@@ -1314,7 +1315,8 @@ final class Phase2AppModelTests: XCTestCase {
             store: store,
             healthKit: healthKit,
             healthKitDefaults: defaults,
-            offlineStore: captureStore
+            offlineStore: captureStore,
+            phoneHealthKitWriter: phoneHealthKitWriter
         )
         return (model, defaults, suite, tokens)
     }
@@ -1342,7 +1344,10 @@ final class Phase2AppModelTests: XCTestCase {
                 return (404, Data())
             }
         }
-        let (model, defaults, suite, tokens) = pairedModel(transport: transport)
+        let hkWriter = FakePhoneHealthKitWorkoutWriter()
+        let (model, defaults, suite, tokens) = pairedModel(
+            transport: transport, phoneHealthKitWriter: hkWriter
+        )
         defer { defaults.removePersistentDomain(forName: suite) }
 
         await model.onLaunch()
@@ -1386,6 +1391,8 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertNil(model.activeWorkout)
         XCTAssertGreaterThanOrEqual(model.sessions.count, 1)
         XCTAssertNotNil(tokens.token)
+        XCTAssertEqual(hkWriter.saves.count, 1, "the phone saves one HealthKit workout at finish")
+        XCTAssertEqual(hkWriter.saves.first?.workoutID, "workout-1")
     }
 
     func testConcurrentDuplicateAddSetCallsOnlySendOneMutation() async {
@@ -1671,6 +1678,39 @@ final class Phase2AppModelTests: XCTestCase {
             readinessAck: false, idempotencyKey: "issue-consumed"
         )
         let started = await model.startWorkout(idempotencyKey: "start-consumed")
+        XCTAssertFalse(started)
+        guard case .prescriptionUnavailable = model.recoveryIssue else {
+            return XCTFail("expected a prescription recovery state")
+        }
+        guard case .idle = model.prescriptionState else {
+            return XCTFail("the unusable prescription should be cleared")
+        }
+    }
+
+    func testStartSurfacesPlanNotBindableAndClearsThePlan() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/prescriptions":
+                return (202, Data(Fixtures.planAck.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(Fixtures.plansReady.utf8))
+            case "/api/ios/v1/workouts":
+                return (409, Data(#"{"error":"plan has no execution id","code":"plan_not_bindable"}"#.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let (model, defaults, suite, _) = pairedModel(transport: transport)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.onLaunch()
+        await model.issuePrescription(
+            readinessAck: false, idempotencyKey: "issue-unbindable"
+        )
+        let started = await model.startWorkout(idempotencyKey: "start-unbindable")
         XCTAssertFalse(started)
         guard case .prescriptionUnavailable = model.recoveryIssue else {
             return XCTFail("expected a prescription recovery state")

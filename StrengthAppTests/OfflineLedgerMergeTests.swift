@@ -117,6 +117,49 @@ final class OfflineLedgerMergeTests: XCTestCase {
         XCTAssertEqual(try store.replayable(now: clock).count, 1)
     }
 
+    func testLedgerProvenanceComesFromTheActiveSession() throws {
+        _ = try store.setActiveWorkout(workout())
+        _ = try store.setSession(WatchSessionRecord(
+            sessionUUID: "session-1",
+            deviceId: "watch-1",
+            startedAt: clock,
+            clockOffsetSeconds: -12,
+            execution: ExecutionView(watermark: 4)
+        ))
+        _ = try store.record(OfflineOperation(
+            operationId: "op-provenance",
+            workoutId: "exec-1",
+            body: .rateForm(FormRatingRequest(
+                exerciseId: "competition_squat", rating: 4, note: nil
+            )),
+            createdAt: clock
+        ))
+        let entry = try XCTUnwrap(try store.load().operations.first)
+        XCTAssertEqual(entry.deviceId, "watch-1")
+        XCTAssertEqual(entry.clockOffsetSeconds, -12)
+        XCTAssertEqual(entry.planWatermark, 4)
+        XCTAssertEqual(entry.createdAtLocal, clock)
+        XCTAssertEqual(entry.entryId, "op-provenance")
+    }
+
+    func testCollisionRewriteChangesOnlyTheSetIndex() throws {
+        _ = try store.setActiveWorkout(workout())
+        _ = try store.record(operation(id: "op-collision", localSetId: -7))
+        let updated = try store.replaceAddSetIndex(
+            operationId: "op-collision",
+            setIndex: 9
+        )
+        guard case .addSet(let body) = updated.operations.first?.body else {
+            return XCTFail("expected add-set body")
+        }
+        XCTAssertEqual(body.setIndex, 9)
+        XCTAssertEqual(body.exerciseId, "competition_squat")
+        XCTAssertEqual(body.loadKg, 140)
+        XCTAssertEqual(body.reps, 3)
+        XCTAssertEqual(body.rir, 2)
+        XCTAssertEqual(body.planItemIndex, 0)
+    }
+
     func testRewritingACaptureKeepsTheCachedPlan() throws {
         _ = try store.setActiveWorkout(workout())
         let catalogue = LoadCatalogue(

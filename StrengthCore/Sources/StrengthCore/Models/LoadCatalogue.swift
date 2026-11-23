@@ -96,6 +96,37 @@ public struct LoadCatalogueEntry: Codable, Equatable, Sendable {
         self.bodyweight = bodyweight
         self.power = power
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case loadSource
+        case baseLoadKg
+        case accessoryLoadKg
+        case incrementKg
+        case bodyweight
+        case power
+    }
+
+    /// Decode through the shortest decimal string, matching `Decimal(str(load))` on the server.
+    /// Decoding straight into `Decimal` can carry a binary artifact (82.5 became 82.499…), which
+    /// would round a value that lands exactly on an increment down by one step.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        loadSource = try container.decodeIfPresent(String.self, forKey: .loadSource)
+        baseLoadKg = Self.decimal(try container.decodeIfPresent(Double.self, forKey: .baseLoadKg))
+        accessoryLoadKg = Self.decimal(
+            try container.decodeIfPresent(Double.self, forKey: .accessoryLoadKg)
+        )
+        incrementKg = Self.decimal(
+            try container.decodeIfPresent(Double.self, forKey: .incrementKg)
+        )
+        bodyweight = try container.decodeIfPresent(Bool.self, forKey: .bodyweight)
+        power = try container.decodeIfPresent(Bool.self, forKey: .power)
+    }
+
+    private static func decimal(_ value: Double?) -> Decimal? {
+        guard let value else { return nil }
+        return Decimal(string: String(value))
+    }
 }
 
 public struct LoadPrefill: Equatable, Sendable {

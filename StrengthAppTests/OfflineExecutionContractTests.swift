@@ -107,7 +107,7 @@ final class OfflineExecutionContractTests: XCTestCase {
                 ),
                 "barbell_curl": LoadCatalogueEntry(
                     loadSource: "double_progression", baseLoadKg: nil,
-                    accessoryLoadKg: accessory, incrementKg: 1,
+                    accessoryLoadKg: accessory, incrementKg: Decimal(string: "0.5"),
                     bodyweight: false, power: false
                 ),
                 "pull_up": LoadCatalogueEntry(
@@ -130,7 +130,10 @@ final class OfflineExecutionContractTests: XCTestCase {
     }
 
     func testCataloguePrefillMatchesTheDocumentedTail() {
-        let built = catalogue(base: 163.3, accessory: 140)
+        let built = catalogue(
+            base: Decimal(string: "163.3")!,
+            accessory: Decimal(string: "140")!
+        )
         // 163.3 / (1 + (5 + 2)/30) = 132.13… -> 132.0 at 0.5 kg.
         XCTAssertEqual(
             built.prefill(exerciseId: "competition_squat", essential: true, reps: 5, rir: 2).loadKg,
@@ -160,7 +163,10 @@ final class OfflineExecutionContractTests: XCTestCase {
     }
 
     func testCataloguePrefillLandsExactlyOnAnIncrement() {
-        let built = catalogue(base: 82.5, accessory: 82.5)
+        let built = catalogue(
+            base: Decimal(string: "82.5")!,
+            accessory: Decimal(string: "82.5")!
+        )
         // No reps/RIR: the divisor is 1, so this is the boundary case that a binary Double
         // implementation tends to round to 82.0.
         XCTAssertEqual(

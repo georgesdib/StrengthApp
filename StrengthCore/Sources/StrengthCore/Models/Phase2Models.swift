@@ -349,6 +349,29 @@ public struct PlanSettings: Codable, Equatable {
         self.topSetIntent = topSetIntent
         self.techniqueThrottle = techniqueThrottle
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionType
+        case minimumSession
+        case minimumTargetMinutes
+        case topSetIntent
+        case techniqueThrottle
+    }
+
+    /// A response may carry only the fields that changed; every absent setting keeps its
+    /// default rather than failing the whole plan read.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionType = try container.decodeIfPresent(String.self, forKey: .sessionType) ?? "auto"
+        minimumSession = try container.decodeIfPresent(Bool.self, forKey: .minimumSession) ?? false
+        minimumTargetMinutes = try container.decodeIfPresent(Int.self, forKey: .minimumTargetMinutes)
+        topSetIntent = try container.decodeIfPresent(
+            PrescriptionTopSetIntent.self, forKey: .topSetIntent
+        )
+        techniqueThrottle = try container.decodeIfPresent(
+            Bool.self, forKey: .techniqueThrottle
+        ) ?? false
+    }
 }
 
 /// The 202 acknowledgement: the request exists, the plan does not yet.

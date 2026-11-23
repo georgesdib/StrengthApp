@@ -163,9 +163,21 @@ struct PrescriptionPreviewView: View {
                         }
                     }
                     .accessibilityIdentifier("preview-start")
-                    .disabled(model.isSaving || model.isOffline || model.hasPendingOfflineCapture)
-                    if model.isOffline || model.hasPendingOfflineCapture {
-                        Text("Starting requires the server.")
+                    .disabled(
+                        model.isSaving
+                            || model.hasPendingOfflineCapture
+                            || (model.isOffline && issued.executionID == nil)
+                    )
+                    if model.hasPendingOfflineCapture {
+                        Text("Resolve the pending capture before starting.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if model.isOffline && issued.executionID != nil {
+                        Text("Offline. The start is saved and binds the plan's execution id when the server is reachable.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if model.isOffline {
+                        Text("Starting requires the server for this plan.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

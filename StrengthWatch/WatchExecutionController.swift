@@ -270,14 +270,20 @@ final class WatchExecutionController: ObservableObject {
                 lastError = "Enable Health access on the watch to log here, or log this workout on the iPhone."
                 return
             }
-            // Start HealthKit in the session's clock domain: one bootstrap call before the start gate.
+            // Start HealthKit in the session's clock domain: one bootstrap call before the start
+            // gate. With a cached plan and no server, the local clock is the only clock there is;
+            // the session is stamped locally and reconciled under the plan's execution id.
             let collectionStart: Date
             do {
                 let clock = try await engine.serverClock(session: session)
                 collectionStart = clock.serverNow(from: Date())
             } catch {
-                lastError = "Could not confirm the server clock, so the session was not started."
-                return
+                if (error as? APIError)?.isTransport == true, engine.cachedPlan != nil {
+                    collectionStart = Date()
+                } else {
+                    lastError = "Could not confirm the server clock, so the session was not started."
+                    return
+                }
             }
             do {
                 try await anchor.begin(at: collectionStart)

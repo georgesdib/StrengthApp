@@ -187,7 +187,7 @@ final class OfflineCaptureTests: XCTestCase {
         }
     }
 
-    func testQueueCapAndRetention() throws {
+    func testQueueCapAndNoAgeOut() throws {
         _ = try store.setActiveWorkout(workout())
         for index in 0..<OfflineCaptureStore.maxOperations {
             _ = try store.record(addOperation(localSetId: -(index + 1), id: "op-\(index)"))
@@ -214,9 +214,9 @@ final class OfflineCaptureTests: XCTestCase {
         now = clock.addingTimeInterval(OfflineCaptureStore.retention + 1)
         let retained = try cleanupStore.load().operations
         XCTAssertEqual(retained.count, 1)
-        XCTAssertEqual(retained.first?.state, .expired)
-        XCTAssertTrue(try cleanupStore.replayable(now: now).isEmpty)
-        XCTAssertNotNil(retained.first?.lastError)
+        // Ledger semantics: unsent work is never aged out before acknowledgement.
+        XCTAssertEqual(retained.first?.state, .pending)
+        XCTAssertEqual(try cleanupStore.replayable(now: now).count, 1)
     }
 
     func testUnsupportedVersionIsRejected() throws {
@@ -240,7 +240,7 @@ final class OfflineCaptureTests: XCTestCase {
             localSetId: old.localSetId
         )
         _ = try store.record(old)
-        XCTAssertTrue(try store.replayable(now: clock).isEmpty)
+        XCTAssertEqual(try store.replayable(now: clock).count, 1)
 
         _ = try store.updateState(operationId: "op-replay", state: .conflict, error: "ended elsewhere")
         let operation = try store.load().operations.first

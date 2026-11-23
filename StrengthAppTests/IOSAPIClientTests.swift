@@ -17,22 +17,27 @@ final class IOSAPIClientTests: XCTestCase {
         return (IOSAPIClient(transport: transport), transport)
     }
 
-    func testTakeoverSendsTheRequiredConfirmation() async throws {
+    func testUpdateSetPostsOneCorrectionKeepingTheServerIdentity() async throws {
         let (client, transport) = makeClient { request in
-            XCTAssertEqual(request.url?.path, "/api/ios/v1/workouts/workout-1/takeover")
+            XCTAssertEqual(request.url?.path, "/api/ios/v1/workouts/workout-1/update-set")
             let object = request.httpBody.flatMap {
                 try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
             }
-            XCTAssertEqual(object?["confirm"] as? Bool, true)
-            return (200, Data(Fixtures.workoutInProgress.utf8))
+            XCTAssertEqual(object?["set_id"] as? Int, 42)
+            XCTAssertEqual(object?["load_kg"] as? Double, 142.5)
+            XCTAssertEqual(object?["reps"] as? Int, 3)
+            XCTAssertEqual(object?["rir"] as? Int, 1)
+            XCTAssertNil(object?["remove"])
+            return (200, Data(Fixtures.workoutWithSet.utf8))
         }
-
-        _ = try await client.takeover(
+        _ = try await client.updateSet(
             workoutId: "workout-1",
+            body: UpdateSetRequest(
+                setId: 42, loadKg: 142.5, reps: 3, rir: 1, velocityMps: 0.61
+            ),
             session: session,
-            idempotencyKey: "takeover-1"
+            idempotencyKey: "update-1"
         )
-
         XCTAssertEqual(transport.requests.count, 1)
     }
 
@@ -50,7 +55,9 @@ final class IOSAPIClientTests: XCTestCase {
             XCTAssertEqual(object?["change"] as? String, "substitution")
             XCTAssertEqual(object?["plan_item_index"] as? Int, 0)
             XCTAssertEqual(object?["exercise_id"] as? String, "squat")
-            XCTAssertEqual(object?["prefill_requested"] as? Bool, true)
+            XCTAssertEqual(object?["prefill_load_kg"] as? Double, 95)
+            XCTAssertEqual(object?["prefill_catalogue_version"] as? String, "load-catalogue/v1")
+            XCTAssertNil(object?["prefill_requested"])
             return (200, Data("""
             {"execution": {"workout_id": "workout-1", "watermark": 3,
              "substitutions": [], "additions": []}}
@@ -64,7 +71,8 @@ final class IOSAPIClientTests: XCTestCase {
                 change: "substitution",
                 planItemIndex: 0,
                 exerciseId: "squat",
-                prefillRequested: true
+                prefillLoadKg: 95,
+                prefillCatalogueVersion: "load-catalogue/v1"
             ),
             session: session,
             idempotencyKey: "exec-1"

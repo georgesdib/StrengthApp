@@ -55,12 +55,13 @@ public enum MutationKind: String, Codable, CaseIterable {
     case startWorkout
     case addSet
     case removeSet
+    case updateSet
     case executionEvents
     case rateForm
     case executionChange
     case completeWorkout
+    case reconciliation
     case abandonWorkout
-    case takeover
 
     public var label: String {
         switch self {
@@ -71,12 +72,13 @@ public enum MutationKind: String, Codable, CaseIterable {
         case .startWorkout: return "Start workout"
         case .addSet: return "Add set"
         case .removeSet: return "Remove set"
+        case .updateSet: return "Correct set"
         case .executionEvents: return "Execution events"
         case .rateForm: return "Form rating"
         case .executionChange: return "Execution change"
         case .completeWorkout: return "Complete workout"
+        case .reconciliation: return "Reconciliation"
         case .abandonWorkout: return "Abandon workout"
-        case .takeover: return "Take over logging"
         }
     }
 }

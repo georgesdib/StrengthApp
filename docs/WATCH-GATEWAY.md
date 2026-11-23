@@ -1,8 +1,13 @@
 # Watch phone gateway (WP8)
 
-The watch normally talks to the Home Server directly. When that transport fails, an active,
-reachable iPhone can relay the same request over WatchConnectivity. The relay is additive: it is
-never the only copy and it does not replace the direct path.
+> **Superseded 2026-11-23.** Execution writes are now phone-committed: the watch sends start, sets,
+> corrections, removals, form, telemetry and finish to the phone, which commits with its own
+> credential. The watch token is read-only for execution. This document remains the historical WP8
+> record of the relay envelope and its failure handling.
+
+The watch normally talks to the Home Server directly for reads. When an execution write is made on
+the watch, an active, reachable iPhone commits it over WatchConnectivity; the watch token is not
+used for that write.
 
 ## Protocol
 

@@ -21,6 +21,8 @@ final class WatchSessionController: NSObject, ObservableObject {
     var canApplyConfig: () -> Bool = { true }
     /// A plan revision pushed by the phone over WatchConnectivity.
     var onExecutionPayload: (([String: Any]) -> Void)?
+    /// The plan-only cache delivered by file, used for a start with no connection.
+    var onPlanCache: ((WatchPlanCache) -> Void)?
 
     private let store: WatchCredentialStore
     private var session: WCSession?
@@ -64,6 +66,38 @@ final class WatchSessionController: NSObject, ObservableObject {
     /// Sends the open rest to the phone, which mirrors it as a Live Activity. A queued user-info
     /// transfer survives an unreachable or sleeping phone; the latest state is kept and re-sent
     /// once the session is active.
+    nonisolated static var planCacheURL: URL {
+        let base = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+        return base
+            .appendingPathComponent("StrengthWatch", isDirectory: true)
+            .appendingPathComponent("plan-cache.json")
+    }
+
+    nonisolated static func cachedPlan() -> WatchPlanCache? {
+        guard let data = try? Data(contentsOf: planCacheURL) else { return nil }
+        return try? JSONDecoder().decode(WatchPlanCache.self, from: data)
+    }
+
+    var isPhoneReachable: Bool { session?.isReachable ?? false }
+
+    private var lastSentStatus: (String?, String?, Int, String, Bool)?
+
+    func sendStatus(_ status: WatchWorkoutStatus) {
+        let key = (status.workoutId, status.sessionId, status.pendingCount,
+                   status.phase, status.finishAcknowledged)
+        guard lastSentStatus == nil
+                || lastSentStatus! != key else {
+            return
+        }
+        guard let session, session.activationState == .activated,
+              let message = status.message else { return }
+        lastSentStatus = key
+        session.transferUserInfo(message)
+    }
+
     func sendRest(_ snapshot: WatchRestSnapshot) {
         guard let session, session.activationState == .activated else {
             pendingRest = snapshot
@@ -300,6 +334,29 @@ extension WatchSessionController: WCSessionDelegate {
                 return
             }
             self?.onExecutionPayload?(userInfo)
+        }
+    }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didReceive file: WCSessionFile
+    ) {
+        let source = file.fileURL
+        let destination = Self.planCacheURL
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: source, to: destination)
+            let data = try Data(contentsOf: destination)
+            let cache = try JSONDecoder().decode(WatchPlanCache.self, from: data)
+            Task { @MainActor in self.onPlanCache?(cache) }
+        } catch {
+            return
         }
     }
 

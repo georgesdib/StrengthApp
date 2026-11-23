@@ -7,6 +7,8 @@ public enum WatchRelayOperation: String, Codable, Sendable {
     case bootstrap
     case start
     case addSet
+    case updateSet
+    case removeSet
     case executionEvents
     case finish
     case abandon
@@ -65,6 +67,52 @@ public struct WatchRelayResponse: Codable, Sendable {
         self.ok = ok
         self.payload = payload
         self.errorMessage = errorMessage
+    }
+}
+
+/// A small status heartbeat from the watch. The phone uses it to name the watch in
+/// `pending_devices` when it finishes, and to avoid leaving a reconciliation window open after
+/// the watch has already sent everything.
+public struct WatchWorkoutStatus: Codable, Equatable, Sendable {
+    public let workoutId: String?
+    public let sessionId: String?
+    public let pendingCount: Int
+    public let phase: String
+    public let finishAcknowledged: Bool
+    public let updatedAt: String
+
+    public init(
+        workoutId: String?,
+        sessionId: String?,
+        pendingCount: Int,
+        phase: String,
+        finishAcknowledged: Bool,
+        updatedAt: String = ExecutionEvent.nowISO()
+    ) {
+        self.workoutId = workoutId
+        self.sessionId = sessionId
+        self.pendingCount = pendingCount
+        self.phase = phase
+        self.finishAcknowledged = finishAcknowledged
+        self.updatedAt = updatedAt
+    }
+
+    public var message: [String: Any]? {
+        guard let data = try? JSONEncoder().encode(self) else { return nil }
+        return ["watch_status": String(decoding: data, as: UTF8.self)]
+    }
+
+    public static func decode(_ userInfo: [String: Any]) -> WatchWorkoutStatus? {
+        guard let value = userInfo["watch_status"] as? String,
+              let data = value.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(WatchWorkoutStatus.self, from: data)
+    }
+
+    /// True while this watch could still have unsent work for the given workout.
+    public func hasPendingWork(for workoutId: String?) -> Bool {
+        guard let workoutId, self.workoutId == workoutId else { return false }
+        if finishAcknowledged && pendingCount == 0 { return false }
+        return pendingCount > 0 || phase == "active" || phase == "finishing"
     }
 }
 

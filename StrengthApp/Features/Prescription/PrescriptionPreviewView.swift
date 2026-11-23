@@ -57,6 +57,17 @@ struct PrescriptionPreviewView: View {
                 }
             }
 
+            if issued.techniqueThrottleInForce {
+                Section("Technique throttle") {
+                    Label("MOD-TECH-001 is in force for this session", systemImage: "gauge.with.dots.needle.33percent")
+                        .font(.subheadline)
+                    Text("Main-work loads are lower than a full session because you asked for a technique throttle. The server applied it when this plan was built; accessory work is unchanged. Every affected exercise is marked below.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("technique-throttle-in-force")
+            }
+
             if let topSet = issued.plan.topSet, topSet.reasonCode != "intent_off" {
                 Section("Top set") {
                     LabeledContent("Outcome", value: topSet.statusLabel)
@@ -94,6 +105,10 @@ struct PrescriptionPreviewView: View {
                             Text(item.repsLabel)
                             Text(item.loadLabel)
                             Text(item.effortLabel)
+                            if (item.refs ?? []).contains("MOD-TECH-001") {
+                                Text("throttled")
+                                    .foregroundStyle(.orange)
+                            }
                             if let velocity = item.velocityTargetLabel {
                                 Text("target \(velocity)")
                             }
@@ -128,32 +143,37 @@ struct PrescriptionPreviewView: View {
             }
 
             Section {
-                if issued.executionTarget == "watch" {
-                    Text("Requested for Apple Watch. Start this workout on the watch.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("watch-targeted-plan")
-                } else {
-                    Button {
-                        start()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if model.isSaving {
-                                ProgressView()
-                            } else {
-                                Text("Start workout")
-                            }
-                            Spacer()
+                Button {
+                    start()
+                } label: {
+                    HStack {
+                        Spacer()
+                        if model.isSaving {
+                            ProgressView()
+                        } else {
+                            Text("Start workout")
                         }
+                        Spacer()
                     }
-                    .accessibilityIdentifier("preview-start")
-                    .disabled(model.isSaving || model.isOffline || model.hasPendingOfflineCapture)
-                    if model.isOffline || model.hasPendingOfflineCapture {
-                        Text("Starting requires the server.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                }
+                .accessibilityIdentifier("preview-start")
+                .disabled(
+                    model.isSaving
+                        || model.hasPendingOfflineCapture
+                        || (model.isOffline && issued.executionID == nil)
+                )
+                if model.hasPendingOfflineCapture {
+                    Text("Resolve the pending capture before starting.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if model.isOffline && issued.executionID != nil {
+                    Text("Offline. The start is saved and binds the plan's execution id when the server is reachable.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if model.isOffline {
+                    Text("Starting requires the server for this plan.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }

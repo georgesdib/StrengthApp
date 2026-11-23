@@ -35,8 +35,6 @@ struct ActiveWorkoutView: View {
     @State private var substituteTarget: ExecutionTarget?
     @State private var additionTarget: ExecutionTarget?
     @State private var executionError: String?
-    @State private var confirmingTakeOver = false
-    @State private var takeOverError: String?
     @StateObject private var drafts = WorkoutDraftStore()
     @State private var otherExerciseId: String?
     @State private var showingOtherExercisePicker = false
@@ -107,52 +105,13 @@ struct ActiveWorkoutView: View {
                             }
                         }
 
-                        if model.isMirroringWatchSession {
-                            Section("Logged on Apple Watch") {
-                                Label(
-                                    "This session is logged on the Apple Watch.",
-                                    systemImage: "applewatch"
-                                )
-                                .foregroundStyle(.secondary)
-                                .accessibilityIdentifier("mirror-banner")
-                                Text("Sets are recorded on the watch. A plan change reaches it after the server accepts it, at its next idle point — never mid-set.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                if let takeOverError {
-                                    Text(takeOverError)
-                                        .font(.caption)
-                                        .foregroundStyle(.red)
-                                        .accessibilityIdentifier("take-over-error")
-                                }
-                                Button {
-                                    confirmingTakeOver = true
-                                } label: {
-                                    HStack {
-                                        Spacer()
-                                        if model.isSaving {
-                                            ProgressView()
-                                        } else {
-                                            Text("Take over logging")
-                                        }
-                                        Spacer()
-                                    }
-                                }
-                                .disabled(model.isSaving)
-                                .accessibilityIdentifier("take-over-logging")
-                            }
-                        }
-
                         if let rejection = model.executionChangeRejection,
                            rejection.workoutID == workout.workoutId {
                             Section("Plan change not applied") {
                                 Text(rejection.message)
                                     .font(.footnote)
                                     .foregroundStyle(.red)
-                                Text(
-                                    model.isMirroringWatchSession
-                                        ? "The session keeps the sets already recorded. Check the plan on the watch before logging the next exercise."
-                                        : "The session keeps the sets already recorded. Refresh to load the current plan."
-                                )
+                                Text("The session keeps the sets already recorded. Refresh to load the current plan.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 Button("Dismiss") {
@@ -164,11 +123,7 @@ struct ActiveWorkoutView: View {
 
                         if !model.pendingExecutionChanges.isEmpty {
                             Section("Pending plan change") {
-                                Text(
-                                    model.isMirroringWatchSession
-                                        ? "Queued on this phone. The Apple Watch keeps the previous exercise until the server accepts it."
-                                        : "Queued on this phone. It is not on the server yet."
-                                )
+                                Text("Queued on this phone. It is not on the server yet.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 ForEach(model.pendingExecutionChanges) { entry in
@@ -268,8 +223,13 @@ struct ActiveWorkoutView: View {
                                                         "plan-group-\(index)-\(groupIndex)"
                                                     )
                                             }
-                                            if let velocity = item.velocityTargetLabel {
+                                            if let velocity = row?.velocityTargetLabel
+                                                ?? item.velocityTargetLabel {
                                                 Text("target " + velocity)
+                                            }
+                                            if let note = row?.topSetNote {
+                                                Text(note)
+                                                    .foregroundStyle(.secondary)
                                             }
                                             if model.isExerciseActive(
                                                 planItemIndex: identity,
@@ -286,8 +246,13 @@ struct ActiveWorkoutView: View {
                                             Text(row?.repsLabel ?? item.repsLabel)
                                             Text(row?.loadLabel ?? item.loadLabel)
                                             Text(row?.effortLabel ?? item.effortLabel)
-                                            if let velocity = item.velocityTargetLabel {
+                                            if let velocity = row?.velocityTargetLabel
+                                                ?? item.velocityTargetLabel {
                                                 Text("target " + velocity)
+                                            }
+                                            if let note = row?.topSetNote {
+                                                Text(note)
+                                                    .foregroundStyle(.secondary)
                                             }
                                             if model.isExerciseActive(
                                                 planItemIndex: identity,
@@ -308,6 +273,14 @@ struct ActiveWorkoutView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.blue)
                                         .accessibilityIdentifier("substituted-" + String(index))
+                                    }
+                                    if let note = row?.localStateNote {
+                                        Text(note)
+                                            .font(.caption2)
+                                            .foregroundStyle(
+                                                row?.change?.localState == "rejected" ? .red : .orange
+                                            )
+                                            .accessibilityIdentifier("execution-local-state-" + String(index))
                                     }
                                     NavigationLink {
                                         ExerciseWorkoutView(
@@ -383,7 +356,7 @@ struct ActiveWorkoutView: View {
                             } label: {
                                 Label("Log an exercise not in the plan", systemImage: "plus.circle")
                             }
-                            .disabled(model.isSaving || model.isMirroringWatchSession)
+                            .disabled(model.isSaving)
                             .accessibilityIdentifier("log-outside-exercise")
                             Text("The set is recorded as performed work without changing the prescription.")
                                 .font(.footnote)
@@ -585,18 +558,6 @@ struct ActiveWorkoutView: View {
             } message: {
                 Text("Logged sets stay in this workout, but the session will not be completed.")
             }
-            .confirmationDialog(
-                "Take over logging on this iPhone?",
-                isPresented: $confirmingTakeOver,
-                titleVisibility: .visible
-            ) {
-                Button("Take over logging", role: .destructive) {
-                    Task { await takeOverLogging() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The watch stops logging and becomes read-only. Sets it already recorded stay in the session; anything still queued on the watch is sent when it reconnects.")
-            }
             .fullScreenCover(item: $reportTarget, onDismiss: {
                 dismiss()
             }) { target in
@@ -796,13 +757,6 @@ struct ActiveWorkoutView: View {
             dismiss()
         } else {
             abandonError = model.mutationError
-        }
-    }
-
-    private func takeOverLogging() async {
-        takeOverError = nil
-        if !(await model.takeOverLogging()) {
-            takeOverError = model.mutationError
         }
     }
 

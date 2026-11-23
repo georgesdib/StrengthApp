@@ -21,6 +21,16 @@ app presents and records that authority.
   exactly-once workout save rule and the privacy limits (denied read is indistinguishable from no
   data) that constrain every future import. Read it before changing any HealthKit code.
 
+## Offline execution
+
+- **Unified offline execution (closed 2026-11-23).** Device-independent offline execution is
+  implemented on both sides, including phone-committed watch writes, optimistic offline
+  substitutions/additions, the dose-aware catalogue and durable set origin. Read
+  [the canonical plan](https://github.com/georgesdib/strength-app/blob/offline-execution/docs/plans/UNIFIED-OFFLINE-EXECUTION.md);
+  it is the source of truth. Physical acceptance was closed by owner decision; release is app-first.
+- [Offline execution client implementation](OFFLINE-EXECUTION.md) — what C1/C2 changed in the app,
+  the plan-only watch cache, the ledger, merge rules and the follow-up findings.
+
 ## Client plan and contracts
 
 - [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) — phased iPhone implementation plan, architecture

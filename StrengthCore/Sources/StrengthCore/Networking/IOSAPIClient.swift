@@ -251,6 +251,8 @@ public final class IOSAPIClient {
     /// When set, a transport failure falls back to the paired phone. The direct server path is
     /// always attempted first; a relay is never the only copy.
     public var relay: (any WatchRelayTransport)?
+    /// Watch execution writes use the phone as the only committer. Reads still go direct.
+    public var requiresPhoneRelay = false
 
     public init(
         transport: HTTPTransport,
@@ -683,10 +685,25 @@ public final class IOSAPIClient {
 
     public func startWorkout(
         issuedPlanId: String,
+        executionId: String? = nil,
+        startedAt: String? = nil,
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> WorkoutDetail {
-        let body = StartWorkoutRequest(issuedPlanId: issuedPlanId)
+        let body = StartWorkoutRequest(
+            issuedPlanId: issuedPlanId,
+            executionId: executionId,
+            startedAt: startedAt
+        )
+        if requiresPhoneRelay {
+            return try await relayed(
+                .start,
+                session: session,
+                issuedPlanId: issuedPlanId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts",
@@ -713,8 +730,33 @@ public final class IOSAPIClient {
         body: AddSetRequest,
         session: IOSSession,
         idempotencyKey: String,
-        journaling: Bool = true
+        journaling: Bool = true,
+        preferRelay: Bool = false
     ) async throws -> WorkoutDetail {
+        if requiresPhoneRelay {
+            return try await relayed(
+                .addSet,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
+        // Ack-before-commit: with the phone reachable, the watch commits through it so the phone
+        // can merge the index and acknowledge the set. The direct path remains the fallback.
+        if preferRelay, relay != nil {
+            do {
+                return try await relayed(
+                    .addSet,
+                    session: session,
+                    workoutId: workoutId,
+                    idempotencyKey: idempotencyKey,
+                    payload: try? encoder.encode(body)
+                )
+            } catch let error as APIError where error.isTransport {
+                // The phone stopped answering; the direct path is still available.
+            }
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/sets",
@@ -744,6 +786,15 @@ public final class IOSAPIClient {
         idempotencyKey: String
     ) async throws -> ExecutionEventsResponse {
         let body = ExecutionEventsRequest(events: events)
+        if requiresPhoneRelay {
+            return try await relayed(
+                .executionEvents,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/execution-events",
@@ -777,13 +828,51 @@ public final class IOSAPIClient {
         )
     }
 
+    /// One correction event; the set keeps its server identity. Never remove-and-re-add.
+    public func updateSet(
+        workoutId: String,
+        body: UpdateSetRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutDetail {
+        if requiresPhoneRelay {
+            let value: WorkoutDetail = try await relayed(
+                .updateSet,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+            return value
+        }
+        let value: WorkoutDetail = try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/update-set",
+            body: body,
+            kind: .updateSet,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey
+        )
+        return value
+    }
+
     public func removeSet(
         workoutId: String,
         body: RemoveSetRequest,
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> WorkoutDetail {
-        try await post(
+        if requiresPhoneRelay {
+            let value: WorkoutDetail = try await relayed(
+                .removeSet,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+            return value
+        }
+        let value: WorkoutDetail = try await post(
             path: "api/ios/v1/workouts/\(workoutId)/remove-set",
             body: body,
             kind: .removeSet,
@@ -791,6 +880,7 @@ public final class IOSAPIClient {
             session: session,
             idempotencyKey: idempotencyKey
         )
+        return value
     }
 
     public func discardPendingOperation(_ operationId: String) {
@@ -829,8 +919,8 @@ public final class IOSAPIClient {
     }
 
     /// Appends one phone-authored execution substitution or addition (DEC-RESOLVER-23).
-    /// Journaling is the offline author: the queued body sets prefillRequested false, so the
-    /// server stores no prefill and never retro-solves.
+    /// A journaled body keeps the same catalogue value or miss; the server never retro-solves a
+    /// catalogue miss.
     public func recordExecutionChange(
         workoutId: String,
         body: ExecutionChangeRequest,
@@ -856,6 +946,15 @@ public final class IOSAPIClient {
         idempotencyKey: String,
         journaling: Bool = true
     ) async throws -> WorkoutDetail {
+        if requiresPhoneRelay {
+            return try await relayed(
+                .rateForm,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/form",
@@ -878,6 +977,25 @@ public final class IOSAPIClient {
         }
     }
 
+    /// Records that an expected device has nothing left to send. This settles an open
+    /// reconciliation window without waiting for its deadline.
+    public func reconcileDevice(
+        workoutId: String,
+        deviceId: String,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> WorkoutReconciliationResponse {
+        try await post(
+            path: "api/ios/v1/workouts/\(workoutId)/reconciliation",
+            body: ReconciliationDeviceRequest(deviceId: deviceId),
+            kind: .reconciliation,
+            targetId: workoutId,
+            session: session,
+            idempotencyKey: idempotencyKey,
+            journaling: false
+        )
+    }
+
     public func completeWorkout(
         workoutId: String,
         body: CompleteWorkoutRequest,
@@ -885,6 +1003,15 @@ public final class IOSAPIClient {
         idempotencyKey: String,
         journaling: Bool = true
     ) async throws -> WorkoutDetail {
+        if requiresPhoneRelay {
+            return try await relayed(
+                .finish,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/complete",
@@ -907,32 +1034,19 @@ public final class IOSAPIClient {
         }
     }
 
-    /// Transfers ownership of an in-progress workout to the calling device (contract §9).
-    /// Never journaled: queuing an ownership change would flip the owner minutes or hours after
-    /// the lifter was told it failed. The caller refreshes instead.
-    public func takeover(
-        workoutId: String,
-        session: IOSSession,
-        idempotencyKey: String
-    ) async throws -> WorkoutDetail {
-        try await post(
-            path: "api/ios/v1/workouts/\(workoutId)/takeover",
-            // The server refuses a take-over that is not explicitly confirmed; the user has
-            // already confirmed in the UI, so the request carries that acknowledgement.
-            body: ["confirm": true],
-            kind: .takeover,
-            targetId: workoutId,
-            session: session,
-            idempotencyKey: idempotencyKey,
-            journaling: false
-        )
-    }
-
     public func abandonWorkout(
         workoutId: String,
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> WorkoutDetail {
+        if requiresPhoneRelay {
+            return try await relayed(
+                .abandon,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/abandon",

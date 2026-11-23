@@ -57,6 +57,48 @@ final class WatchExecutionEngineTests: XCTestCase {
         XCTAssertNil(try? store.load().session)
     }
 
+    func testOfflineStartUsesTheCachedPlanExecutionID() async throws {
+        let transport = AsyncStubTransport { _ in throw APIError.transport("offline") }
+        let engine = makeEngine(transport: transport)
+        let plan = PrescriptionPlan(
+            forDate: "2026-11-07",
+            sessionType: "squat",
+            sessionLabel: "Squat",
+            items: [
+                PrescriptionItem(
+                    orderIndex: 0, exerciseId: "competition_squat", sets: 3,
+                    repsLow: 5, repsHigh: 5, loadKg: 140, loadBasis: "external",
+                    rirTarget: 2, effortModel: "rir", refs: nil, restS: 180,
+                    essential: true
+                )
+            ],
+            warnings: nil, issues: nil
+        )
+        engine.cachedPlan = WatchPlanCache(
+            issuedPlanId: "plan-1",
+            executionId: "exec-1",
+            forDate: "2026-11-07",
+            sessionType: "squat",
+            expiresAt: "2026-11-07T17:00:00Z",
+            plan: plan
+        )
+
+        let started = await engine.start(issuedPlanID: "plan-1", session: session())
+
+        XCTAssertTrue(started)
+        XCTAssertEqual(engine.phase, .active)
+        XCTAssertEqual(engine.workout?.workoutId, "exec-1")
+        let capture = try store.load()
+        XCTAssertEqual(capture.session?.sessionUUID.count, 36)
+        XCTAssertEqual(capture.operations.first?.kind, .start)
+        guard case .start(let body) = capture.operations.first?.body else {
+            return XCTFail("expected a queued start")
+        }
+        XCTAssertEqual(body.executionId, "exec-1")
+        XCTAssertEqual(body.issuedPlanId, "plan-1")
+        XCTAssertNotNil(body.startedAt)
+    }
+
     // MARK: - Sets
 
     func testAddSetIsPerformedWhenTheSetStartedNotWhenItWasSaved() async throws {
@@ -734,7 +776,7 @@ final class WatchExecutionEngineTests: XCTestCase {
         }
     }
 
-    func testMissingOwnershipIsNeverPermissionToWrite() async throws {
+    func testMissingOwnershipDoesNotBlockWriting() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(owner: nil).utf8))
@@ -747,88 +789,12 @@ final class WatchExecutionEngineTests: XCTestCase {
 
         _ = await engine.reconcile(session: session())
 
-        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
-        let result = await engine.logSet(entry(setIndex: 1), session: session())
-        XCTAssertFalse(result.persisted)
-    }
-
-    func testMissingDeviceIdentityIsReadOnly() async throws {
-        let transport = AsyncStubTransport { request in
-            if request.url?.path.hasSuffix("/execution") == true {
-                return (200, Data(Self.executionPayload(owner: "watch-1").utf8))
-            }
-            return (200, Data(Self.watchWorkout.utf8))
-        }
-        let engine = makeEngine(transport: transport)
-        let anonymous = IOSSession(baseURL: URL(string: "http://home.local:8000")!, token: "token")
-        _ = await engine.start(issuedPlanID: "plan-1", session: anonymous)
-
-        _ = await engine.reconcile(session: anonymous)
-
-        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
-    }
-
-    func testStartWithoutConfirmedOwnershipIsReadOnly() async throws {
-        let json = Self.watchWorkout.replacingOccurrences(
-            of: "\"owner_device_id\": \"watch-1\",", with: ""
-        )
-        let transport = AsyncStubTransport { _ in (200, Data(json.utf8)) }
-        let engine = makeEngine(transport: transport)
-
-        _ = await engine.start(issuedPlanID: "plan-1", session: session())
-
-        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
-        XCTAssertNotNil(engine.workout, "the session is kept, not discarded")
-    }
-
-    func testReconciliationRestoresWritabilityAfterOwnershipIsConfirmed() async throws {
-        final class OwnerBox {
-            var value: String?
-            var requests = 0
-            var seen: [String] = []
-        }
-        let box = OwnerBox()
-        let transport = AsyncStubTransport { request in
-            if request.url?.path.hasSuffix("/execution") == true {
-                box.requests += 1
-                box.seen.append(box.value ?? "nil")
-                return (200, Data(Self.executionPayload(owner: box.value).utf8))
-            }
-            return (200, Data(Self.watchWorkout.utf8))
-        }
-        let engine = makeEngine(transport: transport)
-        _ = await engine.start(issuedPlanID: "plan-1", session: session())
-
-        _ = await engine.reconcile(session: session())
-        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
-
-        box.value = "watch-1"
-        _ = await engine.reconcile(session: session())
-        XCTAssertEqual(
-            engine.phase, WatchExecutionPhase.active,
-            "error=\(engine.lastError ?? "nil") requests=\(box.requests) seen=\(box.seen)"
-        )
-    }
-
-    // MARK: - Reconciliation
-
-    func testReconciliationKeepsAnOwnedInProgressSessionActive() async throws {
-        let transport = AsyncStubTransport { request in
-            if request.url?.path.hasSuffix("/execution") == true {
-                return (200, Data(Self.executionPayload(owner: "watch-1").utf8))
-            }
-            return (200, Data(Self.watchWorkout.utf8))
-        }
-        let engine = makeEngine(transport: transport)
-        _ = await engine.start(issuedPlanID: "plan-1", session: session())
-
-        let stop = await engine.reconcile(session: session())
-
-        XCTAssertEqual(stop, .allSent)
         XCTAssertEqual(engine.phase, .active)
+        let result = await engine.logSet(entry(setIndex: 1), session: session())
+        XCTAssertTrue(result.persisted)
     }
 
-    func testReconciliationGoesReadOnlyWhenThePhoneOwnsTheSession() async throws {
+    func testPhoneOwnedSessionDoesNotBlockWatchWriting() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(owner: "phone-1").utf8))
@@ -837,16 +803,16 @@ final class WatchExecutionEngineTests: XCTestCase {
         }
         let engine = makeEngine(transport: transport)
         _ = await engine.start(issuedPlanID: "plan-1", session: session())
+        try engine.selectItem(0)
 
         _ = await engine.reconcile(session: session())
 
-        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+        XCTAssertEqual(engine.phase, .active)
         let result = await engine.logSet(entry(setIndex: 1), session: session())
-        XCTAssertFalse(result.persisted, "a read-only watch cannot capture")
-        XCTAssertEqual(try store.load().operations.count, 0)
+        XCTAssertTrue(result.persisted)
     }
 
-    func testReadOnlyWatchStillAppliesAPlanRevision() async throws {
+    func testPlanRevisionAppliesRegardlessOfOwner() async throws {
         let transport = AsyncStubTransport { request in
             if request.url?.path.hasSuffix("/execution") == true {
                 return (200, Data(Self.executionPayload(
@@ -860,45 +826,8 @@ final class WatchExecutionEngineTests: XCTestCase {
 
         _ = await engine.reconcile(session: session())
 
-        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
-        XCTAssertEqual(
-            engine.workout?.planRevision, 1,
-            "a read-only watch must still mirror phone plan revisions"
-        )
-    }
-
-    func testReconciliationEndsWhenTheServerCompletedTheWorkout() async throws {
-        let transport = AsyncStubTransport { request in
-            if request.url?.path.hasSuffix("/execution") == true {
-                return (200, Data(Self.executionPayload(status: "completed").utf8))
-            }
-            return (200, Data(Self.watchWorkout.utf8))
-        }
-        let engine = makeEngine(transport: transport)
-        _ = await engine.start(issuedPlanID: "plan-1", session: session())
-
-        _ = await engine.reconcile(session: session())
-
-        XCTAssertEqual(engine.phase, WatchExecutionPhase.ended(.completed))
-        XCTAssertNotNil(engine.completedSetCount >= 0 ? engine.workout : nil)
-    }
-
-    func testNotOwnerDuringFlushTurnsTheSessionReadOnly() async throws {
-        let transport = AsyncStubTransport { request in
-            if request.url?.path.hasSuffix("/workouts") == true {
-                return (200, Data(Self.watchWorkout.utf8))
-            }
-            let body = "{\"error\":\"not yours\",\"code\":\"not_owner\"}"
-            return (409, Data(body.utf8))
-        }
-        let engine = makeEngine(transport: transport)
-        _ = await engine.start(issuedPlanID: "plan-1", session: session())
-
-        let result = await engine.logSet(entry(setIndex: 1), session: session())
-
-        XCTAssertTrue(result.persisted, "the set stays local")
-        XCTAssertEqual(result.stop, .conflict(code: "not_owner", message: "not yours"))
-        XCTAssertEqual(engine.phase, WatchExecutionPhase.readOnly)
+        XCTAssertEqual(engine.phase, .active)
+        XCTAssertEqual(engine.workout?.planRevision, 1)
     }
 
     // MARK: - Phase 6.6 corrections
@@ -1455,6 +1384,100 @@ final class WatchExecutionEngineTests: XCTestCase {
     {"workout_id":"workout-1","accepted":[],"duplicates":[],
      "received_at":"2026-11-07T16:00:01+00:00"}
     """#
+
+    func testCorrectLastSetUsesTheMappedServerIdentity() async throws {
+        let workout = try decode(Self.watchWorkout)
+        _ = try store.setActiveWorkout(workout)
+        _ = try store.setSession(WatchSessionRecord(
+            sessionUUID: "session-1",
+            startedAt: clock,
+            eventSetIDs: ["local-1": 42],
+            lastConfirmedLocalSetID: "local-1"
+        ))
+        var seenPath: String?
+        var seenSetID: Int?
+        let transport = AsyncStubTransport { request in
+            seenPath = request.url?.path
+            let object = request.httpBody.flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            seenSetID = object?["set_id"] as? Int
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        try engine.restore()
+        let stop = await engine.correctLastSet(
+            loadKg: 145, reps: 3, rir: 1, velocityMps: nil, session: session()
+        )
+        XCTAssertEqual(stop, .allSent)
+        XCTAssertEqual(seenPath, "/api/ios/v1/workouts/workout-1/update-set")
+        XCTAssertEqual(seenSetID, 42)
+    }
+
+    func testRemoveLastSetUsesTheMappedServerIdentity() async throws {
+        let workout = try decode(Self.watchWorkout)
+        _ = try store.setActiveWorkout(workout)
+        _ = try store.setSession(WatchSessionRecord(
+            sessionUUID: "session-1",
+            startedAt: clock,
+            eventSetIDs: ["local-1": 42],
+            lastConfirmedLocalSetID: "local-1"
+        ))
+        var seenPath: String?
+        var seenSetID: Int?
+        let transport = AsyncStubTransport { request in
+            seenPath = request.url?.path
+            let object = request.httpBody.flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            seenSetID = object?["set_id"] as? Int
+            return (200, Data(Self.watchWorkout.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        try engine.restore()
+        let stop = await engine.removeLastSet(session: session())
+        XCTAssertEqual(stop, .allSent)
+        XCTAssertEqual(seenPath, "/api/ios/v1/workouts/workout-1/remove-set")
+        XCTAssertEqual(seenSetID, 42)
+    }
+
+    func testLateCorrectionIsRefusedWithoutRetry() async throws {
+        let workout = try decode(Self.watchWorkout)
+        _ = try store.setActiveWorkout(workout)
+        _ = try store.setSession(WatchSessionRecord(
+            sessionUUID: "session-1",
+            startedAt: clock,
+            eventSetIDs: ["local-1": 42],
+            lastConfirmedLocalSetID: "local-1"
+        ))
+        let transport = AsyncStubTransport { _ in
+            (409, Data(#"{"error":"set was removed","code":"late_event_rejected"}"#.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        try engine.restore()
+        let stop = await engine.correctLastSet(
+            loadKg: 145, reps: 3, rir: 1, velocityMps: nil, session: session()
+        )
+        XCTAssertEqual(stop, .conflict(code: "late_event_rejected", message: "set was removed"))
+    }
+
+    func testClosedReconciliationWindowIsRefusedWithoutRetry() async throws {
+        let workout = try decode(Self.watchWorkout)
+        _ = try store.setActiveWorkout(workout)
+        _ = try store.setSession(WatchSessionRecord(
+            sessionUUID: "session-1",
+            startedAt: clock,
+            eventSetIDs: ["local-1": 42],
+            lastConfirmedLocalSetID: "local-1"
+        ))
+        let transport = AsyncStubTransport { _ in
+            (409, Data(#"{"error":"window closed","code":"reconciliation_window_closed"}"#.utf8))
+        }
+        let engine = makeEngine(transport: transport)
+        try engine.restore()
+        let stop = await engine.removeLastSet(session: session())
+        XCTAssertEqual(stop, .conflict(code: "reconciliation_window_closed", message: "window closed"))
+    }
 
     /// The shared workout fixture, owned by this watch rather than the phone. The phone suites
     /// need a phone-owned copy because mirror mode blocks their writes.

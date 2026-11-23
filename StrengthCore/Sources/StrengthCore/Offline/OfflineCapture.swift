@@ -6,6 +6,7 @@ import Foundation
 /// render UI, or replay operations. Chunk 3/4 wire those behaviours on top of this contract.
 
 public enum OfflineOperationKind: String, Codable, CaseIterable {
+    case start
     case addSet
     case executionEvents
     case rateForm
@@ -13,6 +14,7 @@ public enum OfflineOperationKind: String, Codable, CaseIterable {
 
     public var label: String {
         switch self {
+        case .start: return "Start workout"
         case .addSet: return "Add set"
         case .executionEvents: return "Execution events"
         case .rateForm: return "Form rating"
@@ -30,6 +32,7 @@ public enum OfflineOperationState: String, Codable {
 }
 
 public enum OfflineOperationBody: Codable, Equatable {
+    case start(StartWorkoutRequest)
     case addSet(AddSetRequest)
     case executionEvents([ExecutionEvent])
     case rateForm(FormRatingRequest)
@@ -37,6 +40,7 @@ public enum OfflineOperationBody: Codable, Equatable {
 
     public var kind: OfflineOperationKind {
         switch self {
+        case .start: return .start
         case .addSet: return .addSet
         case .executionEvents: return .executionEvents
         case .rateForm: return .rateForm
@@ -45,6 +49,15 @@ public enum OfflineOperationBody: Codable, Equatable {
     }
 }
 
+public enum LedgerAckState: String, Codable, Equatable {
+    case pending
+    case acknowledged
+    case failed
+    case conflict
+}
+
+/// One durable ledger entry. The v1 capture called this an operation; the fields below make the
+/// ledger contract explicit while remaining optional so a version-1 file still decodes.
 public struct OfflineOperation: Codable, Equatable, Identifiable {
     public let operationId: String
     public let workoutId: String
@@ -55,16 +68,26 @@ public struct OfflineOperation: Codable, Equatable, Identifiable {
     public var state: OfflineOperationState
     public var lastError: String?
     public var attemptedAt: Date?
+    /// Ledger provenance. Optional on a version-1 decode; the store fills them in place.
+    public var deviceId: String?
+    public var deviceSeq: Int?
+    public var createdAtLocal: Date?
+    public var clockOffsetSeconds: Double?
+    public var planWatermark: Int?
+    public var ackState: LedgerAckState?
 
     public var id: String { operationId }
+    public var entryId: String { operationId }
     public var kind: OfflineOperationKind { body.kind }
+    public var payload: OfflineOperationBody { body }
     public var isCancellable: Bool {
         state == .pending && attemptedAt == nil
     }
 
+    /// A ledger entry is never aged out before acknowledgement. Only the acknowledgement (or a
+    /// deliberate discard) removes it.
     public func isReplayable(now: Date = Date()) -> Bool {
         state == .pending
-            && now.timeIntervalSince(createdAt) <= OfflineCaptureStore.replayWindow
     }
 
     public init(
@@ -76,7 +99,13 @@ public struct OfflineOperation: Codable, Equatable, Identifiable {
         localFormId: Int? = nil,
         state: OfflineOperationState = .pending,
         lastError: String? = nil,
-        attemptedAt: Date? = nil
+        attemptedAt: Date? = nil,
+        deviceId: String? = nil,
+        deviceSeq: Int? = nil,
+        createdAtLocal: Date? = nil,
+        clockOffsetSeconds: Double? = nil,
+        planWatermark: Int? = nil,
+        ackState: LedgerAckState? = nil
     ) {
         self.operationId = operationId
         self.workoutId = workoutId
@@ -87,11 +116,28 @@ public struct OfflineOperation: Codable, Equatable, Identifiable {
         self.state = state
         self.lastError = lastError
         self.attemptedAt = attemptedAt
+        self.deviceId = deviceId
+        self.deviceSeq = deviceSeq
+        self.createdAtLocal = createdAtLocal ?? createdAt
+        self.clockOffsetSeconds = clockOffsetSeconds
+        self.planWatermark = planWatermark
+        self.ackState = ackState ?? Self.ackState(for: state)
+    }
+
+    public static func ackState(for state: OfflineOperationState) -> LedgerAckState {
+        switch state {
+        case .pending: return .pending
+        case .synced: return .acknowledged
+        case .failed, .expired: return .failed
+        case .conflict: return .conflict
+        }
     }
 }
 
 public struct OfflineCapture: Codable {
-    public static let currentVersion = 1
+    /// Version 2 adds the ledger fields and the pre-start plan cache. Version 1 is decoded and
+    /// migrated in place; a mid-workout app update must never make the capture unreadable.
+    public static let currentVersion = 2
 
     public var version: Int
     public var activeWorkout: WorkoutDetail?
@@ -100,19 +146,35 @@ public struct OfflineCapture: Codable {
     /// The watch's execution record for the active session (Phase 6.3). Nil on the phone and in
     /// files written before 6.3; optional so an older capture file still decodes at version 1.
     public var session: WatchSessionRecord?
+    /// The issued plan downloaded before start, with its execution identity and catalogue. Nil
+    /// when no plan is cached, or in files written before offline execution.
+    public var cachedPlan: CachedIssuedPlan?
+    /// The catalogue the active workout was started with. It stays available after the start
+    /// consumes the plan cache, so a later substitution can still be prefilled offline.
+    public var activeCatalogue: LoadCatalogue?
+    /// Optimistic execution changes authored on this phone. They are applied to the local view
+    /// before the server answers; a rejected change stays here marked unresolved rather than
+    /// silently reverting.
+    public var localExecutionChanges: [ExecutionChange]?
 
     public init(
         version: Int = OfflineCapture.currentVersion,
         activeWorkout: WorkoutDetail? = nil,
         operations: [OfflineOperation] = [],
         updatedAt: Date = Date(),
-        session: WatchSessionRecord? = nil
+        session: WatchSessionRecord? = nil,
+        cachedPlan: CachedIssuedPlan? = nil,
+        activeCatalogue: LoadCatalogue? = nil,
+        localExecutionChanges: [ExecutionChange]? = nil
     ) {
         self.version = version
         self.activeWorkout = activeWorkout
         self.operations = operations
         self.updatedAt = updatedAt
         self.session = session
+        self.cachedPlan = cachedPlan
+        self.activeCatalogue = activeCatalogue
+        self.localExecutionChanges = localExecutionChanges
     }
 }
 
@@ -245,11 +307,16 @@ public final class OfflineCaptureStore {
             guard capture.operations.count < maxOperations else {
                 throw OfflineCaptureStoreError.full
             }
+            let sequence = (capture.operations.compactMap(\.deviceSeq).max() ?? -1) + 1
             capture.operations.append(OfflineOperation(
                 operationId: UUID().uuidString.lowercased(),
                 workoutId: workoutId,
                 body: .executionEvents(events),
-                createdAt: now
+                createdAt: now,
+                deviceId: capture.session?.deviceId,
+                deviceSeq: sequence,
+                clockOffsetSeconds: capture.session?.clockOffsetSeconds,
+                planWatermark: capture.session?.execution?.watermark
             ))
         }
     }
@@ -294,6 +361,39 @@ public final class OfflineCaptureStore {
         return try loadUnlocked()
     }
 
+    /// Stores the issued plan before it is started, so a relaunch (or an offline watch) still has
+    /// the plan, its execution id and the catalogue it shipped.
+    public func setCachedPlan(_ plan: CachedIssuedPlan?) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        capture.cachedPlan = plan
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Keeps the catalogue beside the active workout after the start consumed the plan cache.
+    public func setActiveCatalogue(_ catalogue: LoadCatalogue?) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        capture.activeCatalogue = catalogue
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Persists optimistic execution changes independently of the operation queue.
+    public func setLocalExecutionChanges(
+        _ changes: [ExecutionChange]
+    ) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        capture.localExecutionChanges = changes.isEmpty ? nil : changes
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
     public func record(_ operation: OfflineOperation) throws -> OfflineCapture {
         try record(operation, activeWorkout: nil)
     }
@@ -324,7 +424,24 @@ public final class OfflineCaptureStore {
         guard capture.operations.count < Self.maxOperations else {
             throw OfflineCaptureStoreError.full
         }
-        capture.operations.append(operation)
+        var entry = operation
+        if entry.deviceSeq == nil {
+            entry.deviceSeq = (capture.operations.compactMap(\.deviceSeq).max() ?? -1) + 1
+        }
+        if entry.createdAtLocal == nil {
+            entry.createdAtLocal = entry.createdAt
+        }
+        if entry.ackState == nil {
+            entry.ackState = .pending
+        }
+        if entry.deviceId == nil { entry.deviceId = capture.session?.deviceId }
+        if entry.clockOffsetSeconds == nil {
+            entry.clockOffsetSeconds = capture.session?.clockOffsetSeconds
+        }
+        if entry.planWatermark == nil {
+            entry.planWatermark = capture.session?.execution?.watermark
+        }
+        capture.operations.append(entry)
         try saveUnlocked(capture)
         return try loadUnlocked()
     }
@@ -364,13 +481,44 @@ public final class OfflineCaptureStore {
             guard capture.operations.count < Self.maxOperations else {
                 throw OfflineCaptureStoreError.full
             }
+            let sequence = (capture.operations.compactMap(\.deviceSeq).max() ?? -1) + 1
             capture.operations.append(OfflineOperation(
                 operationId: UUID().uuidString.lowercased(),
                 workoutId: workoutId,
                 body: .executionEvents(events),
-                createdAt: now()
+                createdAt: now(),
+                deviceId: capture.session?.deviceId,
+                deviceSeq: sequence,
+                clockOffsetSeconds: capture.session?.clockOffsetSeconds,
+                planWatermark: capture.session?.execution?.watermark
             ))
         }
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Rewrites one queued set's index after the server reports a collision. The rest of the
+    /// request is untouched, so its idempotency identity keeps the same payload apart from the
+    /// index that must change.
+    public func replaceAddSetIndex(
+        operationId: String,
+        setIndex: Int
+    ) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        guard let index = capture.operations.firstIndex(where: {
+            $0.operationId == operationId
+        }) else {
+            throw OfflineCaptureStoreError.operationNotFound(operationId)
+        }
+        guard case .addSet(var body) = capture.operations[index].body else {
+            throw OfflineCaptureStoreError.invalidOperation(
+                "Only an add-set operation has a set index."
+            )
+        }
+        body = body.withSetIndex(setIndex)
+        capture.operations[index].body = .addSet(body)
         try saveUnlocked(capture)
         return try loadUnlocked()
     }
@@ -390,6 +538,7 @@ public final class OfflineCaptureStore {
             throw OfflineCaptureStoreError.operationNotFound(operationId)
         }
         capture.operations[index].state = state
+        capture.operations[index].ackState = OfflineOperation.ackState(for: state)
         capture.operations[index].lastError = error
         if let attemptedAt {
             capture.operations[index].attemptedAt = attemptedAt
@@ -462,17 +611,31 @@ public final class OfflineCaptureStore {
         try saveUnlocked(OfflineCapture(updatedAt: now()))
     }
 
+    /// Ledger entries are not aged out before acknowledgement. Kept as a no-op so callers that
+    /// still read a v1 file cannot turn unsent work into an expired entry on upgrade.
     private func expireUnsafeOperations(_ capture: OfflineCapture) -> OfflineCapture {
-        let cutoff = now().addingTimeInterval(-Self.replayWindow)
-        var result = capture
-        for index in result.operations.indices {
-            guard result.operations[index].state == .pending,
-                  result.operations[index].createdAt < cutoff else { continue }
-            result.operations[index].state = .expired
-            result.operations[index].lastError =
-                "Older than the 28-day replay window; reconcile or discard it."
+        capture
+    }
+
+    /// Fills the ledger-only fields a version-1 file did not persist. No set is dropped and the
+    /// operation order is preserved.
+    private func migrateLedgerFields(_ capture: inout OfflineCapture) {
+        var nextSequence = (capture.operations.compactMap(\.deviceSeq).max() ?? -1) + 1
+        for index in capture.operations.indices {
+            if capture.operations[index].createdAtLocal == nil {
+                capture.operations[index].createdAtLocal = capture.operations[index].createdAt
+            }
+            if capture.operations[index].deviceSeq == nil {
+                capture.operations[index].deviceSeq = nextSequence
+                nextSequence += 1
+            }
+            if capture.operations[index].ackState == nil {
+                capture.operations[index].ackState = OfflineOperation.ackState(
+                    for: capture.operations[index].state
+                )
+            }
         }
-        return result
+        capture.version = OfflineCapture.currentVersion
     }
 
     public static func validateOperation(
@@ -513,9 +676,16 @@ public final class OfflineCaptureStore {
             let data = try Data(contentsOf: fileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let capture = try decoder.decode(OfflineCapture.self, from: data)
-            guard capture.version == OfflineCapture.currentVersion else {
+            var capture = try decoder.decode(OfflineCapture.self, from: data)
+            guard capture.version >= 1,
+                  capture.version <= OfflineCapture.currentVersion else {
                 throw OfflineCaptureStoreError.unsupportedVersion(capture.version)
+            }
+            if capture.version < OfflineCapture.currentVersion {
+                // Decode and migrate in place. The write is atomic, so a termination during the
+                // upgrade leaves either the original v1 file or the migrated v2 file.
+                migrateLedgerFields(&capture)
+                try saveUnlocked(capture)
             }
             return capture
         } catch let error as OfflineCaptureStoreError {

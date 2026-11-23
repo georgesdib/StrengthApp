@@ -27,7 +27,12 @@ final class HealthKitReadinessService: HealthKitReadinessProviding {
             throw HealthKitReadinessError.unavailable
         }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            store.requestAuthorization(toShare: [], read: [hrv, rhr, bodyMass]) { _, error in
+            // The same opt-in that enables readiness import also grants the phone permission
+            // to save the one HealthKit workout it writes when it finishes a session (D11/C3).
+            store.requestAuthorization(
+                toShare: [HKObjectType.workoutType()],
+                read: [hrv, rhr, bodyMass]
+            ) { _, error in
                 if let error {
                     continuation.resume(throwing: HealthKitReadinessError.query(error.localizedDescription))
                 } else {

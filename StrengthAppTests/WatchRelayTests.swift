@@ -52,6 +52,38 @@ final class WatchRelayTests: XCTestCase {
         XCTAssertEqual(request.issuedPlanId, "plan-1")
     }
 
+    func testPhoneRelayRequirementSkipsTheDirectPath() async throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let workout = try decoder.decode(
+            WorkoutDetail.self, from: Data(Fixtures.workoutWithSet.utf8)
+        )
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let relay = RecordingRelay()
+        relay.response = WatchRelayResponse(
+            requestId: "request-1", ok: true, payload: try encoder.encode(workout)
+        )
+        var directCalls = 0
+        let transport = StubTransport { _ in
+            directCalls += 1
+            return (200, Data(Fixtures.workoutWithSet.utf8))
+        }
+        let client = IOSAPIClient(transport: transport)
+        client.relay = relay
+        client.requiresPhoneRelay = true
+        let session = IOSSession(
+            baseURL: URL(string: "http://home.local:8000")!,
+            token: "watch-token",
+            deviceID: "watch-1"
+        )
+        _ = try await client.startWorkout(
+            issuedPlanId: "plan-1", session: session, idempotencyKey: "start-key"
+        )
+        XCTAssertEqual(directCalls, 0)
+        XCTAssertEqual(relay.requests.first?.operation, .start)
+    }
+
     func testDirectSuccessDoesNotUseTheRelay() async throws {
         let relay = RecordingRelay()
         let transport = StubTransport { _ in

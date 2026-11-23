@@ -251,6 +251,8 @@ public final class IOSAPIClient {
     /// When set, a transport failure falls back to the paired phone. The direct server path is
     /// always attempted first; a relay is never the only copy.
     public var relay: (any WatchRelayTransport)?
+    /// Watch execution writes use the phone as the only committer. Reads still go direct.
+    public var requiresPhoneRelay = false
 
     public init(
         transport: HTTPTransport,
@@ -693,6 +695,15 @@ public final class IOSAPIClient {
             executionId: executionId,
             startedAt: startedAt
         )
+        if requiresPhoneRelay {
+            return try await relayed(
+                .start,
+                session: session,
+                issuedPlanId: issuedPlanId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts",
@@ -722,6 +733,15 @@ public final class IOSAPIClient {
         journaling: Bool = true,
         preferRelay: Bool = false
     ) async throws -> WorkoutDetail {
+        if requiresPhoneRelay {
+            return try await relayed(
+                .addSet,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
         // Ack-before-commit: with the phone reachable, the watch commits through it so the phone
         // can merge the index and acknowledge the set. The direct path remains the fallback.
         if preferRelay, relay != nil {
@@ -766,6 +786,15 @@ public final class IOSAPIClient {
         idempotencyKey: String
     ) async throws -> ExecutionEventsResponse {
         let body = ExecutionEventsRequest(events: events)
+        if requiresPhoneRelay {
+            return try await relayed(
+                .executionEvents,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/execution-events",
@@ -806,7 +835,17 @@ public final class IOSAPIClient {
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> WorkoutDetail {
-        try await post(
+        if requiresPhoneRelay {
+            let value: WorkoutDetail = try await relayed(
+                .updateSet,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+            return value
+        }
+        let value: WorkoutDetail = try await post(
             path: "api/ios/v1/workouts/\(workoutId)/update-set",
             body: body,
             kind: .updateSet,
@@ -814,6 +853,7 @@ public final class IOSAPIClient {
             session: session,
             idempotencyKey: idempotencyKey
         )
+        return value
     }
 
     public func removeSet(
@@ -822,7 +862,17 @@ public final class IOSAPIClient {
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> WorkoutDetail {
-        try await post(
+        if requiresPhoneRelay {
+            let value: WorkoutDetail = try await relayed(
+                .removeSet,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+            return value
+        }
+        let value: WorkoutDetail = try await post(
             path: "api/ios/v1/workouts/\(workoutId)/remove-set",
             body: body,
             kind: .removeSet,
@@ -830,6 +880,7 @@ public final class IOSAPIClient {
             session: session,
             idempotencyKey: idempotencyKey
         )
+        return value
     }
 
     public func discardPendingOperation(_ operationId: String) {
@@ -895,6 +946,15 @@ public final class IOSAPIClient {
         idempotencyKey: String,
         journaling: Bool = true
     ) async throws -> WorkoutDetail {
+        if requiresPhoneRelay {
+            return try await relayed(
+                .rateForm,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/form",
@@ -943,6 +1003,15 @@ public final class IOSAPIClient {
         idempotencyKey: String,
         journaling: Bool = true
     ) async throws -> WorkoutDetail {
+        if requiresPhoneRelay {
+            return try await relayed(
+                .finish,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey,
+                payload: try? encoder.encode(body)
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/complete",
@@ -970,6 +1039,14 @@ public final class IOSAPIClient {
         session: IOSSession,
         idempotencyKey: String
     ) async throws -> WorkoutDetail {
+        if requiresPhoneRelay {
+            return try await relayed(
+                .abandon,
+                session: session,
+                workoutId: workoutId,
+                idempotencyKey: idempotencyKey
+            )
+        }
         do {
             return try await post(
                 path: "api/ios/v1/workouts/\(workoutId)/abandon",

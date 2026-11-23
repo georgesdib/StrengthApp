@@ -883,7 +883,7 @@ public struct FormRatingRequest: Codable, Equatable {
     }
 }
 
-public struct RemoveSetRequest: Encodable, Equatable {
+public struct RemoveSetRequest: Codable, Equatable {
     public let setId: Int
 
     public init(setId: Int) {
@@ -893,7 +893,7 @@ public struct RemoveSetRequest: Encodable, Equatable {
 
 /// One correction to a performed set. The server appends a correction event; the set keeps its
 /// `set_id` and `set_index`, which the merge map and telemetry links depend on.
-public struct UpdateSetRequest: Encodable, Equatable {
+public struct UpdateSetRequest: Codable, Equatable {
     public let setId: Int
     public let loadKg: Double?
     public let reps: Int?

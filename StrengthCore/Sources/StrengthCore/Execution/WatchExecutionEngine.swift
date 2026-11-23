@@ -232,12 +232,14 @@ public final class WatchExecutionEngine {
         client: IOSAPIClient,
         store: OfflineCaptureStore,
         relay: (any WatchRelayTransport)? = nil,
+        requiresPhoneRelay: Bool = false,
         now: @escaping () -> Date = Date.init
     ) {
         self.client = client
         self.store = store
         self.now = now
         client.relay = relay
+        client.requiresPhoneRelay = requiresPhoneRelay
     }
 
     // MARK: - Derived state
@@ -439,6 +441,104 @@ public final class WatchExecutionEngine {
 
     public var canUndoLastSet: Bool {
         pending.contains { $0.kind == .addSet && $0.attemptedAt == nil }
+    }
+
+    /// The server id of the newest acknowledged set, via the per-device local-set map.
+    public var lastConfirmedSetID: Int? {
+        guard let local = sessionRecord?.lastConfirmedLocalSetID else { return nil }
+        return sessionRecord?.eventSetIDs?[local]
+    }
+
+    public var lastConfirmedSet: WorkoutSet? {
+        guard let setId = lastConfirmedSetID else { return nil }
+        return workout?.sets?.first { $0.setId == setId }
+    }
+
+    /// One correction call for the newest confirmed set. The set keeps its server identity.
+    @discardableResult
+    public func correctLastSet(
+        loadKg: Double?,
+        reps: Int?,
+        rir: Int?,
+        velocityMps: Double?,
+        session: IOSSession
+    ) async -> WatchFlushStop {
+        guard let setId = lastConfirmedSetID, let workoutId = workout?.workoutId else {
+            return .conflict(code: "no_confirmed_set", message: "There is no confirmed set to correct.")
+        }
+        do {
+            let updated = try await client.updateSet(
+                workoutId: workoutId,
+                body: UpdateSetRequest(
+                    setId: setId,
+                    loadKg: loadKg,
+                    reps: reps,
+                    rir: rir,
+                    velocityMps: velocityMps
+                ),
+                session: session,
+                idempotencyKey: OperationID.derived("watch-update:\(setId)")
+            )
+            _ = try? store.setActiveWorkout(updated)
+            refresh()
+            return .allSent
+        } catch {
+            return handleDirect(error)
+        }
+    }
+
+    /// One removal for the newest confirmed set, addressed through the same map.
+    @discardableResult
+    public func removeLastSet(session: IOSSession) async -> WatchFlushStop {
+        guard let setId = lastConfirmedSetID, let workoutId = workout?.workoutId else {
+            return .conflict(code: "no_confirmed_set", message: "There is no confirmed set to remove.")
+        }
+        do {
+            let updated = try await client.removeSet(
+                workoutId: workoutId,
+                body: RemoveSetRequest(setId: setId),
+                session: session,
+                idempotencyKey: OperationID.derived("watch-remove:\(setId)")
+            )
+            _ = try? store.setActiveWorkout(updated)
+            if var record = sessionRecord {
+                let local = record.lastConfirmedLocalSetID
+                record.eventSetIDs?.removeValue(forKey: local ?? "")
+                record.lastConfirmedLocalSetID = nil
+                if let saved = try? store.setSession(record) { apply(saved) }
+            }
+            refresh()
+            return .allSent
+        } catch {
+            return handleDirect(error)
+        }
+    }
+
+    private func handleDirect(_ error: Error) -> WatchFlushStop {
+        guard let api = error as? APIError else {
+            return transient(error)
+        }
+        switch api {
+        case .unauthorized, .forbidden:
+            return .credentialsMissing
+        case .server(let status, let code, let text, _, _):
+            if status == 401 || status == 403 { return .credentialsMissing }
+            if status >= 500 || status == 408 || status == 429 {
+                return transient(error)
+            }
+            if code == "workout_not_active" || code == "workout_not_found" {
+                phase = .ended(.unavailable)
+            }
+            return .conflict(code: code, message: text)
+        case .http(let status, let text, _):
+            if status == 401 || status == 403 { return .credentialsMissing }
+            if status >= 500 { return transient(error) }
+            return .conflict(code: "http_\(status)", message: text)
+        case .transport, .decoding:
+            return transient(error)
+        default:
+            return transient(error)
+        }
     }
 
     public var canDiscard: Bool {
@@ -1473,6 +1573,7 @@ public final class WatchExecutionEngine {
         guard !mapping.values.contains(setId) else { return }
         mapping[operation.operationId] = setId
         record.eventSetIDs = mapping
+        record.lastConfirmedLocalSetID = operation.operationId
         if let updated = try? store.setSession(record) {
             apply(updated)
         }

@@ -900,14 +900,16 @@ final class WatchPairingCoordinator: ObservableObject {
         )
     }
 
-    /// Executes one watch operation with the watch token. The phone is a transport, not a
-    /// second author: it does not journal, retry or reinterpret the request.
+    /// Commits one watch operation with the phone's credential. The watch token that travelled
+    /// with the request is not used for execution writes; the watch keeps it for reads only.
     private func relay(_ request: WatchRelayRequest) async -> WatchRelayResponse {
         do {
-            let baseURL = try IOSAPIClient.validatedBaseURL(request.baseURL)
-            let watchSession = IOSSession(
-                baseURL: baseURL, token: request.token, deviceID: request.deviceID
-            )
+            let _ = try IOSAPIClient.validatedBaseURL(request.baseURL)
+            // The phone is the only writer. Its own session commits the operation; the watch
+            // token is kept only for read-only surfaces.
+            guard let commitSession = homeSession else {
+                throw APIError.transport("The iPhone session is unavailable.")
+            }
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             let encoder = JSONEncoder()
@@ -923,7 +925,7 @@ final class WatchPairingCoordinator: ObservableObject {
             }
             switch request.operation {
             case .bootstrap:
-                let value = try await client.bootstrap(session: watchSession)
+                let value = try await client.bootstrap(session: commitSession)
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
                 )
@@ -932,8 +934,13 @@ final class WatchPairingCoordinator: ObservableObject {
                       let key = request.idempotencyKey else {
                     throw APIError.http(status: 400, message: "start relay is incomplete", fields: [:])
                 }
+                let startBody = try? payload(StartWorkoutRequest.self)
                 let value = try await client.startWorkout(
-                    issuedPlanId: issuedPlanId, session: watchSession, idempotencyKey: key
+                    issuedPlanId: issuedPlanId,
+                    executionId: startBody?.executionId,
+                    startedAt: startBody?.startedAt,
+                    session: commitSession,
+                    idempotencyKey: key
                 )
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
@@ -967,7 +974,7 @@ final class WatchPairingCoordinator: ObservableObject {
                 let value = try await client.addSet(
                     workoutId: workoutId,
                     body: body,
-                    session: watchSession,
+                    session: commitSession,
                     idempotencyKey: key,
                     journaling: false
                 )
@@ -985,6 +992,34 @@ final class WatchPairingCoordinator: ObservableObject {
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
                 )
+            case .updateSet:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "correction relay is incomplete", fields: [:])
+                }
+                let value = try await client.updateSet(
+                    workoutId: workoutId,
+                    body: try payload(UpdateSetRequest.self),
+                    session: commitSession,
+                    idempotencyKey: key
+                )
+                onRelayedWorkout?(value)
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .removeSet:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "removal relay is incomplete", fields: [:])
+                }
+                let value = try await client.removeSet(
+                    workoutId: workoutId,
+                    body: try payload(RemoveSetRequest.self),
+                    session: commitSession,
+                    idempotencyKey: key
+                )
+                onRelayedWorkout?(value)
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
             case .executionEvents:
                 guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
                     throw APIError.http(status: 400, message: "event relay is incomplete", fields: [:])
@@ -992,7 +1027,7 @@ final class WatchPairingCoordinator: ObservableObject {
                 let value = try await client.submitExecutionEvents(
                     workoutId: workoutId,
                     events: try payload(ExecutionEventsRequest.self).events,
-                    session: watchSession,
+                    session: commitSession,
                     idempotencyKey: key
                 )
                 return WatchRelayResponse(
@@ -1005,7 +1040,7 @@ final class WatchPairingCoordinator: ObservableObject {
                 let value = try await client.completeWorkout(
                     workoutId: workoutId,
                     body: try payload(CompleteWorkoutRequest.self),
-                    session: watchSession,
+                    session: commitSession,
                     idempotencyKey: key,
                     journaling: false
                 )
@@ -1018,7 +1053,7 @@ final class WatchPairingCoordinator: ObservableObject {
                     throw APIError.http(status: 400, message: "abandon relay is incomplete", fields: [:])
                 }
                 let value = try await client.abandonWorkout(
-                    workoutId: workoutId, session: watchSession, idempotencyKey: key
+                    workoutId: workoutId, session: commitSession, idempotencyKey: key
                 )
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
@@ -1030,7 +1065,7 @@ final class WatchPairingCoordinator: ObservableObject {
                 let value = try await client.rateForm(
                     workoutId: workoutId,
                     body: try payload(FormRatingRequest.self),
-                    session: watchSession,
+                    session: commitSession,
                     idempotencyKey: key,
                     journaling: false
                 )

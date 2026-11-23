@@ -7,6 +7,8 @@ public enum WatchRelayOperation: String, Codable, Sendable {
     case bootstrap
     case start
     case addSet
+    case updateSet
+    case removeSet
     case executionEvents
     case finish
     case abandon

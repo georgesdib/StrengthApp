@@ -87,13 +87,14 @@ portfolio repository; this file records only what the app does.
 - The phone no longer enters mirror mode: it can log, rate form, edit and finish whenever a session
   is open. The takeover button, its confirmation sheet and the takeover request are gone.
 - The watch no longer turns read-only because another device owns the session.
-- The watch keeps its read-only credential. Direct watch execution writes and the generic relay
-  remain in place for this slice; retiring them needs the phone-commit transport and is the
-  remaining S5 engineering item.
+- The watch keeps its read-only credential. Execution writes no longer go direct: the watch
+  sends each start, set, correction, removal, form, event batch and finish to the phone, which
+  commits it with its own credential. If the phone is unreachable the operation stays in the
+  watch ledger for the next connection. Reads still use the watch credential.
 
 ## What is not done here
 
 - Physical-device acceptance is still required: watch-only with the phone off, both devices
   partitioned, termination mid-set, a version-1 capture upgraded mid-workout, and the visible
   technique-throttle effect.
-- Watch direct execution writes and the generic relay are not yet retired.
+- The watch's execution writes are phone-committed; the watch token is read-only.

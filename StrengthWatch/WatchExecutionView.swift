@@ -76,6 +76,11 @@ struct WatchSessionSheet: View {
     @ObservedObject var execution: WatchExecutionController
     @Environment(\.dismiss) private var dismiss
     @State private var showingFinish = false
+    @State private var showingCorrection = false
+    @State private var correctionLoad = ""
+    @State private var correctionReps = ""
+    @State private var correctionRir = ""
+    @State private var correctionVelocity = ""
 
     var body: some View {
         ScrollView {
@@ -142,6 +147,22 @@ struct WatchSessionSheet: View {
                     Button("Undo last set") { execution.undoLastSet() }
                         .font(.footnote)
                 }
+                if let set = execution.lastConfirmedSet {
+                    Button("Correct set \(set.setIndex ?? 0)") {
+                        correctionLoad = set.loadKg.map { String($0) } ?? ""
+                        correctionReps = set.reps.map(String.init) ?? ""
+                        correctionRir = set.rir.map(String.init) ?? ""
+                        correctionVelocity = set.velocity.map { String($0) } ?? ""
+                        showingCorrection = true
+                    }
+                    .font(.footnote)
+                    .accessibilityIdentifier("watch-correct-last-set")
+                    Button("Remove set \(set.setIndex ?? 0)", role: .destructive) {
+                        Task { await execution.removeLastSet() }
+                    }
+                    .font(.footnote)
+                    .accessibilityIdentifier("watch-remove-last-set")
+                }
                 Button("Finish") { showingFinish = true }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("watch-open-finish")
@@ -150,6 +171,41 @@ struct WatchSessionSheet: View {
         .sheet(isPresented: $showingFinish) {
             WatchFinishView(execution: execution)
         }
+        .sheet(isPresented: $showingCorrection) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Correct set").font(.headline)
+                    TextField("Load kg", text: $correctionLoad)
+                    TextField("Reps", text: $correctionReps)
+                    TextField("RIR", text: $correctionRir)
+                    TextField("Velocity m/s", text: $correctionVelocity)
+                    if let error = execution.lastError {
+                        Text(error).font(.caption2).foregroundStyle(.red)
+                    }
+                    Button("Save") {
+                        Task {
+                            await execution.correctLastSet(
+                                loadKg: Self.parse(correctionLoad),
+                                reps: Int(correctionReps),
+                                rir: Int(correctionRir),
+                                velocityMps: Self.parse(correctionVelocity)
+                            )
+                            showingCorrection = execution.lastError != nil
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(execution.isWorking)
+                    Button("Cancel") { showingCorrection = false }
+                }
+                .padding(.horizontal, 4)
+            }
+        }
+    }
+
+    private static func parse(_ text: String) -> Double? {
+        let value = text.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: ",", with: ".")
+        return value.isEmpty ? nil : Double(value)
     }
 
     private var plannedSets: Int {

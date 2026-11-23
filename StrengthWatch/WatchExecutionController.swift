@@ -102,7 +102,8 @@ final class WatchExecutionController: ObservableObject {
         self.engine = WatchExecutionEngine(
             client: IOSAPIClient(),
             store: OfflineCaptureStore(fileURL: Self.recordFileURL),
-            relay: relay
+            relay: relay,
+            requiresPhoneRelay: true
         )
         healthRecorder?.onHeartRate = { [weak self] bpm in
             self?.heartRateUpdated(bpm)
@@ -416,6 +417,43 @@ final class WatchExecutionController: ObservableObject {
     }
 
     var selectedSetNumber: Int { selectedCompletedSets + 1 }
+
+    var lastConfirmedSet: WorkoutSet? { engine.lastConfirmedSet }
+
+    func correctLastSet(
+        loadKg: Double?,
+        reps: Int?,
+        rir: Int?,
+        velocityMps: Double?
+    ) async {
+        guard let session = currentSession() else {
+            credentialsMissing()
+            return
+        }
+        isWorking = true
+        defer { isWorking = false }
+        let stop = await engine.correctLastSet(
+            loadKg: loadKg,
+            reps: reps,
+            rir: rir,
+            velocityMps: velocityMps,
+            session: session
+        )
+        await handle(stop)
+        sync()
+    }
+
+    func removeLastSet() async {
+        guard let session = currentSession() else {
+            credentialsMissing()
+            return
+        }
+        isWorking = true
+        defer { isWorking = false }
+        let stop = await engine.removeLastSet(session: session)
+        await handle(stop)
+        sync()
+    }
 
     var selectedExerciseName: String {
         let id = selectedRow?.exerciseId ?? engine.selectedItem?.exerciseId ?? ""

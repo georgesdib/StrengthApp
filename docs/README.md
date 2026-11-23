@@ -28,6 +28,8 @@ app presents and records that authority.
   [the canonical plan](https://github.com/georgesdib/strength-app/blob/offline-execution/docs/plans/UNIFIED-OFFLINE-EXECUTION.md),
   then its **§18 MacBook handout** for the Swift work (C1/C2) and its §16 for the one HTTP
   conversation the client must match. The plan is the source of truth; do not copy it here.
+- [Offline execution client implementation](OFFLINE-EXECUTION.md) — what C1/C2 changed in the app,
+  the plan-only watch cache, the ledger and the merge rules.
 
 ## Client plan and contracts
 

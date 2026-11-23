@@ -1392,6 +1392,20 @@ public final class WatchExecutionEngine {
                 nextRetryAt = nil
                 markOnline(session)
             } catch {
+                // A start replayed after another pairing device completed the session must not
+                // block the queued sets: the start already owns that execution id, and the
+                // late-reconciliation window is what accepts the sets next.
+                if operation.kind == .start,
+                   let api = error as? APIError,
+                   case let .server(_, code, _, _, details) = api,
+                   code == "plan_consumed",
+                   details["workout_id"]?.stringValue == operation.workoutId {
+                    _ = try? store.remove(operation.operationId)
+                    sentAny = true
+                    ladder.succeeded()
+                    nextRetryAt = nil
+                    continue
+                }
                 // A finish whose first response was lost comes back as 409 workout_not_active:
                 // the server already holds the session. Acknowledge it instead of stranding the
                 // watch on the progress screen with nothing left in the queue.

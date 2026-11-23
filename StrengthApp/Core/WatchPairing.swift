@@ -959,6 +959,8 @@ final class WatchPairingCoordinator: ObservableObject {
                     throw APIError.http(status: 400, message: "set relay is incomplete", fields: [:])
                 }
                 var body = try payload(AddSetRequest.self)
+                // The watch captured it; the phone remains the authenticated committer.
+                body = body.withOriginDeviceId(request.deviceID)
                 if let index = body.setIndex {
                     let existing = (currentWorkout?()?.sets ?? []).compactMap { set -> (String, Int)? in
                         guard let value = set.setIndex else { return nil }

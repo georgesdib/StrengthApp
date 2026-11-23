@@ -31,6 +31,10 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
     /// Server-path velocity target.
     public let vbt: ExecutionVBT?
     public let createdAt: String?
+    /// Client-side state for an optimistic change: "pending" or "rejected". Nil for a server row.
+    public let localState: String?
+    /// The journal operation that owns this optimistic change.
+    public let localOperationId: String?
 
     public init(
         eventId: Int? = nil,
@@ -52,7 +56,9 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
         topSet: TopSetStatus? = nil,
         vbtTarget: ExecutionVBT? = nil,
         vbt: ExecutionVBT? = nil,
-        createdAt: String? = nil
+        createdAt: String? = nil,
+        localState: String? = nil,
+        localOperationId: String? = nil
     ) {
         self.eventId = eventId
         self.kind = kind
@@ -74,6 +80,8 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
         self.vbtTarget = vbtTarget
         self.vbt = vbt
         self.createdAt = createdAt
+        self.localState = localState
+        self.localOperationId = localOperationId
     }
 
     public var id: String {
@@ -124,6 +132,30 @@ public struct ExecutionVBT: Codable, Equatable, Sendable {
     public let nSets: Int?
     public let nSessions: Int?
     public let calibrationId: String?
+
+    public init(
+        targetMps: Double? = nil,
+        lowMps: Double? = nil,
+        highMps: Double? = nil,
+        repCount: Int? = nil,
+        rirLow: Int? = nil,
+        rirHigh: Int? = nil,
+        scope: String? = nil,
+        nSets: Int? = nil,
+        nSessions: Int? = nil,
+        calibrationId: String? = nil
+    ) {
+        self.targetMps = targetMps
+        self.lowMps = lowMps
+        self.highMps = highMps
+        self.repCount = repCount
+        self.rirLow = rirLow
+        self.rirHigh = rirHigh
+        self.scope = scope
+        self.nSets = nSets
+        self.nSessions = nSessions
+        self.calibrationId = calibrationId
+    }
 }
 
 /// The server's current execution view: the latest substitution per plan slot and every
@@ -148,6 +180,32 @@ public struct ExecutionView: Codable, Sendable, Equatable {
     }
 
     public static let empty = ExecutionView()
+
+    /// Applies optimistic local changes over the latest server view. A local substitution
+    /// replaces the server's row for that slot; local additions stay visible until acknowledged.
+    public func merging(local changes: [ExecutionChange]) -> ExecutionView {
+        guard !changes.isEmpty else { return self }
+        var slots: [Int: ExecutionChange] = [:]
+        for change in substitutions {
+            if let slot = change.planItemIndex {
+                slots[slot] = change
+            }
+        }
+        var additions = additions
+        for change in changes {
+            if let slot = change.planItemIndex {
+                slots[slot] = change
+            } else if !additions.contains(where: { $0.id == change.id }) {
+                additions.append(change)
+            }
+        }
+        return ExecutionView(
+            workoutId: workoutId,
+            watermark: watermark,
+            substitutions: slots.sorted { ($0.key) < ($1.key) }.map(\.value),
+            additions: additions
+        )
+    }
 
     /// One display row per plan item, with its substitution applied, plus additions after their
     /// anchor. Order is the plan order; an addition whose anchor is gone stays at the end.
@@ -332,6 +390,14 @@ public struct ExecutionRow: Identifiable, Equatable, Sendable {
 
     /// A substitute's top-set eligibility is not inherited from the planned lift.
     public var topSetNote: String? { change?.topSetNote }
+
+    public var localStateNote: String? {
+        switch change?.localState {
+        case "pending": return "Saved on this iPhone · not yet synced"
+        case "rejected": return "Unresolved · the server rejected this change"
+        default: return nil
+        }
+    }
 }
 
 /// The phone's authoring body. There is no legacy prefill flag: a value means the phone applied

@@ -39,37 +39,144 @@ public struct LoadCatalogue: Codable, Equatable, Sendable {
         reps: Int,
         rir: Int?
     ) -> LoadPrefill {
+        let prescription = prescription(
+            exerciseId: exerciseId,
+            essential: essential,
+            reps: reps,
+            rir: rir,
+            sets: 0,
+            groups: []
+        )
+        return LoadPrefill(loadKg: prescription.loadKg, reason: prescription.reason ?? "none")
+    }
+
+    /// The full replacement prescription, matching `prescription_from_catalogue` on the server:
+    /// a live erector dose overrides every other load and caps sets; the slot's group shape
+    /// survives a normal substitution; a substituted slot never keeps top-set eligibility.
+    public func prescription(
+        exerciseId: String,
+        essential: Bool,
+        reps: Int,
+        rir: Int?,
+        sets: Int,
+        groups: [SetGroup]
+    ) -> CataloguePrescription {
         guard let entry = exercises[exerciseId] else {
-            return LoadPrefill(loadKg: nil, reason: "no_catalogue_entry")
+            return CataloguePrescription(sets: sets, reason: "no_catalogue_entry")
         }
+        var result = CataloguePrescription(
+            sets: sets,
+            topSet: TopSetStatus(status: "not_applicable", reasonCode: "substituted"),
+            vbtTarget: entry.vbtTarget
+        )
+        if let dose = entry.doseLoadKg {
+            let cap = entry.doseSetsCap
+            result.loadKg = NSDecimalNumber(decimal: dose).doubleValue
+            result.sets = cap.map { min(sets, $0) } ?? sets
+            result.reason = "flare_dose"
+            result.resolvedBy = "catalogue"
+            return result
+        }
+        let increment = entry.incrementKg ?? 0
         if entry.bodyweight == true {
-            return LoadPrefill(loadKg: 0, reason: "bodyweight")
+            result.loadKg = 0
+            result.reason = "bodyweight"
+            result.resolvedBy = "catalogue"
+            result.groups = Self.shape(
+                groups, e1rm: nil, load: 0, increment: increment
+            )
+            return result
         }
         if entry.power == true {
-            return LoadPrefill(loadKg: nil, reason: "power_work")
+            result.reason = "power_work"
+            return result
         }
-        guard let increment = entry.incrementKg, increment > 0 else {
-            return LoadPrefill(loadKg: nil, reason: "no_increment")
+        guard increment > 0 else {
+            result.reason = "no_increment"
+            return result
         }
-        let raw: Decimal
-        let reason: String
         if essential {
             guard let base = entry.baseLoadKg else {
-                return LoadPrefill(loadKg: nil, reason: "no_catalogue_base")
+                result.reason = "no_catalogue_base"
+                return result
             }
-            // Missing RIR falls back to plain Epley (reps / 30), matching estimate_e1rm.
             let divisor = Decimal(1) + (Decimal(reps) + Decimal(rir ?? 0)) / Decimal(30)
-            raw = base / divisor
-            reason = "catalogue_e1rm"
-        } else {
-            guard let held = entry.accessoryLoadKg else {
-                return LoadPrefill(loadKg: nil, reason: "no_catalogue_working_load")
-            }
-            raw = held
-            reason = "catalogue_double_progression"
+            let rounded = LoadRounding.roundDown(base / divisor, increment: increment)
+            result.loadKg = rounded
+            result.reason = "catalogue_e1rm"
+            result.resolvedBy = "catalogue"
+            result.groups = Self.shape(
+                groups, e1rm: base, load: Decimal(rounded), increment: increment
+            )
+            return result
         }
-        let rounded = LoadRounding.roundDown(raw, increment: increment)
-        return LoadPrefill(loadKg: rounded, reason: reason)
+        guard let held = entry.accessoryLoadKg else {
+            result.reason = "no_catalogue_working_load"
+            return result
+        }
+        let rounded = LoadRounding.roundDown(held, increment: increment)
+        result.loadKg = rounded
+        result.reason = "catalogue_double_progression"
+        result.resolvedBy = "catalogue"
+        result.groups = Self.shape(
+            groups, e1rm: nil, load: Decimal(rounded), increment: increment
+        )
+        return result
+    }
+
+    private static func shape(
+        _ groups: [SetGroup],
+        e1rm: Decimal?,
+        load: Decimal,
+        increment: Decimal
+    ) -> [SetGroup] {
+        groups.map { group in
+            let reps = group.repsLow ?? 1
+            let rir = group.rirTarget ?? 0
+            let groupLoad: Double
+            if let e1rm, increment > 0 {
+                let divisor = Decimal(1) + (Decimal(reps) + Decimal(rir)) / Decimal(30)
+                groupLoad = LoadRounding.roundDown(e1rm / divisor, increment: increment)
+            } else {
+                groupLoad = NSDecimalNumber(decimal: load).doubleValue
+            }
+            return SetGroup(
+                groupIndex: group.groupIndex,
+                sets: group.sets,
+                loadKg: groupLoad,
+                repsLow: group.repsLow,
+                repsHigh: group.repsHigh,
+                rirTarget: group.rirTarget
+            )
+        }
+    }
+}
+
+public struct CataloguePrescription: Equatable, Sendable {
+    public var loadKg: Double?
+    public var sets: Int
+    public var groups: [SetGroup] = []
+    public var topSet: TopSetStatus?
+    public var vbtTarget: ExecutionVBT?
+    public var reason: String?
+    public var resolvedBy: String?
+
+    public init(
+        loadKg: Double? = nil,
+        sets: Int,
+        groups: [SetGroup] = [],
+        topSet: TopSetStatus? = nil,
+        vbtTarget: ExecutionVBT? = nil,
+        reason: String? = nil,
+        resolvedBy: String? = nil
+    ) {
+        self.loadKg = loadKg
+        self.sets = sets
+        self.groups = groups
+        self.topSet = topSet
+        self.vbtTarget = vbtTarget
+        self.reason = reason
+        self.resolvedBy = resolvedBy
     }
 }
 
@@ -80,6 +187,10 @@ public struct LoadCatalogueEntry: Codable, Equatable, Sendable {
     public let incrementKg: Decimal?
     public let bodyweight: Bool?
     public let power: Bool?
+    /// A live erector dose overrides every other load and caps the working sets.
+    public let doseLoadKg: Decimal?
+    public let doseSetsCap: Int?
+    public let vbtTarget: ExecutionVBT?
 
     public init(
         loadSource: String? = nil,
@@ -87,7 +198,10 @@ public struct LoadCatalogueEntry: Codable, Equatable, Sendable {
         accessoryLoadKg: Decimal? = nil,
         incrementKg: Decimal? = nil,
         bodyweight: Bool? = nil,
-        power: Bool? = nil
+        power: Bool? = nil,
+        doseLoadKg: Decimal? = nil,
+        doseSetsCap: Int? = nil,
+        vbtTarget: ExecutionVBT? = nil
     ) {
         self.loadSource = loadSource
         self.baseLoadKg = baseLoadKg
@@ -95,6 +209,9 @@ public struct LoadCatalogueEntry: Codable, Equatable, Sendable {
         self.incrementKg = incrementKg
         self.bodyweight = bodyweight
         self.power = power
+        self.doseLoadKg = doseLoadKg
+        self.doseSetsCap = doseSetsCap
+        self.vbtTarget = vbtTarget
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -104,6 +221,9 @@ public struct LoadCatalogueEntry: Codable, Equatable, Sendable {
         case incrementKg
         case bodyweight
         case power
+        case doseLoadKg
+        case doseSetsCap
+        case vbtTarget
     }
 
     /// Decode through the shortest decimal string, matching `Decimal(str(load))` on the server.
@@ -121,6 +241,11 @@ public struct LoadCatalogueEntry: Codable, Equatable, Sendable {
         )
         bodyweight = try container.decodeIfPresent(Bool.self, forKey: .bodyweight)
         power = try container.decodeIfPresent(Bool.self, forKey: .power)
+        doseLoadKg = Self.decimal(
+            try container.decodeIfPresent(Double.self, forKey: .doseLoadKg)
+        )
+        doseSetsCap = try container.decodeIfPresent(Int.self, forKey: .doseSetsCap)
+        vbtTarget = try container.decodeIfPresent(ExecutionVBT.self, forKey: .vbtTarget)
     }
 
     private static func decimal(_ value: Double?) -> Decimal? {

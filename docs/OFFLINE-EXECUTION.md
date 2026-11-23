@@ -79,6 +79,24 @@ portfolio repository; this file records only what the app does.
 - **Plan binding.** `409 plan_not_bindable` clears the unusable cached plan and asks for a fresh
   one.
 
+## Follow-up findings (2026-11-23)
+
+- **Completed start replay.** If another pairing device completed a session before the watch
+  flushed its offline start, the server now returns the existing workout for the same
+  `execution_id` instead of `410 plan_consumed`; the watch drops the start and sends the queued
+  sets through the late-reconciliation window.
+- **Optimistic execution changes.** A substitution or addition is persisted and applied to the
+  local execution view before the server answers, including its catalogue load, set groups, set
+  cap and VBT target. A transport failure keeps it marked `pending`; a server rejection keeps it
+  marked `rejected` and visible. The server response replaces it on acknowledgement.
+- **Complete catalogue contract.** Swift decodes `dose_load_kg`, `dose_sets_cap` and
+  `vbt_target`. A live erector dose wins over the ordinary base, caps sets and uses straight sets,
+  matching Python's `prescription_from_catalogue`. Parity tests cover ordinary, dose and
+  bodyweight/power entries.
+- **Set origin.** Every set carries `origin_device_id`. The watch relay adds the watch id before
+  the phone commits; the phone adds its own id on direct writes. The server validates that the
+  origin belongs to the workout's pairing and persists it without changing the set key.
+
 ## S5 — pairing-scoped execution
 
 - An issued plan belongs to the iPhone/watch pairing. The request screen no longer has a device

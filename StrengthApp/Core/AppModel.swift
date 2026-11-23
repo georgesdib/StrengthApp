@@ -89,10 +89,14 @@ final class AppModel: ObservableObject {
     /// The current execution substitutions and additions for the active workout. The plan is
     /// frozen at start, so this is the only mid-session change (DEC-RESOLVER-23).
     @Published private(set) var executionView: ExecutionView?
+    /// Optimistic changes from the persisted capture, applied over the server view.
+    var effectiveExecutionView: ExecutionView {
+        (executionView ?? .empty).merging(local: offlineCapture?.localExecutionChanges ?? [])
+    }
 
     /// Plan rows with the execution view applied; extra work follows its anchor item.
     var executionRows: [ExecutionRow] {
-        (executionView ?? .empty).rows(plan: activeWorkout?.plan)
+        effectiveExecutionView.rows(plan: activeWorkout?.plan)
     }
 
     /// The execution row for one frozen plan slot, if the plan has it.
@@ -2334,6 +2338,7 @@ final class AppModel: ObservableObject {
 
     func addSet(_ body: AddSetRequest, idempotencyKey: String) async -> Bool {
         guard !isSaving, let session, let workout = activeWorkout else { return false }
+        let body = body.withOriginDeviceId(session.deviceID)
         if offlineCaptureActive {
             return queueAddSet(body, idempotencyKey: idempotencyKey, workout: workout)
         }
@@ -2649,6 +2654,19 @@ final class AppModel: ObservableObject {
             prefillCatalogueVersion: loadCatalogue?.version,
             prefillAsOf: loadCatalogue?.asOf
         )
+        let local = localExecutionChange(
+            workoutId: workoutId,
+            planItemIndex: planItemIndex,
+            afterItemIndex: afterItemIndex,
+            exerciseId: exerciseId,
+            repsLow: repsLow,
+            repsHigh: repsHigh,
+            rirTarget: rirTarget,
+            idempotencyKey: idempotencyKey
+        )
+        if let local {
+            appendLocalExecutionChange(local)
+        }
         _ = apply(.operationBegan)
         defer { _ = apply(.operationEnded) }
         do {
@@ -2659,6 +2677,7 @@ final class AppModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             executionView = response.execution
+            removeLocalExecutionChange(operationId: idempotencyKey)
             logPrefillVerification(response.execution)
             if executionChangeRejection?.workoutID == workoutId {
                 executionChangeRejection = nil
@@ -2667,11 +2686,130 @@ final class AppModel: ObservableObject {
             pushExecutionToWatch()
             return true
         } catch {
-            // A transport failure leaves the body in the journal. Refresh the published list so
-            // the workout screen can show the change as queued instead of only an error.
+            // A transport failure keeps the optimistic row and the journal entry. The athlete
+            // sees the change now; it syncs when the server is reachable.
+            if let api = error as? APIError, api.isTransport {
+                mutationError = "Saved on this iPhone; it will sync when the server is reachable."
+                refreshPendingMutations()
+                pushExecutionToWatch()
+                return local != nil
+            }
+            // A server rejection is not silently reverted: the row stays visible as unresolved
+            // and the error explains why.
+            markLocalExecutionChange(operationId: idempotencyKey, state: "rejected")
             refreshPendingMutations()
+            pushExecutionToWatch()
             handleMutation(error)
             return false
+        }
+    }
+
+    private func localExecutionChange(
+        workoutId: String,
+        planItemIndex: Int?,
+        afterItemIndex: Int?,
+        exerciseId: String,
+        repsLow: Int?,
+        repsHigh: Int?,
+        rirTarget: Int?,
+        idempotencyKey: String
+    ) -> ExecutionChange? {
+        guard activeWorkout?.workoutId == workoutId else { return nil }
+        let item = planItemIndex.flatMap { index in
+            activeWorkout?.plan?.items.first { ($0.orderIndex ?? -1) == index }
+        }
+        let reps = repsLow ?? item?.repsLow ?? 0
+        let rir = rirTarget ?? item?.rirTarget
+        let sets = planItemIndex == nil ? 1 : (item?.sets ?? 1)
+        let groups = planItemIndex == nil ? [] : (item?.setGroups ?? [])
+        let essential = planItemIndex != nil && item?.essential == true
+        let catalogue = loadCatalogue ?? cachedCatalogueForActiveWorkout()
+        let prescription = catalogue?.prescription(
+            exerciseId: exerciseId,
+            essential: essential,
+            reps: reps,
+            rir: rir,
+            sets: sets,
+            groups: groups
+        )
+        let localId = -Int(Date().timeIntervalSince1970 * 1000)
+        return ExecutionChange(
+            eventId: localId,
+            kind: planItemIndex == nil ? "addition" : "substitution",
+            planItemIndex: planItemIndex,
+            afterItemIndex: afterItemIndex,
+            exerciseId: exerciseId,
+            repsLow: repsLow ?? item?.repsLow,
+            repsHigh: repsHigh ?? item?.repsHigh,
+            rirTarget: rir,
+            prefillLoadKg: prescription?.loadKg,
+            prefillReason: prescription?.reason,
+            resolvedBy: prescription?.resolvedBy ?? "pending",
+            sets: prescription?.sets ?? sets,
+            setGroups: prescription?.groups ?? [],
+            topSet: prescription?.topSet ?? TopSetStatus(
+                status: "not_applicable", reasonCode: "substituted"
+            ),
+            vbtTarget: prescription?.vbtTarget,
+            createdAt: nowISO(),
+            localState: "pending",
+            localOperationId: idempotencyKey
+        )
+    }
+
+    private func appendLocalExecutionChange(_ change: ExecutionChange) {
+        var changes = offlineCapture?.localExecutionChanges ?? []
+        changes.removeAll { $0.localOperationId == change.localOperationId }
+        changes.append(change)
+        persistLocalExecutionChanges(changes)
+    }
+
+    private func markLocalExecutionChange(operationId: String, state: String) {
+        var changes = offlineCapture?.localExecutionChanges ?? []
+        guard let index = changes.firstIndex(where: { $0.localOperationId == operationId }) else {
+            return
+        }
+        let old = changes[index]
+        changes[index] = ExecutionChange(
+            eventId: old.eventId,
+            kind: old.kind,
+            planItemIndex: old.planItemIndex,
+            afterItemIndex: old.afterItemIndex,
+            exerciseId: old.exerciseId,
+            repsLow: old.repsLow,
+            repsHigh: old.repsHigh,
+            rirTarget: old.rirTarget,
+            prefillLoadKg: old.prefillLoadKg,
+            prefillReason: old.prefillReason,
+            prefillVerified: old.prefillVerified,
+            prefillExpectedLoadKg: old.prefillExpectedLoadKg,
+            prefillMismatchReason: old.prefillMismatchReason,
+            resolvedBy: old.resolvedBy,
+            sets: old.sets,
+            setGroups: old.setGroups,
+            topSet: old.topSet,
+            vbtTarget: old.vbtTarget,
+            vbt: old.vbt,
+            createdAt: old.createdAt,
+            localState: state,
+            localOperationId: old.localOperationId
+        )
+        persistLocalExecutionChanges(changes)
+    }
+
+    private func removeLocalExecutionChange(operationId: String) {
+        var changes = offlineCapture?.localExecutionChanges ?? []
+        let before = changes.count
+        changes.removeAll { $0.localOperationId == operationId }
+        guard changes.count != before else { return }
+        persistLocalExecutionChanges(changes)
+    }
+
+    private func persistLocalExecutionChanges(_ changes: [ExecutionChange]) {
+        do {
+            offlineCapture = try offlineStore.setLocalExecutionChanges(changes)
+        } catch {
+            offlinePersistenceError = error.localizedDescription
         }
     }
 
@@ -3043,6 +3181,7 @@ final class AppModel: ObservableObject {
                         entry, session: session
                     )
                     executionView = response.execution
+                    removeLocalExecutionChange(operationId: entry.operationId)
                     if executionChangeRejection?.workoutID == (entry.targetId ?? "") {
                         executionChangeRejection = nil
                     }
@@ -3064,6 +3203,7 @@ final class AppModel: ObservableObject {
                 if entry.kind == .executionChange,
                    !Self.isAmbiguous(api),
                    !api.isAuthenticationFailure {
+                    markLocalExecutionChange(operationId: entry.operationId, state: "rejected")
                     executionChangeRejection = ExecutionChangeRejection(
                         workoutID: entry.targetId ?? "",
                         message: api.errorDescription
@@ -3228,7 +3368,8 @@ final class AppModel: ObservableObject {
             setIndex: body.setIndex,
             planItemIndex: body.planItemIndex,
             repVelocities: body.repVelocities,
-            performedAt: performedAt
+            performedAt: performedAt,
+            originDeviceId: body.originDeviceId
         )
         do {
             let localId = try offlineStore.nextLocalSetId()
@@ -3761,7 +3902,7 @@ final class AppModel: ObservableObject {
     @discardableResult
     private func pushExecutionToWatch() -> Bool {
         guard let workout = activeWorkout else { return false }
-        return watchPairing.pushExecution(workout, execution: executionView)
+        return watchPairing.pushExecution(workout, execution: effectiveExecutionView)
     }
 
     private func permitsMutation(kind: MutationKind, operationId: String) -> Bool {

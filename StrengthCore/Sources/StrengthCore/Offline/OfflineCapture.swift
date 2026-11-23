@@ -152,6 +152,10 @@ public struct OfflineCapture: Codable {
     /// The catalogue the active workout was started with. It stays available after the start
     /// consumes the plan cache, so a later substitution can still be prefilled offline.
     public var activeCatalogue: LoadCatalogue?
+    /// Optimistic execution changes authored on this phone. They are applied to the local view
+    /// before the server answers; a rejected change stays here marked unresolved rather than
+    /// silently reverting.
+    public var localExecutionChanges: [ExecutionChange]?
 
     public init(
         version: Int = OfflineCapture.currentVersion,
@@ -160,7 +164,8 @@ public struct OfflineCapture: Codable {
         updatedAt: Date = Date(),
         session: WatchSessionRecord? = nil,
         cachedPlan: CachedIssuedPlan? = nil,
-        activeCatalogue: LoadCatalogue? = nil
+        activeCatalogue: LoadCatalogue? = nil,
+        localExecutionChanges: [ExecutionChange]? = nil
     ) {
         self.version = version
         self.activeWorkout = activeWorkout
@@ -169,6 +174,7 @@ public struct OfflineCapture: Codable {
         self.session = session
         self.cachedPlan = cachedPlan
         self.activeCatalogue = activeCatalogue
+        self.localExecutionChanges = localExecutionChanges
     }
 }
 
@@ -372,6 +378,18 @@ public final class OfflineCaptureStore {
         defer { lock.unlock() }
         var capture = try loadUnlocked()
         capture.activeCatalogue = catalogue
+        try saveUnlocked(capture)
+        return try loadUnlocked()
+    }
+
+    /// Persists optimistic execution changes independently of the operation queue.
+    public func setLocalExecutionChanges(
+        _ changes: [ExecutionChange]
+    ) throws -> OfflineCapture {
+        lock.lock()
+        defer { lock.unlock() }
+        var capture = try loadUnlocked()
+        capture.localExecutionChanges = changes.isEmpty ? nil : changes
         try saveUnlocked(capture)
         return try loadUnlocked()
     }

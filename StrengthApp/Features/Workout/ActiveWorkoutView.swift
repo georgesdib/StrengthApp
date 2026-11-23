@@ -249,6 +249,14 @@ struct ActiveWorkoutView: View {
                                         .foregroundStyle(.blue)
                                         .accessibilityIdentifier("substituted-" + String(index))
                                     }
+                                    if let note = row?.localStateNote {
+                                        Text(note)
+                                            .font(.caption2)
+                                            .foregroundStyle(
+                                                row?.change?.localState == "rejected" ? .red : .orange
+                                            )
+                                            .accessibilityIdentifier("execution-local-state-" + String(index))
+                                    }
                                     NavigationLink {
                                         ExerciseWorkoutView(
                                             model: model,

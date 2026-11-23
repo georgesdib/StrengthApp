@@ -266,10 +266,45 @@ final class AppModelTests: XCTestCase {
             idempotencyKey: "change-offline"
         )
 
-        XCTAssertFalse(recorded)
+        XCTAssertTrue(recorded)
         XCTAssertEqual(model.pendingExecutionChanges.count, 1)
         XCTAssertEqual(model.pendingExecutionChanges.first?.targetId, "workout-1")
         XCTAssertNil(model.executionChangeRejection)
+        XCTAssertEqual(model.effectiveExecutionView.substitutions.count, 1)
+        XCTAssertEqual(model.effectiveExecutionView.substitutions.first?.localState, "pending")
+        XCTAssertTrue(model.executionRows.contains { $0.change?.localState == "pending" })
+    }
+
+    func testRejectedExecutionChangeStaysVisibleAsUnresolved() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(executionChangeToday().utf8))
+            case "/api/ios/v1/workouts/workout-1/execution":
+                return (409, Data(#"{"error":"already substituted","code":"execution_change_conflict"}"#.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let journal = MutationJournal(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("execution-change-(UUID().uuidString).json"))
+        let (model, suite) = executionChangeModel(transport: transport, journal: journal)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+        let recorded = await model.recordExecutionChange(
+            workoutId: "workout-1",
+            planItemIndex: 0,
+            exerciseId: "bench_press",
+            idempotencyKey: "change-rejected"
+        )
+
+        XCTAssertFalse(recorded)
+        XCTAssertEqual(model.effectiveExecutionView.substitutions.first?.localState, "rejected")
+        XCTAssertTrue(model.executionRows.contains { $0.change?.localState == "rejected" })
+        XCTAssertNotNil(model.mutationError)
     }
 
     func testReplayedExecutionChangePushesThePlanAndFlagsOffPlanSets() async throws {

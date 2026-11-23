@@ -576,6 +576,7 @@ public struct WorkoutSet: Codable, Identifiable {
     /// The frozen plan slot this set replaced; set only for an annotated substitution
     /// (DEC-RESOLVER-23). Nil for ordinary and extra work.
     public let substitutesPlanItemIndex: Int?
+    public let originDeviceId: String?
 
     public init(
         setId: Int?,
@@ -589,7 +590,8 @@ public struct WorkoutSet: Codable, Identifiable {
         source: String?,
         repsDetail: WorkoutRepDetail?,
         repSummary: WorkoutRepSummary?,
-        substitutesPlanItemIndex: Int? = nil
+        substitutesPlanItemIndex: Int? = nil,
+        originDeviceId: String? = nil
     ) {
         self.setId = setId
         self.exerciseId = exerciseId
@@ -603,6 +605,7 @@ public struct WorkoutSet: Codable, Identifiable {
         self.repsDetail = repsDetail
         self.repSummary = repSummary
         self.substitutesPlanItemIndex = substitutesPlanItemIndex
+        self.originDeviceId = originDeviceId
     }
 
     public var id: String { "\(setId ?? 0)-\(exerciseId)-\(setIndex ?? 0)" }
@@ -830,6 +833,9 @@ public struct AddSetRequest: Codable, Equatable {
     public let substitutesPlanItemIndex: Int?
     public let repVelocities: [RepVelocity]?
     public let performedAt: String?
+    /// The device that captured the set. The phone commits it; the server validates that the
+    /// origin belongs to the same pairing.
+    public let originDeviceId: String?
 
     public init(
         exerciseId: String,
@@ -841,7 +847,8 @@ public struct AddSetRequest: Codable, Equatable {
         planItemIndex: Int?,
         substitutesPlanItemIndex: Int? = nil,
         repVelocities: [RepVelocity]? = nil,
-        performedAt: String? = nil
+        performedAt: String? = nil,
+        originDeviceId: String? = nil
     ) {
         self.exerciseId = exerciseId
         self.loadKg = loadKg
@@ -853,6 +860,7 @@ public struct AddSetRequest: Codable, Equatable {
         self.substitutesPlanItemIndex = substitutesPlanItemIndex
         self.repVelocities = repVelocities
         self.performedAt = performedAt
+        self.originDeviceId = originDeviceId
     }
 
     public func withSetIndex(_ setIndex: Int) -> AddSetRequest {
@@ -866,7 +874,24 @@ public struct AddSetRequest: Codable, Equatable {
             planItemIndex: planItemIndex,
             substitutesPlanItemIndex: substitutesPlanItemIndex,
             repVelocities: repVelocities,
-            performedAt: performedAt
+            performedAt: performedAt,
+            originDeviceId: originDeviceId
+        )
+    }
+
+    public func withOriginDeviceId(_ deviceId: String?) -> AddSetRequest {
+        AddSetRequest(
+            exerciseId: exerciseId,
+            loadKg: loadKg,
+            reps: reps,
+            rir: rir,
+            velocityMps: velocityMps,
+            setIndex: setIndex,
+            planItemIndex: planItemIndex,
+            substitutesPlanItemIndex: substitutesPlanItemIndex,
+            repVelocities: repVelocities,
+            performedAt: performedAt,
+            originDeviceId: deviceId
         )
     }
 }

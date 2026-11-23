@@ -1322,6 +1322,7 @@ final class Phase2AppModelTests: XCTestCase {
     }
 
     func testIssueStartSetAndCompleteFlow() async {
+        var originDeviceID: String?
         let transport = StubTransport { request in
             switch request.url?.path {
             case "/api/ios/v1/bootstrap":
@@ -1335,6 +1336,8 @@ final class Phase2AppModelTests: XCTestCase {
             case "/api/ios/v1/workouts":
                 return (200, Data(Fixtures.workoutInProgress.utf8))
             case "/api/ios/v1/workouts/workout-1/sets":
+                originDeviceID = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data()))
+                    .flatMap { ($0 as? [String: Any])?["origin_device_id"] as? String }
                 return (200, Data(Fixtures.workoutWithSet.utf8))
             case "/api/ios/v1/workouts/workout-1/complete":
                 return (200, Data(Fixtures.workoutCompleted.utf8))
@@ -1378,6 +1381,7 @@ final class Phase2AppModelTests: XCTestCase {
             idempotencyKey: "set-1"
         )
         XCTAssertTrue(added)
+        XCTAssertEqual(originDeviceID, "device-1")
         XCTAssertEqual(model.activeWorkout?.sets?.count, 1)
         XCTAssertEqual(model.activeWorkout?.sets?.first?.velocity, 0.62)
 

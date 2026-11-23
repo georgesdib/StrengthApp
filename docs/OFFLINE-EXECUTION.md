@@ -92,6 +92,13 @@ portfolio repository; this file records only what the app does.
   commits it with its own credential. If the phone is unreachable the operation stays in the
   watch ledger for the next connection. Reads still use the watch credential.
 
+## S3 completeness
+
+The watch can log extra working sets beyond the planned groups, and phone-authored execution-change
+additions appear in its plan and can be logged. The watch does not author a new exercise addition
+(no watch-side catalogue picker); the performed set remains the durable record and the execution
+change is a phone-side view hint.
+
 ## What is not done here
 
 - Physical-device acceptance is still required: watch-only with the phone off, both devices

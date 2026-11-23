@@ -290,11 +290,17 @@ public final class WatchTodayService {
     public func fetch(session: IOSSession) async throws -> WatchTodaySnapshot {
         async let bootstrap = client.bootstrap(session: session)
         async let plan = client.planState(session: session)
+        // Readiness is independent of whether a plan is ready. The plan envelope carries it
+        // only sometimes; Today is the authoritative readiness read.
+        async let today: TodayResponse? = try? client.today(session: session)
         let (server, planState) = try await (bootstrap, plan)
+        let todayData = await today
         return WatchTodaySnapshot(
             state: WatchTodayMapper.map(planState),
             serverDate: server.serverDate,
-            readiness: WatchReadinessSummary.make(planState.readiness)
+            readiness: WatchReadinessSummary.make(
+                todayData?.readinessScore ?? planState.readiness
+            )
         )
     }
 }

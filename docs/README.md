@@ -49,7 +49,7 @@ app presents and records that authority.
   MCP server and the native Apple adapters. Delivered 2026-11-15: read-only Siri/Shortcuts intents,
   workout automation (Shortcuts and HomeKit scenes), the Action button, watch Siri and the Shortcuts
   start/finish pair. INT-9 (the Siri AI Developer Preview adoption pass) is deferred until iOS 27.3 and
-  PCC (INT-4c) is parked on Apple's entitlement.
+  PCC (INT-4c) was withdrawn on 2026-11-24; the app has no Private Cloud path.
 - [Training Intelligence contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/TRAINING-INTELLIGENCE-CONTRACT.md)
   — response envelope, MCP tool/resource catalogue and the native iOS adapter rules (five-tool cap,
   no Swift calculation).

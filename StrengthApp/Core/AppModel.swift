@@ -822,9 +822,7 @@ final class AppModel: ObservableObject {
         if let session {
             watchPairing.currentWorkout = { [weak self] in self?.activeWorkout }
             watchPairing.onRelayedWorkout = { [weak self] workout in
-                guard let self else { return }
-                self.activeWorkout = workout
-                self.persistActiveWorkout()
+                self?.adoptRelayedWorkout(workout)
             }
             watchPairing.onWatchStatus = { [weak self] status in
                 Task { @MainActor in
@@ -1423,6 +1421,52 @@ final class AppModel: ObservableObject {
             handle(error)
             return .failure(message(for: error))
         }
+    }
+
+    /// A workout was started, changed or ended on the watch and this phone committed it. A
+    /// pairing-scoped plan is consumed by that start, so the phone's preview and on-disk cache
+    /// must not survive it; a terminal result also refreshes Today and History.
+    private func adoptRelayedWorkout(_ workout: WorkoutDetail) {
+        if workout.status == "in_progress" {
+            let catalogue = loadCatalogue ?? offlineCapture?.cachedPlan?.loadCatalogue
+            clearConsumedPlanState()
+            if let catalogue {
+                offlineCapture = try? offlineStore.setActiveCatalogue(catalogue)
+            }
+            activeWorkout = workout
+            recoveryIssue = nil
+            persistActiveWorkout()
+            return
+        }
+        // The watch finished or abandoned the session; no local workout is active any more.
+        if activeWorkout == nil || activeWorkout?.workoutId == workout.workoutId {
+            activeWorkout = nil
+        }
+        clearConsumedPlanState()
+        persistActiveWorkout()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.refresh()
+            await self.loadHistory(reset: true)
+        }
+    }
+
+    /// Drops an issued preview once the pairing's plan has been started elsewhere. Idempotent:
+    /// relayed set updates arrive for every set and must not rewrite the capture once cleared.
+    private func clearConsumedPlanState() {
+        if case .issued = prescriptionState {
+            prescriptionState = .idle
+        }
+        if case .generating = prescriptionState {
+            stopPlanPolling()
+            prescriptionState = .idle
+        }
+        let hasPlanState = planIsFromCache
+            || planExecutionID != nil
+            || loadCatalogue != nil
+            || offlineCapture?.cachedPlan != nil
+        guard hasPlanState else { return }
+        clearCachedPlan()
     }
 
     private func persistActiveWorkout() {
@@ -2271,22 +2315,16 @@ final class AppModel: ObservableObject {
                 state.error?.message ?? "The plan could not be generated."
             )
         default:
-            // "none": no live request. Drop a stale preview instead of offering Start on it,
-            // unless it is the unexpired plan this launch loaded from the cache. That cache is
-            // exactly what makes an offline start possible.
+            // "none": no live request. A successful read is authoritative, so drop the preview
+            // and its on-disk cache instead of offering Start on a plan the server no longer has.
             stopPlanPolling()
-            if planIsFromCache, let cached = offlineCapture?.cachedPlan, !cached.isExpired {
-                return
-            }
             if case .issued = prescriptionState {
                 prescriptionState = .idle
             }
             if case .generating = prescriptionState {
                 prescriptionState = .idle
             }
-            planExecutionID = nil
-            loadCatalogue = nil
-            planIsFromCache = false
+            clearCachedPlan()
         }
     }
 

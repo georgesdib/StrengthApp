@@ -173,7 +173,8 @@ final class WatchPairingCoordinator: ObservableObject {
     private var lastPushedPlanKey: String?
     /// The phone's committed workout, so an incoming watch set can be merged against it.
     var currentWorkout: (() -> WorkoutDetail?)?
-    /// Applied after a relayed watch write so the phone's merged view stays current.
+    /// Applied after a relayed watch write so the phone's merged view stays current and a
+    /// consumed phone-side plan preview cannot outlive the start that used it.
     var onRelayedWorkout: ((WorkoutDetail) -> Void)?
     /// Called when the watch reports its pending work, so a synced watch can settle an open
     /// reconciliation window instead of leaving it open for the full seven days.
@@ -951,6 +952,7 @@ final class WatchPairingCoordinator: ObservableObject {
                     session: commitSession,
                     idempotencyKey: key
                 )
+                onRelayedWorkout?(value)
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
                 )
@@ -1066,6 +1068,7 @@ final class WatchPairingCoordinator: ObservableObject {
                 let value = try await client.abandonWorkout(
                     workoutId: workoutId, session: commitSession, idempotencyKey: key
                 )
+                onRelayedWorkout?(value)
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
                 )

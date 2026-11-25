@@ -102,6 +102,10 @@ portfolio repository; this file records only what the app does.
 - An issued plan belongs to the iPhone/watch pairing. The request screen no longer has a device
   picker and the client no longer sends `execution_target`.
 - Either device in the pairing can start the plan. `owner_device_id` is provenance only.
+- A start committed through the phone relay is applied to the phone: the running workout is
+  adopted, and the issued preview plus its on-disk cache are cleared because the pairing's plan is
+  consumed. A relayed finish or abandon clears the active workout, the plan state and refreshes
+  Today and History.
 - The phone no longer enters mirror mode: it can log, rate form, edit and finish whenever a session
   is open. The takeover button, its confirmation sheet and the takeover request are gone.
 - The watch no longer turns read-only because another device owns the session.

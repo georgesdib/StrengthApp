@@ -1,8 +1,9 @@
 # Readiness registry — device acceptance
 
-**Status:** **outstanding — the physical-device run was not performed.** The owner declined the
-installation of this build on 2026-11-25 when asked. Simulator live acceptance passed on the same
-build against a disposable seeded-registry server; that is not physical-device proof.
+**Status:** **waived by the owner on 2026-11-25.** The physical-device run was not performed: the
+owner declined the installation of this build when asked and then waived the physical acceptance
+requirement. Simulator live acceptance passed on the same build against a disposable
+seeded-registry server; that is the recorded evidence, not physical-device proof.
 
 - **Client branch:** `readiness-registry`
 - **Client code under test:** `295b416`
@@ -34,7 +35,7 @@ Verified end to end:
 5. Screenshots used in the user guide: [schema form](../../images/readiness-registry-form.png) and
    [filled form](../../images/readiness-registry-filled.png).
 
-## Physical checklist (still required)
+## Physical checklist (not run — waived)
 
 Run this against the same disposable server, with the phone on the same trusted LAN and the server
 bound to the Mac's LAN address (never the real database):
@@ -59,5 +60,5 @@ bound to the Mac's LAN address (never the real database):
 | Date | — (not run) |
 | Device / OS | iPhone 16 Pro Max / iOS 27.2.1 |
 | Build | — |
-| Result | Outstanding — owner declined installation 2026-11-25 |
+| Result | Waived by owner 2026-11-25 (installation declined; simulator acceptance is the evidence) |
 | Screenshots | — |

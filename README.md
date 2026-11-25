@@ -274,12 +274,12 @@ Three failure modes that are environmental rather than code:
 - **"Test crashed with signal kill before establishing connection"** means the simulator session
   is wedged, usually after a test run was killed. `xcrun simctl shutdown all` then boot the device
   again, or run on a different simulator. A clean device always works.
-- **"No profiles for 'com.georgesdibpersonalteam.StrengthApp(.watchkitapp)' were found"** means the
-  development profiles lapsed or were pruned on this Mac; the Xcode account is fine and nothing in
-  the project needs changing. `scripts/install-iphone.sh` builds with
-  `-allowProvisioningUpdates`, which reissues them from the portal, so re-run the script rather
-  than editing signing settings. Building for a device without a signed-in Xcode account cannot be
-  fixed this way.
+- **"No profiles for '…StrengthApp', '…watchkitapp' or '…widgets' were found"** means a development
+  profile lapsed or was pruned on this Mac; nothing in the project needs changing.
+  `scripts/install-iphone.sh` builds with `-allowProvisioningUpdates`, which reissues a lapsed
+  profile from the portal, so re-run the script rather than editing signing settings. If
+  xcodebuild also reports **"No Accounts"**, sign in under **Xcode → Settings → Accounts** first:
+  a profile that has to be created, such as the widget extension's, cannot be issued without it.
 - **A non-interactive shell has no pseudo-terminal**, which `xcodebuild test` needs. Wrap the
   command: `script -q /dev/null xcodebuild test …` (macOS). The build alone does not need it.
 

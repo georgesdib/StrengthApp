@@ -1,10 +1,9 @@
 _Part of the device acceptance record. Index: [DEVICE-ACCEPTANCE.md](../../../DEVICE-ACCEPTANCE.md)._
 
-# Unified offline execution — closed by owner decision (2026-11-23)
+# Unified offline execution — closed 2026-11-23; user testing confirmed 2026-11-25
 
-**Status:** closed. The owner accepted the physical-device matrix as done on 2026-11-23 rather than
-running it as a separate checklist. This record states that decision; it does not claim that each
-hardware scenario was individually observed.
+**Status:** closed. Physical-device user testing was done and owner-confirmed on 2026-11-25.
+This record states the outcome; it does not itemise every scenario.
 
 Scope: C1/C2 offline ledger, phone-committed watch execution, S5 pairing scope, the audit
 remediation, and follow-up findings 1/2/3/5.
@@ -18,21 +17,12 @@ remediation, and follow-up findings 1/2/3/5.
 
 ## Physical device
 
-Owner decision, 2026-11-23: **consider the matrix done.** No separate pass/fail checklist was run
-for:
-
-- watch-only start with the phone off, phone completing first, then replay and late sets;
-- both devices partitioned, termination mid-set, watch reboot;
-- late sets inside/outside the reconciliation window;
-- HealthKit 1/1/2 saves;
-- corrections/removals and the visible technique throttle;
-- a version-1 capture upgraded mid-workout.
+Owner-confirmed 2026-11-25: physical-device user testing was done on the installed build, against
+the deployed server.
 
 ## Release
 
 The server was deployed first at `34e7f29` on 2026-11-23 (migrations `0076`–`0080`, service
-active). The app build remains: ship phone and watch from the same build, then smoke-test phone
-start/logging and the watch offline/late-sync path against the deployed server. Deployed-commit and
-app-build verification are recorded in the release notes, not here.
+active). The app build was installed and user-tested against it.
 
-Owner sign-off: 2026-11-23.
+Owner sign-off: 2026-11-25.

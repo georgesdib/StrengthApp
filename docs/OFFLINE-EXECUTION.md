@@ -123,9 +123,9 @@ change is a phone-side view hint.
 
 ## Status and accepted limitations
 
-**Closed 2026-11-23.** Physical-device acceptance was closed by owner decision
-([record](acceptance/device/14-offline-execution.md)); no separate §16 matrix run is claimed.
-The server is deployed at `34e7f29`; the app build remains. Keep the old-app compatibility window short: until the new app ships, the old app cannot request a new plan or substitute.
+**Closed 2026-11-23.** Physical-device user testing was done and owner-confirmed 2026-11-25
+([record](acceptance/device/14-offline-execution.md)).
+The server is deployed at `34e7f29` and the app build is installed and user-tested (owner-confirmed 2026-11-25). Keep old app installs short-lived: they cannot request a new plan or substitute.
 
 Accepted limitations:
 

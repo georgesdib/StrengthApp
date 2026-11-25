@@ -1,6 +1,7 @@
 import AppIntents
 import Foundation
 import StrengthCore
+import StrengthIntents
 
 /// The phone's intents run in this process; RootView registers the live model here.
 @MainActor
@@ -18,26 +19,26 @@ struct StartWorkoutShortcutIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         guard let model = PhoneIntentBridge.model else {
-            return .result(dialog: "Open StrengthApp first.")
+            return IntentAnswer.text("Open StrengthApp first.")
         }
         guard model.phase == .paired else {
-            return .result(dialog: "Pair this iPhone with your server first.")
+            return IntentAnswer.text("Pair this iPhone with your server first.")
         }
         if model.activeWorkout != nil || model.today?.activeWorkout != nil {
             model.requestOpenActiveWorkout()
-            return .result(dialog: "A workout is already running.")
+            return IntentAnswer.text("A workout is already running.")
         }
         guard case .issued = model.prescriptionState else {
-            return .result(dialog: "No workout is ready. Request one in the app, then try again.")
+            return IntentAnswer.text("No workout is ready. Request one in the app, then try again.")
         }
         let started = await model.startWorkout(idempotencyKey: UUID().uuidString)
         if started {
             model.requestOpenActiveWorkout()
-            return .result(dialog: "Workout started.")
+            return IntentAnswer.text("Workout started.")
         }
-        return .result(dialog: "The workout could not be started. Check the app for the reason.")
+        return IntentAnswer.text("The workout could not be started. Check the app for the reason.")
     }
 }
 
@@ -51,14 +52,14 @@ struct FinishWorkoutShortcutIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         guard let model = PhoneIntentBridge.model else {
-            return .result(dialog: "Open StrengthApp first.")
+            return IntentAnswer.text("Open StrengthApp first.")
         }
         guard model.activeWorkout != nil || model.today?.activeWorkout != nil else {
-            return .result(dialog: "No workout is running.")
+            return IntentAnswer.text("No workout is running.")
         }
         model.requestOpenActiveWorkout()
-        return .result(dialog: "Finish the workout here.")
+        return IntentAnswer.text("Finish the workout here.")
     }
 }

@@ -3,35 +3,18 @@ import Foundation
 import StrengthCore
 import StrengthIntents
 
-/// One provider lookup and one error mapping, mirroring the phone's intents.
-@MainActor
-enum WatchIntentCall {
-    static func run<T>(_ body: () async throws -> T) async throws -> T {
-        do {
-            return try await body()
-        } catch let error as IntentServiceError {
-            throw error
-        } catch {
-            throw IntentServiceError.requestFailed(error.localizedDescription)
-        }
-    }
-}
-
 struct WatchLastWorkoutIntent: AppIntent {
     static var title: LocalizedStringResource = "Last Workout"
     static var description = IntentDescription("Say when your latest workout was and how long it lasted.")
     static var openAppWhenRun: Bool = false
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        let summary = try await WatchIntentCall.run {
-            let provider = try IntentServices.provider()
-            return try await provider.lastWorkout()
-        }
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let summary = try await ReadOnlyIntentQuery.lastWorkout()
         guard let summary else {
-            return .result(dialog: "You have no completed workouts yet.")
+            return IntentAnswer.text("You have no completed workouts yet.")
         }
-        return .result(dialog: IntentDialog(stringLiteral: summary.dialog))
+        return IntentAnswer.text(summary.dialog)
     }
 }
 
@@ -41,12 +24,9 @@ struct WatchOverviewIntent: AppIntent {
     static var openAppWhenRun: Bool = false
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        let envelope = try await WatchIntentCall.run {
-            let provider = try IntentServices.provider()
-            return try await provider.overview(windowWeeks: 4)
-        }
-        return .result(dialog: IntentDialog(stringLiteral: OverviewDigest(envelope: envelope).dialog))
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let envelope = try await ReadOnlyIntentQuery.overview(windowWeeks: 4)
+        return IntentAnswer.text(OverviewDigest(envelope: envelope).dialog)
     }
 }
 
@@ -56,12 +36,9 @@ struct WatchWeeklyReviewIntent: AppIntent {
     static var openAppWhenRun: Bool = false
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        let envelope = try await WatchIntentCall.run {
-            let provider = try IntentServices.provider()
-            return try await provider.weeklyReview()
-        }
-        return .result(dialog: IntentDialog(stringLiteral: WeeklyReviewDigest(envelope: envelope).dialog))
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let envelope = try await ReadOnlyIntentQuery.weeklyReview()
+        return IntentAnswer.text(WeeklyReviewDigest(envelope: envelope).dialog)
     }
 }
 
@@ -74,16 +51,13 @@ struct WatchProgressionIntent: AppIntent {
     var exercise: ExerciseEntity?
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         guard let entity = exercise else {
-            return .result(dialog: "Name an exercise, for example your main lift.")
+            return IntentAnswer.text("Name an exercise, for example your main lift.")
         }
-        let envelope = try await WatchIntentCall.run {
-            let provider = try IntentServices.provider()
-            return try await provider.progression(exerciseID: entity.id)
-        }
+        let envelope = try await ReadOnlyIntentQuery.progression(exerciseID: entity.id)
         let digest = ProgressionDigest(envelope: envelope)
-        return .result(dialog: IntentDialog(stringLiteral: digest.dialog(fallbackName: entity.name)))
+        return IntentAnswer.text(digest.dialog(fallbackName: entity.name))
     }
 }
 

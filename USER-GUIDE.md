@@ -268,6 +268,15 @@ completed workouts.
 
 Exercise information is read-only. The training rules and prescription engine are unchanged.
 
+### Siri and Shortcuts
+
+Siri answers the app's read-only training questions — training overview, last workout, average
+workout duration, weekly review and one exercise's progression — on the iPhone and Apple Watch.
+On the phone, the same actions appear in the Shortcuts app, and each one returns the sentence it
+speaks as its output, so a shortcut can pass the answer to a later action, display it, or branch
+on it. **Start Workout** and **Finish Workout** return their status message in the same way; they
+also open the app, where the workout is started or finished by hand.
+
 ## 8. HealthKit
 
 HealthKit readiness is optional and off by default. When enabled, the app reads only:

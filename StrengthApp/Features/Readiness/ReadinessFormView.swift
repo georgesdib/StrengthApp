@@ -2,141 +2,221 @@ import SwiftUI
 import UIKit
 import StrengthCore
 
+/// Schema-driven readiness entry. The server's effective registry supplies the enabled fields,
+/// order, labels, scales, units and direction; bodyweight and the wearable score stay separate
+/// non-registry inputs. The client only validates for convenience and submits the values map.
 struct ReadinessFormView: View {
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
-    private struct Field: Identifiable {
-        let id: String
-        let label: String
-        let hint: String
-    }
-
-    private static let coreFields = [
-        Field(id: "sleep", label: "Sleep", hint: "1-5"),
-        Field(id: "energy", label: "Energy", hint: "1-5"),
-        Field(id: "mood", label: "Mood", hint: "1-5"),
-        Field(id: "soreness", label: "Soreness", hint: "1-5"),
-        Field(id: "stress", label: "Stress", hint: "1-5 (5 = no stress)"),
-    ]
-    private static let measureFields = [
-        Field(id: "hrv_ms", label: "HRV", hint: "ms, optional"),
-        Field(id: "rhr_bpm", label: "Resting HR", hint: "bpm, optional"),
-        Field(id: "bodyweight_kg", label: "Bodyweight", hint: "kg, optional"),
-        Field(id: "wearable_score", label: "Wearable score", hint: "0-100, optional"),
-    ]
-
-    /// Every field this form can write, in display order. The legacy per-lift labels
-    /// (`squat_readiness`, `bench_readiness`, `deadlift_readiness`) are deliberately absent:
-    /// they are historical calibration labels, not inputs, and the server rejects them on the
-    /// manual-entry path (`DEC-READINESS-06`).
+    /// Every field the fixed fallback form can write. Kept as a stable test/introspection surface;
+    /// the live form renders model.readinessSchema instead.
     static var inputFieldIds: [String] {
-        (coreFields + measureFields).map(\.id)
+        ReadinessSchema.fallback.enabledMetrics.map(\.key)
+            + ["bodyweight_kg", "wearable_score"]
     }
 
-    private var allFields: [Field] { Self.coreFields + Self.measureFields }
+    private var schema: ReadinessSchema { model.readinessSchema }
 
     @State private var text: [String: String] = [:]
     @State private var note = ""
     @State private var localError: String?
+    @State private var fieldErrors: [String: String] = [:]
     @State private var operation = OperationKey<ReadinessWriteRequest>()
 
     var body: some View {
         Form {
+            if schema.registryId != nil
+                || model.readinessSchemaSource != .server
+                || model.readinessSchemaError != nil {
+                schemaSection
+            }
+
+            Section {
+                ForEach(schema.enabledCoreMetrics, id: \.key) { metric in
+                    metricRow(metric)
+                }
+            } header: {
+                Text("Core readiness")
+            } footer: {
+                Text(coreFooter)
+            }
+
+            if model.bootstrap?.capabilities.healthkitReadiness == true {
+                healthKitSection
+            }
+
+            if !schema.enabledDeviceMetrics.isEmpty {
                 Section {
-                    ForEach(Self.coreFields) { field in
-                        fieldRow(field)
+                    ForEach(schema.enabledDeviceMetrics, id: \.key) { metric in
+                        metricRow(metric)
                     }
                 } header: {
-                    Text("Core readiness")
+                    Text("Device measurements")
                 } footer: {
-                    Text("Leave anything you did not record empty. The server keeps missing values missing.")
+                    Text("Optional measured inputs. Enter the value in the unit shown.")
                 }
+            }
 
-                if model.bootstrap?.capabilities.healthkitReadiness == true {
-                    Section {
-                        if !model.healthKitEnabled {
-                            Text("HealthKit is off. Enter the measurement manually, or enable it in Settings.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            healthKitRow("HRV", field: "hrv_ms", unit: "ms")
-                            healthKitRow("Resting HR", field: "rhr_bpm", unit: "bpm")
-                            healthKitRow("Bodyweight", field: "bodyweight_kg", unit: "kg")
-                            Button {
-                                Task { await model.importHealthKit() }
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    if model.isImportingHealthKit {
-                                        ProgressView()
-                                    } else {
-                                        Text("Refresh HealthKit")
-                                    }
-                                    Spacer()
-                                }
-                            }
-                            .disabled(model.isImportingHealthKit)
-                            if let error = model.healthKitRefreshError {
-                                Text(error)
-                                    .font(.footnote)
-                                    .foregroundStyle(.orange)
-                                    .textSelection(.enabled)
-                            }
-                        }
-                    } header: {
-                        Text("From HealthKit")
-                    } footer: {
-                        Text("Automatic values are shown here. Enter a value below to override it; manual readiness wins.")
-                    }
+            Section {
+                extraRow(
+                    "Bodyweight",
+                    key: "bodyweight_kg",
+                    placeholder: "kg, optional"
+                )
+                extraRow(
+                    "Wearable score",
+                    key: "wearable_score",
+                    placeholder: "0–100, optional"
+                )
+            } header: {
+                Text("Other inputs")
+            } footer: {
+                Text("Bodyweight and the wearable score are stored with readiness but are not registry metrics.")
+            }
+
+            Section("Note") {
+                TextField("Optional note", text: $note, axis: .vertical)
+                    .lineLimit(2...4)
+                if let error = fieldErrors["note"] {
+                    errorText(error, id: "readiness-error-note")
                 }
+            }
 
-                Section("Measurements") {
-                    ForEach(Self.measureFields) { field in
-                        fieldRow(field)
-                    }
-                }
-
-                Section("Note") {
-                    TextField("Optional note", text: $note, axis: .vertical)
-                        .lineLimit(2...4)
-                }
-
-                if let error = localError ?? model.mutationError {
-                    Section {
-                        Text(error)
-                            .foregroundStyle(.red)
-                    }
-                }
-
+            if let error = localError ?? model.mutationError {
                 Section {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if model.isSaving {
-                                ProgressView()
-                            } else {
-                                Text("Save readiness")
-                            }
-                            Spacer()
+                    Text(error)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if model.isSaving {
+                            ProgressView()
+                        } else {
+                            Text("Save readiness")
                         }
+                        Spacer()
                     }
-                    .accessibilityIdentifier("save-readiness")
-                    .disabled(model.isSaving)
+                }
+                .accessibilityIdentifier("save-readiness")
+                .disabled(model.isSaving)
+            }
+        }
+        .navigationTitle("Log readiness")
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { hideKeyboard() }
+            }
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+        }
+        .task { await model.loadReadinessSchema() }
+    }
+
+    // MARK: - Schema status
+
+    @ViewBuilder
+    private var schemaSection: some View {
+        Section {
+            if model.readinessSchemaSource != .server || model.readinessSchemaError != nil {
+                Text(schemaNotice)
+                    .font(.footnote)
+                if let error = model.readinessSchemaError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let registryId = schema.registryId {
+                Text("Readiness registry v\(registryId)\(schema.effectiveFrom.map { " (effective \($0))" } ?? "").")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Readiness form")
+        }
+    }
+
+    private var schemaNotice: String {
+        let suffix = " Metrics added to the server registry since this form was last saved are not "
+            + "available offline, and no value is invented for them; they appear after the next sync."
+        switch model.readinessSchemaSource {
+        case .server:
+            return "Server unreachable: showing the readiness form last loaded from this server."
+                + suffix
+        case .cache:
+            let version = schema.registryId.map { " (registry v\($0))" } ?? ""
+            return "Server unreachable: showing the readiness form last saved for this server"
+                + version + "." + suffix
+        case .fallback:
+            return "Server unreachable: showing the standard readiness fields." + suffix
+        }
+    }
+
+    private var coreFooter: String {
+        var parts: [String] = []
+        let required = schema.requiredMetricLabels
+        if !required.isEmpty {
+            parts.append("Required: at least one of \(list(required)).")
+        }
+        parts.append("Enter at least \(schema.minCoreFields) core fields for a score.")
+        return parts.joined(separator: " ")
+    }
+
+    // MARK: - HealthKit
+
+    @ViewBuilder
+    private var healthKitSection: some View {
+        Section {
+            if !model.healthKitEnabled {
+                Text("HealthKit is off. Enter the measurement manually, or enable it in Settings.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                healthKitRow(
+                    metricLabel("hrv_ms", fallback: "HRV"),
+                    field: "hrv_ms",
+                    unit: metricUnit("hrv_ms", fallback: "ms")
+                )
+                healthKitRow(
+                    metricLabel("rhr_bpm", fallback: "Resting HR"),
+                    field: "rhr_bpm",
+                    unit: metricUnit("rhr_bpm", fallback: "bpm")
+                )
+                healthKitRow("Bodyweight", field: "bodyweight_kg", unit: "kg")
+                Button {
+                    Task { await model.importHealthKit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if model.isImportingHealthKit {
+                            ProgressView()
+                        } else {
+                            Text("Refresh HealthKit")
+                        }
+                        Spacer()
+                    }
+                }
+                .disabled(model.isImportingHealthKit)
+                if let error = model.healthKitRefreshError {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
                 }
             }
-            .navigationTitle("Log readiness")
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { hideKeyboard() }
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
+        } header: {
+            Text("From HealthKit")
+        } footer: {
+            Text("Automatic values are shown here. Enter a value below to override it; manual readiness wins.")
+        }
     }
 
     @ViewBuilder
@@ -187,6 +267,14 @@ struct ReadinessFormView: View {
         }
     }
 
+    private func metricLabel(_ key: String, fallback: String) -> String {
+        schema.metric(key)?.label ?? fallback
+    }
+
+    private func metricUnit(_ key: String, fallback: String) -> String {
+        schema.metric(key)?.unit ?? fallback
+    }
+
     private func sampleAge(_ iso: String) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -201,29 +289,77 @@ struct ReadinessFormView: View {
         return relative.localizedString(for: date, relativeTo: Date())
     }
 
-    private func fieldHint(_ field: Field) -> String {
-        switch field.id {
-        case "hrv_ms": return "ms, optional override"
-        case "rhr_bpm": return "bpm, optional override"
-        case "bodyweight_kg": return "kg, optional override"
-        default: return field.hint
+    // MARK: - Rows
+
+    private func metricRow(_ metric: ReadinessMetric) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent {
+                TextField(metric.inputPlaceholder, text: binding(metric.key))
+                    .keyboardType(metric.isCore ? .numberPad : .decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .accessibilityLabel(Text(accessibilityLabel(metric)))
+                    .accessibilityIdentifier("readiness-\(metric.key)")
+            } label: {
+                HStack(spacing: 2) {
+                    Text(metric.label)
+                    if schema.isRequiredOneOf(metric) {
+                        Text("*")
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            Text(metric.inputHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let error = fieldErrors[metric.key] {
+                errorText(error, id: "readiness-error-\(metric.key)")
+            }
         }
     }
 
-    private func fieldRow(_ field: Field) -> some View {
-        LabeledContent(field.label) {
-            TextField(fieldHint(field), text: binding(field.id))
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .accessibilityLabel(field.label)
-                .accessibilityIdentifier("readiness-\(field.id)")
+    private func extraRow(_ title: String, key: String, placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent(title) {
+                TextField(placeholder, text: binding(key))
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .accessibilityLabel(title)
+                    .accessibilityIdentifier("readiness-\(key)")
+            }
+            if let error = fieldErrors[key] {
+                errorText(error, id: "readiness-error-\(key)")
+            }
         }
+    }
+
+    private func errorText(_ message: String, id: String) -> some View {
+        Text(message)
+            .font(.caption)
+            .foregroundStyle(.red)
+            .accessibilityIdentifier(id)
+    }
+
+    private func accessibilityLabel(_ metric: ReadinessMetric) -> String {
+        schema.isRequiredOneOf(metric)
+            ? "\(metric.label), required one of"
+            : metric.label
+    }
+
+    private func list(_ items: [String]) -> String {
+        guard let last = items.last else { return "" }
+        if items.count == 1 { return last }
+        if items.count == 2 { return "\(items[0]) or \(last)" }
+        return items.dropLast().joined(separator: ", ") + " or \(last)"
     }
 
     private func binding(_ key: String) -> Binding<String> {
         Binding(
             get: { text[key] ?? "" },
-            set: { text[key] = $0 }
+            set: { newValue in
+                text[key] = newValue
+                fieldErrors[key] = nil
+                localError = nil
+            }
         )
     }
 
@@ -235,33 +371,26 @@ struct ReadinessFormView: View {
 
     private func save() async {
         localError = nil
-        var values: [String: Double] = [:]
-        for field in allFields {
-            let raw = (text[field.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if raw.isEmpty { continue }
-            guard let value = Double(raw.replacingOccurrences(of: ",", with: ".")) else {
-                localError = "\(field.label) must be a number."
-                return
+        fieldErrors = [:]
+        switch schema.makeRequest(text: text, note: note) {
+        case .failure(.invalid(let errors, let summary)):
+            fieldErrors = errors
+            localError = summary
+        case .success(let request):
+            let key = operation.use(request)
+            let result = await model.saveReadiness(
+                values: request.values,
+                note: request.note,
+                idempotencyKey: key
+            )
+            switch result {
+            case .saved:
+                operation.acknowledged()
+                dismiss()
+            case .failed(let message, let fields):
+                fieldErrors = fields
+                localError = message
             }
-            values[field.id] = value
-        }
-        guard !values.isEmpty else {
-            localError = "Enter at least one readiness field."
-            return
-        }
-        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        let request = ReadinessWriteRequest(
-            values: values,
-            note: trimmedNote.isEmpty ? nil : trimmedNote
-        )
-        let key = operation.use(request)
-        if await model.saveReadiness(
-            values: values,
-            note: request.note,
-            idempotencyKey: key
-        ) {
-            operation.acknowledged()
-            dismiss()
         }
     }
 }

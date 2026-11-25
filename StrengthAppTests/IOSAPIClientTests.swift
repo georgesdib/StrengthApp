@@ -129,6 +129,42 @@ final class IOSAPIClientTests: XCTestCase {
         XCTAssertEqual(score.contextFlags, ["travel"])
         XCTAssertEqual(score.categoryFactors?["squat"]?.rirBump, 1)
         XCTAssertEqual(today.readiness?.score?.status, "ready")
+        XCTAssertEqual(today.readiness?.registryVersion, 3)
+    }
+
+    func testReadinessSchemaFetchesTheRegistryWithBearerAuth() async throws {
+        let body = #"""
+        {
+          "registry_id": 7,
+          "effective_from": "2026-11-20",
+          "schema_version": 1,
+          "min_core_fields": 3,
+          "require_any_of": ["sleep", "energy"],
+          "wearable_weight": 0.1,
+          "metrics": [
+            {"key": "sleep", "label": "Sleep", "role": "core", "enabled": true,
+             "weight": 1.0, "baseline_days": 0, "counts_as_core": true, "order": 1,
+             "min_readings": null, "slope": null, "scale_min": 1, "scale_max": 5,
+             "higher_is_better": true, "unit": null}
+          ]
+        }
+        """#
+        let (client, transport) = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/ios/v1/readiness/schema")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Bearer token-abc"
+            )
+            return (200, Data(body.utf8))
+        }
+
+        let schema = try await client.readinessSchema(session: session)
+
+        XCTAssertEqual(schema.registryId, 7)
+        XCTAssertEqual(schema.requireAnyOf, ["sleep", "energy"])
+        XCTAssertEqual(schema.enabledMetrics.map(\.key), ["sleep"])
+        XCTAssertEqual(transport.requests.count, 1)
     }
 
     func testTodayDecodesAnActiveWorkoutSummary() async throws {

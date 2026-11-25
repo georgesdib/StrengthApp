@@ -150,6 +150,7 @@ enum Fixtures {
       "readiness": {
         "on_date": "2026-11-07",
         "known": true,
+        "registry_version": 3,
         "score": {
           "on_date": "2026-11-07",
           "status": "ready",

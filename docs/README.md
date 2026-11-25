@@ -31,6 +31,11 @@ app presents and records that authority.
 - [Offline execution client implementation](OFFLINE-EXECUTION.md) — what C1/C2 changed in the app,
   the plan-only watch cache, the ledger, merge rules and the follow-up findings.
 
+## Readiness
+
+- [Readiness registry on the iPhone](READINESS-REGISTRY.md) — schema-driven form, server field
+  errors, cached-schema/fixed-field offline fallback and the registry-added-metric limitation.
+
 ## Client plan and contracts
 
 - [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) — phased iPhone implementation plan, architecture

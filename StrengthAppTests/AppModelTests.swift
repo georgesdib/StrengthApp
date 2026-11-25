@@ -58,6 +58,52 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.pairingError, APIError.forbidden.errorDescription)
     }
 
+    func testCachedReadinessSchemaIsAvailableOfflineAndAbsenceUsesTheFallback() throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        store.serverURL = "http://127.0.0.1:8000"
+
+        let cacheURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("readiness-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: cacheURL) }
+        let cache = ReadinessSchemaCache(fileURL: cacheURL)
+        let schema = ReadinessSchema(
+            registryId: 9,
+            effectiveFrom: "2026-11-24",
+            schemaVersion: 1,
+            minCoreFields: 2,
+            requireAnyOf: ["mood"],
+            wearableWeight: 0.2,
+            metrics: ReadinessSchema.fallback.metrics
+        )
+        try cache.save(serverURL: "http://127.0.0.1:8000", schema: schema)
+
+        let cachedModel = AppModel(
+            client: IOSAPIClient(transport: StubTransport { _ in (500, Data()) }),
+            tokens: InMemoryTokenStore(),
+            store: store,
+            readinessSchemaCache: cache
+        )
+        XCTAssertEqual(cachedModel.readinessSchema.registryId, 9)
+        XCTAssertEqual(cachedModel.readinessSchemaSource, .cache)
+
+        let fallbackURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("readiness-\(UUID().uuidString).json")
+        let fallbackModel = AppModel(
+            client: IOSAPIClient(transport: StubTransport { _ in (500, Data()) }),
+            tokens: InMemoryTokenStore(),
+            store: store,
+            readinessSchemaCache: ReadinessSchemaCache(fileURL: fallbackURL)
+        )
+        XCTAssertNil(fallbackModel.readinessSchema.registryId)
+        XCTAssertEqual(fallbackModel.readinessSchemaSource, .fallback)
+        XCTAssertEqual(
+            fallbackModel.readinessSchema.enabledMetrics.map(\.key),
+            ReadinessSchema.fallback.enabledMetrics.map(\.key)
+        )
+    }
+
     func testPairStoresTheTokenAndLoadsToday() async {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }

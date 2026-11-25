@@ -80,6 +80,17 @@ public enum APIError: LocalizedError, Equatable {
         return nil
     }
 
+    /// Field-specific validation messages. The readiness form attaches these to the matching
+    /// input instead of showing one opaque banner.
+    public var fields: [String: String] {
+        switch self {
+        case .http(_, _, let fields), .server(_, _, _, let fields, _):
+            return fields
+        default:
+            return [:]
+        }
+    }
+
     public var details: [String: JSONValue]? {
         if case .server(_, _, _, _, let details) = self { return details }
         return nil
@@ -576,6 +587,16 @@ public final class IOSAPIClient {
             timeout: 60,
             transport: longTransport,
             retries: 0
+        )
+    }
+
+    /// The effective readiness registry schema. The phone form renders from this; the server
+    /// remains authoritative for validation and scoring.
+    public func readinessSchema(session: IOSSession) async throws -> ReadinessSchema {
+        try await get(
+            path: "api/ios/v1/readiness/schema",
+            query: [],
+            session: session
         )
     }
 

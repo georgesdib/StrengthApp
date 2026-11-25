@@ -125,6 +125,27 @@ raw 100.x address.
 11. The same report is available later from the session's **History** detail. An imported session
     with no workout record explains that no report exists.
 
+### Logging readiness
+
+**Today → Log readiness** renders the server's effective readiness registry: only enabled metrics,
+in the registry's order, with its labels, 1–5 scales, units and direction. A red **\*** marks the
+fields named by the registry's required-one-of rule (normally sleep or energy). The form checks
+the minimum number of core fields before it submits, but that check is a convenience: the server
+still validates every value, and any field error it returns is shown on the matching input.
+
+![Schema-driven readiness form with registry order, scales and required-one-of marks](docs/images/readiness-registry-form.png)
+
+Bodyweight and the wearable score are separate, non-registry inputs and are sent with the
+readiness values. HealthKit HRV, resting heart rate and bodyweight are shown on the same form; a
+manual value wins.
+
+![Readiness form filled in before saving](docs/images/readiness-registry-filled.png)
+
+The app caches the last schema it received. If the server is unreachable, the form uses that
+cached schema, or the fixed seeded fields when no cache exists, and says so at the top. A metric
+added to the server registry after the cache was written cannot be entered offline; the app does
+not invent a value for it, and it appears after the next successful sync.
+
 ### Substituting and adding work
 
 A plan item with more than one target group (for example a top set and a back-off) lists each
@@ -232,7 +253,10 @@ The app keeps the active workout and pending operations on the phone before ackn
   screen show **Execution timing** rather than silently dropping it.
 
 Fresh readiness scoring, prescription generation and server authority are not available offline.
-Offline records are performed-work capture, not a new prescription.
+Readiness entry itself still works: the form uses its cached schema (or the fixed seeded fields),
+the attempted write is journaled like the other Phase 2 mutations, and the authoritative score
+refreshes when the server confirms it. Offline records are performed-work capture, not a new
+prescription.
 
 ## 6. History and execution timeline
 

@@ -16,6 +16,13 @@ struct ExecutionChangeRejection: Equatable {
     let message: String
 }
 
+/// The result of a readiness write. Server field errors are returned intact so the form can put
+/// each message on its matching input; the client never rewrites the server's validation.
+enum ReadinessSaveResult: Equatable {
+    case saved
+    case failed(message: String, fields: [String: String])
+}
+
 enum AppTab: Hashable {
     case today
     case history
@@ -258,6 +265,12 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var isLoadingProgress = false
+    /// The form contract for readiness. Never nil: the last cached schema or the fixed fallback
+    /// stands in when the server is unreachable, so readiness entry is never blocked.
+    @Published private(set) var readinessSchema: ReadinessSchema = .fallback
+    @Published private(set) var readinessSchemaSource: ReadinessSchemaSource = .fallback
+    @Published private(set) var readinessSchemaError: String?
+    @Published private(set) var isLoadingReadinessSchema = false
     @Published private(set) var mutationError: String?
     @Published private(set) var mutationFailureAmbiguous = false
     @Published private(set) var pendingMutations: [PendingMutation] = []
@@ -331,6 +344,8 @@ final class AppModel: ObservableObject {
     private var offlineRetryTask: Task<Void, Never>?
     private var offlineRetryAttempt = 0
     private let exerciseCatalogueCache: ExerciseCatalogueCache
+    private let readinessSchemaCache: ReadinessSchemaCache
+    private var readinessSchemaLoadedServerURL: String?
     private let automation: WorkoutAutomation
     private let phoneHealthKitWriter: any PhoneHealthKitWorkoutWriting
     private var exerciseCatalogueLoadedServerURL: String?
@@ -351,6 +366,7 @@ final class AppModel: ObservableObject {
         offlineStore: OfflineCaptureStore? = nil,
         watchConnectivity: WatchConnectivitySession? = nil,
         exerciseCatalogueCache: ExerciseCatalogueCache? = nil,
+        readinessSchemaCache: ReadinessSchemaCache? = nil,
         automation: WorkoutAutomation? = nil,
         phoneHealthKitWriter: (any PhoneHealthKitWorkoutWriting)? = nil
     ) {
@@ -390,6 +406,17 @@ final class AppModel: ObservableObject {
         self.healthKitDefaults = healthKitDefaults
         self.offlineStore = captureStore
         self.exerciseCatalogueCache = exerciseCatalogueCache ?? ExerciseCatalogueCache()
+        let schemaCache = readinessSchemaCache ?? ReadinessSchemaCache()
+        self.readinessSchemaCache = schemaCache
+        if let cached = schemaCache.load(serverURL: store.serverURL ?? "") {
+            self.readinessSchema = cached.schema
+            self.readinessSchemaSource = .cache
+            self.readinessSchemaLoadedServerURL = store.serverURL
+        } else {
+            self.readinessSchema = .fallback
+            self.readinessSchemaSource = .fallback
+            self.readinessSchemaLoadedServerURL = nil
+        }
         self.automation = resolvedAutomation
         self.phoneHealthKitWriter = phoneHealthKitWriter ?? PhoneHealthKitWorkoutWriter()
         self.deepSeekKeyPresent = ((try? self.deepSeekKeyStore.load()) ?? nil)?.isEmpty == false
@@ -1843,14 +1870,53 @@ final class AppModel: ObservableObject {
 
     // MARK: Phase 2 mutations
 
+    /// Fetch the effective registry schema and cache it. A failure never blocks readiness entry:
+    /// the last schema for this server (or the fixed fallback) stays in place and the form says so.
+    func loadReadinessSchema() async {
+        guard let session, !isLoadingReadinessSchema else { return }
+        let serverURL = session.baseURL.absoluteString
+        isLoadingReadinessSchema = true
+        defer { isLoadingReadinessSchema = false }
+        do {
+            let schema = try await client.readinessSchema(session: session)
+            readinessSchema = schema
+            readinessSchemaSource = .server
+            readinessSchemaLoadedServerURL = serverURL
+            readinessSchemaError = nil
+            try? readinessSchemaCache.save(serverURL: serverURL, schema: schema)
+        } catch {
+            readinessSchemaError = message(for: error)
+            // Keep a schema already loaded for this server. Only replace it when the form was
+            // showing another server's schema (or nothing yet).
+            guard readinessSchemaLoadedServerURL != serverURL else { return }
+            if let cached = readinessSchemaCache.load(serverURL: serverURL) {
+                readinessSchema = cached.schema
+                readinessSchemaSource = .cache
+                readinessSchemaLoadedServerURL = serverURL
+            } else {
+                readinessSchema = .fallback
+                readinessSchemaSource = .fallback
+                readinessSchemaLoadedServerURL = serverURL
+            }
+        }
+    }
+
     func saveReadiness(
         values: [String: Double],
         note: String?,
         idempotencyKey: String
-    ) async -> Bool {
-        guard !isSaving, let session else { return false }
+    ) async -> ReadinessSaveResult {
+        guard !isSaving, let session else {
+            return .failed(
+                message: "A readiness save is already in progress, or this device is not paired.",
+                fields: [:]
+            )
+        }
         guard permitsMutation(kind: .readiness, operationId: idempotencyKey) else {
-            return false
+            return .failed(
+                message: mutationError ?? "A previous write was not confirmed.",
+                fields: [:]
+            )
         }
         isSaving = true
         mutationFailureAmbiguous = false
@@ -1866,10 +1932,20 @@ final class AppModel: ObservableObject {
             )
             mutationError = nil
             await refresh()
-            return true
+            return .saved
         } catch {
+            if let api = error as? APIError, !api.fields.isEmpty,
+               !api.isAuthenticationFailure {
+                // Put the server's field errors on the form's inputs; the server rejected the
+                // write and the journal entry is already gone.
+                mutationError = nil
+                return .failed(
+                    message: api.errorDescription ?? "The server rejected the readiness entry.",
+                    fields: api.fields
+                )
+            }
             handleMutation(error)
-            return false
+            return .failed(message: message(for: error), fields: [:])
         }
     }
 

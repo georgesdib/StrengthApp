@@ -84,10 +84,13 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   section when the server has a workout not represented locally, a local workout ended elsewhere,
   or a prescription is no longer usable; an opt-in HealthKit section showing HRV/RHR/bodyweight
   effective values, source, sample age and Import from HealthKit; pull to refresh.
-- **Readiness** — manual sleep/energy/mood/soreness/stress (1–5), optional HRV/RHR/bodyweight/
-  wearable, optional note; HealthKit HRV (a nightly recovery value), RHR and bodyweight
-  values/source/age are shown on the same form with manual override; missing fields stay missing;
-  errors stay visible.
+- **Readiness** — schema-driven manual entry from the server's effective registry: enabled
+  metrics in registry order with the server's labels, scales, units and direction, and the
+  required-one-of marker; optional device measurements, then bodyweight and the wearable score in
+  a separate non-registry section; optional note. HealthKit HRV (a nightly recovery value), RHR and
+  bodyweight values/source/age are shown on the same form with manual override; missing fields stay
+  missing. Client minimum/required checks are a convenience, server field errors appear on the
+  matching input, and offline entry uses the last cached schema or the fixed seeded fields.
 - **Workout ready** — once the server finishes building, Today shows a ready card with the
   session type, date, exercise count and warnings. **Review workout** opens the full plan, and
   **Start workout** on that screen starts by issued-plan id and opens the active workout directly;

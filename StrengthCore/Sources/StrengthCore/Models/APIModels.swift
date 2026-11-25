@@ -138,6 +138,9 @@ public struct TodayResponse: Decodable {
 public struct ReadinessPayload: Decodable {
     public let onDate: String?
     public let known: Bool?
+    /// The readiness registry version the server used for this day. The form can show it, but
+    /// the schema endpoint remains the source for labels, scale and required fields.
+    public let registryVersion: Int?
     public let score: ReadinessScore?
     public let contextFlags: [String]?
     public let hrvMs: Double?

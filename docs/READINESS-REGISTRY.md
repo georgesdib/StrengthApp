@@ -49,6 +49,14 @@ form says so at the top and does not invent a value for it; the metric appears a
 successful schema fetch. An offline readiness write follows the existing Phase 2 mutation
 journal, so the server remains the authority for the score once it syncs.
 
+## Acceptance
+
+The simulator live flow passed against a disposable seeded-registry server on 2026-11-25; the
+physical-device record is [outstanding](acceptance/device/15-readiness-registry.md) because the
+owner declined installation for that run. Unit coverage is in `ReadinessSchemaTests`,
+`ReadinessSchemaCacheTests`, `ReadinessFormFieldTests`, `IOSAPIClientTests` and
+`AppModelTests`.
+
 ## What the Swift code must not do
 
 No Swift code calculates readiness, weights, components, category factors, baselines or a score.

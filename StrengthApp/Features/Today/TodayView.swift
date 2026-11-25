@@ -879,6 +879,11 @@ struct PlanSettingsView: View {
         SessionOption(id: "accessory", label: "Accessory"),
     ]
 
+    // Mirrors the server's MOD-MIN-001 targets in config/minimum-session.v1.yaml. The
+    // server rejects anything else, so the picker must not offer intermediate minutes.
+    private let minimumTargets = [30, 45, 60]
+    private let defaultMinimumTarget = 45
+
     private enum MainLiftStructure: String, CaseIterable, Identifiable {
         case server = "Server default"
         case preferred = "Prefer top set + back-off"
@@ -886,6 +891,15 @@ struct PlanSettingsView: View {
         case straight = "Straight sets"
 
         var id: String { rawValue }
+    }
+
+    /// Keep the request on a target the server accepts, even if an older request echoed a
+    /// non-configured value into the restored settings.
+    private func normalizeMinimumTarget() {
+        guard settings.minimumSession else { return }
+        let target = settings.minimumTargetMinutes ?? defaultMinimumTarget
+        settings.minimumTargetMinutes = minimumTargets.contains(target)
+            ? target : defaultMinimumTarget
     }
 
     private var structure: Binding<MainLiftStructure> {
@@ -939,16 +953,27 @@ struct PlanSettingsView: View {
                 }
                 Section("Length") {
                     Toggle("Allow a minimum session", isOn: $settings.minimumSession)
+                        .onChange(of: settings.minimumSession) { _, enabled in
+                            if enabled {
+                                self.normalizeMinimumTarget()
+                            } else {
+                                // Only sent with an enabled minimum session; a stale value
+                                // must not be able to reach the server from an off toggle.
+                                settings.minimumTargetMinutes = nil
+                            }
+                        }
+                        .onAppear { self.normalizeMinimumTarget() }
                     if settings.minimumSession {
-                        Stepper(
-                            "Target: \(settings.minimumTargetMinutes ?? 30) min",
-                            value: Binding(
-                                get: { settings.minimumTargetMinutes ?? 30 },
-                                set: { settings.minimumTargetMinutes = $0 }
-                            ),
-                            in: 10...120,
-                            step: 5
-                        )
+                        Picker("Target", selection: Binding(
+                            get: { settings.minimumTargetMinutes ?? self.defaultMinimumTarget },
+                            set: { settings.minimumTargetMinutes = $0 }
+                        )) {
+                            ForEach(minimumTargets, id: \.self) { minutes in
+                                Text("\(minutes) min").tag(minutes)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .accessibilityIdentifier("minimum-session-target")
                     }
                 }
                 Section {

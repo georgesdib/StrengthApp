@@ -190,7 +190,11 @@ final class Phase2ClientTests: XCTestCase {
             IssuePrescriptionRequest(
                 readinessAck: true,
                 confirmations: ["deload": false],
-                settings: PlanSettings(sessionType: "squat", minimumSession: true)
+                settings: PlanSettings(
+                    sessionType: "squat",
+                    minimumSession: true,
+                    minimumTargetMinutes: 45
+                )
             ),
             session: session,
             idempotencyKey: "key-issue"
@@ -209,6 +213,7 @@ final class Phase2ClientTests: XCTestCase {
         let settings = json["settings"] as? [String: Any]
         XCTAssertEqual(settings?["session_type"] as? String, "squat")
         XCTAssertEqual(settings?["minimum_session"] as? Bool, true)
+        XCTAssertEqual(settings?["minimum_target_minutes"] as? Int, 45)
         XCTAssertNil(json["plan"])
         XCTAssertNil(json["execution_target"])
 

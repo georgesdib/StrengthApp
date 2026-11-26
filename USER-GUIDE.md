@@ -86,12 +86,14 @@ raw 100.x address.
    competition date/countdown. Trained week and deload week are different definitions: trained
    weeks count only weeks with a session, while the deload calendar counts every week since the
    block anchor.
-2. When requesting a new workout, choose **Run on iPhone** or **Run on Apple Watch**. The default
-   is iPhone. A watch-targeted plan appears on the watch and cannot be started on the phone.
+2. When requesting a new workout, the plan belongs to the iPhone/watch pairing. It appears on
+   both devices and either device can start it.
    The main-lift structure offers **Server default**, **Prefer top set + back-off**,
    **Require top set + back-off** or **Straight sets**. Preferred accepts a straight-set fallback
    with a recorded reason; required marks an unexpected fallback as unsatisfied, but the plan stays
-   startable. The server owns eligibility and every load.
+   startable. **Technique throttle (main work)** asks the server to lighten main-work loads for
+   this session only; the issued plan marks the affected exercises and explains why. The server
+   owns eligibility and every load.
 3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
    load, RIR, any velocity target, rest and any warnings. **Start workout** is on that screen, so the plan is always
    visible before it is consumed. The server issues the plan; the phone never invents plan content.
@@ -108,14 +110,41 @@ raw 100.x address.
    and logging the working sets is valid. To record one, tap **Start set** on its warm-up row: it
    fills that row's load and reps, and RIR 6 is what records the set as a warm-up.
    A working set starts the rest timer automatically; logged warm-ups (RIR 6) do not.
-7. Repeat for the remaining sets and exercises. When an exercise is done, tap **End exercise**:
+7. A saved set has **Edit**: saving appends one correction and keeps the set's server identity.
+   **Remove set** is a separate action; it never resurrects or re-adds a set.
+8. Repeat for the remaining sets and exercises. If the server becomes unreachable after a
+   plan has been downloaded, **Start workout** still starts it: the plan's execution id and your
+   start time are kept locally and bound on the next sync. When an exercise is done, tap **End exercise**:
    it closes any running rest, records the exercise's completion and offers the optional 1–5 form
    rating. Leaving the screen does not end the exercise.
-8. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
-9. Review the **Session report** that opens after completion: prescription adherence, velocity,
-   session feedback, quality flags and evidence. It is read-only. **Done** returns to Today.
-10. The same report is available later from the session's **History** detail. An imported session
+9. Finish with session RPE or **Not recorded**, optional duration/notes and productivity.
+10. Review the **Session report** that opens after completion: prescription adherence, velocity,
+   session feedback, quality flags and evidence. It is read-only. If the Apple Watch still owes
+   sets, the report says **Apple Watch data pending** and refreshes until the server settles the
+   window; do not treat those totals as final until then. **Done** returns to Today.
+11. The same report is available later from the session's **History** detail. An imported session
     with no workout record explains that no report exists.
+
+### Logging readiness
+
+**Today → Log readiness** renders the server's effective readiness registry: only enabled metrics,
+in the registry's order, with its labels, 1–5 scales, units and direction. A red **\*** marks the
+fields named by the registry's required-one-of rule (normally sleep or energy). The form checks
+the minimum number of core fields before it submits, but that check is a convenience: the server
+still validates every value, and any field error it returns is shown on the matching input.
+
+![Schema-driven readiness form with registry order, scales and required-one-of marks](docs/images/readiness-registry-form.png)
+
+Bodyweight and the wearable score are separate, non-registry inputs and are sent with the
+readiness values. HealthKit HRV, resting heart rate and bodyweight are shown on the same form; a
+manual value wins.
+
+![Readiness form filled in before saving](docs/images/readiness-registry-filled.png)
+
+The app caches the last schema it received. If the server is unreachable, the form uses that
+cached schema, or the fixed seeded fields when no cache exists, and says so at the top. A metric
+added to the server registry after the cache was written cannot be entered offline; the app does
+not invent a value for it, and it appears after the next successful sync.
 
 ### Substituting and adding work
 
@@ -136,10 +165,11 @@ mid-session changes:
   selectable on the phone and watch, and its sets are recorded as extra work without a plan
   slot.
 
-The server solves the substitute's or addition's prefill, and that value fills the logging
-controls on both devices. The phone never computes a load. A null prefill stays blank and is
-never replaced by the original exercise's load. An offline phone records the change without a
-prefill, and it is not solved later.
+The phone applies the server-built catalogue's prefill, including the live erector dose and set
+cap, and shows it on both devices. The phone never invents a load: a catalogue miss stays blank
+and is never replaced by the original exercise's load. The change is applied locally before the
+server answers; if the phone is offline it stays **Saved on this iPhone** and syncs later. If the
+server rejects it, the row stays visible as **Unresolved** rather than silently reverting.
 
 ![Frozen plan with per-exercise options](docs/images/workout-plan.png)
 
@@ -205,8 +235,8 @@ The app keeps the active workout and pending operations on the phone before ackn
 
 - Sets, form ratings, finish operations and execution events can be queued.
 - The exercise catalogue is cached on the phone: the library and exercise pickers remain usable
-  offline for browsing and logging an exercise outside the plan. Plan edits still require the
-  server and are not queued.
+  offline. Substitutions and additions are applied locally and queued; other plan edits still
+  require the server.
 - Queued work survives app termination and reloads on the next launch.
 - Replay preserves the original occurrence time.
 - The app shows pending, offline and conflict states rather than claiming server acceptance.
@@ -223,7 +253,10 @@ The app keeps the active workout and pending operations on the phone before ackn
   screen show **Execution timing** rather than silently dropping it.
 
 Fresh readiness scoring, prescription generation and server authority are not available offline.
-Offline records are performed-work capture, not a new prescription.
+Readiness entry itself still works: the form uses its cached schema (or the fixed seeded fields),
+the attempted write is journaled like the other Phase 2 mutations, and the authoritative score
+refreshes when the server confirms it. Offline records are performed-work capture, not a new
+prescription.
 
 ## 6. History and execution timeline
 
@@ -259,6 +292,15 @@ completed workouts.
 
 Exercise information is read-only. The training rules and prescription engine are unchanged.
 
+### Siri and Shortcuts
+
+Siri answers the app's read-only training questions — training overview, last workout, average
+workout duration, weekly review and one exercise's progression — on the iPhone and Apple Watch.
+On the phone, the same actions appear in the Shortcuts app, and each one returns the sentence it
+speaks as its output, so a shortcut can pass the answer to a later action, display it, or branch
+on it. **Start Workout** and **Finish Workout** return their status message in the same way; they
+also open the app, where the workout is started or finished by hand.
+
 ## 8. HealthKit
 
 HealthKit readiness is optional and off by default. When enabled, the app reads only:
@@ -282,8 +324,10 @@ minus Apple Watch stand time, so it only exists for days a watch was worn — an
 records no sitting value at all, which is missing rather than zero. Neither value changes a load,
 a prescription or a readiness score.
 
-**Workout heart rate is read only on Apple Watch**, for the live session display and the one
-saved HealthKit workout. It is not used for readiness, fatigue, progression or prescriptions.
+**Workout heart rate is read only on Apple Watch**, for the live session display. The watch saves
+one HealthKit workout for a session it ran; the phone saves one when it finishes a session, so a
+session finished on both can leave two. The app never deletes or merges them, and training data
+still comes from the server's recorded sets.
 
 ## 9. Settings and maintenance
 
@@ -363,7 +407,7 @@ Changing the Home Server and tapping **Save server settings** increments the wat
 version. When the watch has no active session, it updates its Home address without receiving a new
 token.
 
-The watch runs its own session: fetch the watch-targeted plan, **Start set**, log load/reps/RIR.
+The watch runs its own session: fetch the pairing's plan, **Start set**, log load/reps/RIR.
 A warm-up is an ordinary set: tap **Use** on a warm-up row to fill its load and reps, then log it
 with RIR 6. RIR 6 is what records it as warm-up work, so it stays out of working-set volume and
 does not open a rest. When the plan supplies a velocity target it appears beside RIR and in the
@@ -374,8 +418,8 @@ velocity entry happens during the rest, not inside the set. Rest — **+15s** ex
 shortens it, and a local notification fires when it ends if you allowed notifications — rate form
 at **End exercise**, and finish with editable sRPE and optional productivity. Total elapsed time
 and heart rate show at the top of the exercise screen; heart rate follows the latest HealthKit
-sample and clears after 10 seconds without a new one. Exactly one HealthKit workout is saved, and
-the session sRPE is written as the workout's Apple effort score.
+sample and clears after 10 seconds without a new one. The watch saves one HealthKit workout for
+the session and writes the session sRPE as the workout's Apple effort score.
 
 A swap re-solves the replacement from its own history and calibration: load, warm-up ramps and
 VBT target when available. It never copies the old lift's load. If no load can be derived, the
@@ -392,9 +436,8 @@ those numbers; it never computes them. **Not scored yet** means the day has no s
 on the iPhone.
 
 When there is nothing to start, the screen says why and what fixes it: **No workout today** (request
-one on the iPhone), **Planned for iPhone** (start it there), **Not for Apple Watch**, **Not paired**
-(open Strength on the iPhone to pair), or **Can't reach your Home Server** with the host that was
-tried. The gear opens **Settings**.
+one on the iPhone), **Not paired** (open Strength on the iPhone to pair), or **Can't reach your
+Home Server** with the host that was tried. The gear opens **Settings**.
 
 **Home scenes on the watch.** The watch runs the start and end Home scene you chose under
 **Settings → Workout automation** on the iPhone. The choice reaches the watch shortly after you pick
@@ -404,13 +447,11 @@ discarded, the watch names the case on that screen instead of failing silently: 
 Apple Watch** (allow Home access when the watch asks, or check the app's HomeKit entitlement),
 **Home … not on watch**, **Scene … not in …**, or **HomeKit: …** with the system error.
 
-While the watch owns the session the phone shows **Logged on Apple Watch** and does not accept sets,
-form ratings or velocity. Use the phone to edit the plan; the change is queued until the server
-accepts it, then reaches the watch at its next idle point, never mid-set. If the watch has already
-logged sets for that exercise, the server refuses the change and the workout screen says so; those
-sets stay recorded, and the phone marks any set that could not be attached to its plan item.
-**Take over logging** asks for confirmation, moves the session to the phone and leaves the watch
-read-only; sets the watch already recorded stay in the session.
+Either device can log while a session is open: ownership is provenance, not permission. Use the
+phone to edit the plan; the change is queued until the server accepts it, then reaches the watch at
+its next idle point, never mid-set. If the watch has already logged sets for that exercise, the
+server refuses the change and the workout screen says so; those sets stay recorded, and the phone
+marks any set that could not be attached to its plan item.
 
 If the server address changes, save the settings and let the app recheck. If you change to a
 different server/database, pair again.

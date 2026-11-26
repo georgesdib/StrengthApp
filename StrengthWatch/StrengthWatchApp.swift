@@ -31,6 +31,16 @@ struct StrengthWatchApp: App {
         session.onExecutionPayload = { [weak execution] in
             execution?.applyRemotePayload($0)
         }
+        session.onPlanCache = { [weak execution, weak today] cache in
+            execution?.applyPlanCache(cache)
+            today?.applyPlanCache(cache)
+        }
+        execution.phoneReachable = { [weak session] in
+            session?.isPhoneReachable ?? false
+        }
+        execution.onStatusChanged = { [weak session] status in
+            session?.sendStatus(status)
+        }
         // A rest that starts on the wrist is mirrored on the phone as a Live Activity.
         execution.onRestChanged = { [weak session] snapshot in
             session?.sendRest(snapshot)

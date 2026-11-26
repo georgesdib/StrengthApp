@@ -84,10 +84,13 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   section when the server has a workout not represented locally, a local workout ended elsewhere,
   or a prescription is no longer usable; an opt-in HealthKit section showing HRV/RHR/bodyweight
   effective values, source, sample age and Import from HealthKit; pull to refresh.
-- **Readiness** — manual sleep/energy/mood/soreness/stress (1–5), optional HRV/RHR/bodyweight/
-  wearable, optional note; HealthKit HRV (a nightly recovery value), RHR and bodyweight
-  values/source/age are shown on the same form with manual override; missing fields stay missing;
-  errors stay visible.
+- **Readiness** — schema-driven manual entry from the server's effective registry: enabled
+  metrics in registry order with the server's labels, scales, units and direction, and the
+  required-one-of marker; optional device measurements, then bodyweight and the wearable score in
+  a separate non-registry section; optional note. HealthKit HRV (a nightly recovery value), RHR and
+  bodyweight values/source/age are shown on the same form with manual override; missing fields stay
+  missing. Client minimum/required checks are a convenience, server field errors appear on the
+  matching input, and offline entry uses the last cached schema or the fixed seeded fields.
 - **Workout ready** — once the server finishes building, Today shows a ready card with the
   session type, date, exercise count and warnings. **Review workout** opens the full plan, and
   **Start workout** on that screen starts by issued-plan id and opens the active workout directly;
@@ -132,12 +135,10 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
   RIR-6 sets,
   form rating, mean velocity for external-load work even without a target, rest with +15s/−15s
   and a local end-of-rest notification, total elapsed time beside heart rate, one HealthKit
-  workout, editable sRPE and optional productivity at finish, local-first outbox);
-  phone-targeted plans are hidden. While
-  the watch owns the session the phone shows a **Logged on Apple Watch** banner, keeps set logging
-  and form ratings disabled, and remains read-only for capture; plan edits still work and are
-  pushed to the watch at its next idle point, never mid-set. **Take over logging** asks for
-  confirmation, moves ownership to the phone and leaves the watch read-only.
+  workout, editable sRPE and optional productivity at finish, local-first outbox). A plan belongs
+  to the iPhone/watch pairing; `owner_device_id` is provenance only, so the phone can log, rate
+  form, substitute, add work and finish even when the watch started the session. There is no
+  take-over button and no read-only mirror mode. Watch execution writes commit through the phone.
 - **Exercise Library** — searchable catalogue, read-only configuration, server-computed e1RM and
   paginated working-set history; the catalogue is cached on disk so browsing and exercise choice
   work offline, configuration is cached for the app session, e1RM/history are fetched on entry,
@@ -146,8 +147,9 @@ notifications, offline behaviour, History execution timeline, HealthKit and trou
 HealthKit is read-only and off by default. Readiness reads HRV, resting heart rate and bodyweight;
 the separate, opt-in activity sync reads workouts, workout heart rate, active energy, VO₂max
 estimates, steps per day and sitting time (derived from Apple Watch stand time) for the last
-completed calendar week. There is no sleep import, review/rubric or Apple Intelligence/PCC UI. Execution telemetry is
-queued through the Phase 4 offline capture path; plan edits remain online-only.
+completed calendar week. There is no sleep import, review/rubric or Apple Intelligence/PCC UI. Execution
+telemetry is queued through the offline capture path; substitutions and additions are queued
+optimistically with catalogue prefill, while other plan editing remains server-side.
 
 ## Storage and networking
 
@@ -275,12 +277,12 @@ Three failure modes that are environmental rather than code:
 - **"Test crashed with signal kill before establishing connection"** means the simulator session
   is wedged, usually after a test run was killed. `xcrun simctl shutdown all` then boot the device
   again, or run on a different simulator. A clean device always works.
-- **"No profiles for 'com.georgesdibpersonalteam.StrengthApp(.watchkitapp)' were found"** means the
-  development profiles lapsed or were pruned on this Mac; the Xcode account is fine and nothing in
-  the project needs changing. `scripts/install-iphone.sh` builds with
-  `-allowProvisioningUpdates`, which reissues them from the portal, so re-run the script rather
-  than editing signing settings. Building for a device without a signed-in Xcode account cannot be
-  fixed this way.
+- **"No profiles for '…StrengthApp', '…watchkitapp' or '…widgets' were found"** means a development
+  profile lapsed or was pruned on this Mac; nothing in the project needs changing.
+  `scripts/install-iphone.sh` builds with `-allowProvisioningUpdates`, which reissues a lapsed
+  profile from the portal, so re-run the script rather than editing signing settings. If
+  xcodebuild also reports **"No Accounts"**, sign in under **Xcode → Settings → Accounts** first:
+  a profile that has to be created, such as the widget extension's, cannot be issued without it.
 - **A non-interactive shell has no pseudo-terminal**, which `xcodebuild test` needs. Wrap the
   command: `script -q /dev/null xcodebuild test …` (macOS). The build alone does not need it.
 

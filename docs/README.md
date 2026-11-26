@@ -21,6 +21,21 @@ app presents and records that authority.
   exactly-once workout save rule and the privacy limits (denied read is indistinguishable from no
   data) that constrain every future import. Read it before changing any HealthKit code.
 
+## Offline execution
+
+- **Unified offline execution (closed 2026-11-23).** Device-independent offline execution is
+  implemented on both sides, including phone-committed watch writes, optimistic offline
+  substitutions/additions, the dose-aware catalogue and durable set origin. Read
+  [the canonical plan](https://github.com/georgesdib/strength-app/blob/offline-execution/docs/plans/UNIFIED-OFFLINE-EXECUTION.md);
+  it is the source of truth. Physical-device user testing was done and owner-confirmed 2026-11-25; the server is deployed at `34e7f29`.
+- [Offline execution client implementation](OFFLINE-EXECUTION.md) — what C1/C2 changed in the app,
+  the plan-only watch cache, the ledger, merge rules and the follow-up findings.
+
+## Readiness
+
+- [Readiness registry on the iPhone](READINESS-REGISTRY.md) — schema-driven form, server field
+  errors, cached-schema/fixed-field offline fallback and the registry-added-metric limitation.
+
 ## Client plan and contracts
 
 - [iOS client plan](https://github.com/georgesdib/strength-app/blob/main/docs/plans/IOS-CLIENT-PLAN.md) — phased iPhone implementation plan, architecture
@@ -39,7 +54,7 @@ app presents and records that authority.
   MCP server and the native Apple adapters. Delivered 2026-11-15: read-only Siri/Shortcuts intents,
   workout automation (Shortcuts and HomeKit scenes), the Action button, watch Siri and the Shortcuts
   start/finish pair. INT-9 (the Siri AI Developer Preview adoption pass) is deferred until iOS 27.3 and
-  PCC (INT-4c) is parked on Apple's entitlement.
+  PCC (INT-4c) was withdrawn on 2026-11-24; the app has no Private Cloud path.
 - [Training Intelligence contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/TRAINING-INTELLIGENCE-CONTRACT.md)
   — response envelope, MCP tool/resource catalogue and the native iOS adapter rules (five-tool cap,
   no Swift calculation).

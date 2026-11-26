@@ -3,30 +3,6 @@ import Foundation
 import StrengthCore
 import StrengthIntents
 import SwiftUI
-import os
-
-/// Shared entry point for the read-only intents: one provider lookup, one error mapping.
-@MainActor
-enum IntentCall {
-    private static let logger = Logger(
-        subsystem: "com.georgesdibpersonalteam.StrengthApp",
-        category: "intents"
-    )
-
-    static func run<T>(_ label: String = #function, _ body: () async throws -> T) async throws -> T {
-        do {
-            let value = try await body()
-            logger.debug("intent \(label, privacy: .public) ok")
-            return value
-        } catch let error as IntentServiceError {
-            logger.error("intent \(label, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-            throw error
-        } catch {
-            logger.error("intent \(label, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
-            throw IntentServiceError.requestFailed(error.localizedDescription)
-        }
-    }
-}
 
 /// "How is my training going?" — the deterministic overview envelope, spoken and drawn.
 struct TrainingOverviewIntent: AppIntent {
@@ -36,14 +12,14 @@ struct TrainingOverviewIntent: AppIntent {
     )
     static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult & ShowsSnippetView & ProvidesDialog {
-        let envelope = try await IntentCall.run {
-            let provider = try await IntentServices.provider()
-            return try await provider.overview(windowWeeks: 4)
-        }
+    func perform() async throws -> some IntentResult & ReturnsValue<String>
+        & ShowsSnippetView & ProvidesDialog {
+        let envelope = try await ReadOnlyIntentQuery.overview(windowWeeks: 4)
         let digest = OverviewDigest(envelope: envelope)
+        let text = digest.dialog
         return .result(
-            dialog: IntentDialog(stringLiteral: digest.dialog),
+            value: text,
+            dialog: IntentDialog(stringLiteral: text),
             view: OverviewSnippetView(digest: digest)
         )
     }
@@ -57,19 +33,21 @@ struct LastWorkoutIntent: AppIntent {
     )
     static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult & ShowsSnippetView & ProvidesDialog {
-        let summary = try await IntentCall.run {
-            let provider = try await IntentServices.provider()
-            return try await provider.lastWorkout()
-        }
+    func perform() async throws -> some IntentResult & ReturnsValue<String>
+        & ShowsSnippetView & ProvidesDialog {
+        let summary = try await ReadOnlyIntentQuery.lastWorkout()
         guard let summary else {
+            let text = "You have no completed workouts yet."
             return .result(
-                dialog: "You have no completed workouts yet.",
+                value: text,
+                dialog: IntentDialog(stringLiteral: text),
                 view: LastWorkoutSnippetView(summary: nil)
             )
         }
+        let text = summary.dialog
         return .result(
-            dialog: IntentDialog(stringLiteral: summary.dialog),
+            value: text,
+            dialog: IntentDialog(stringLiteral: text),
             view: LastWorkoutSnippetView(summary: summary)
         )
     }
@@ -90,15 +68,15 @@ struct AverageSessionDurationIntent: AppIntent {
         Summary("Average workout duration over the last \(\.$weeks) weeks")
     }
 
-    func perform() async throws -> some IntentResult & ShowsSnippetView & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<String>
+        & ShowsSnippetView & ProvidesDialog {
         let window = weeks
-        let envelope = try await IntentCall.run {
-            let provider = try await IntentServices.provider()
-            return try await provider.overview(windowWeeks: window)
-        }
+        let envelope = try await ReadOnlyIntentQuery.overview(windowWeeks: window)
         let digest = AverageDurationDigest(envelope: envelope, weeks: window)
+        let text = digest.dialog
         return .result(
-            dialog: IntentDialog(stringLiteral: digest.dialog),
+            value: text,
+            dialog: IntentDialog(stringLiteral: text),
             view: AverageDurationSnippetView(digest: digest)
         )
     }
@@ -116,14 +94,14 @@ struct AverageSessionDuration12WeeksIntent: AppIntent {
     )
     static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult & ShowsSnippetView & ProvidesDialog {
-        let envelope = try await IntentCall.run {
-            let provider = try await IntentServices.provider()
-            return try await provider.overview(windowWeeks: 12)
-        }
+    func perform() async throws -> some IntentResult & ReturnsValue<String>
+        & ShowsSnippetView & ProvidesDialog {
+        let envelope = try await ReadOnlyIntentQuery.overview(windowWeeks: 12)
         let digest = AverageDurationDigest(envelope: envelope, weeks: 12)
+        let text = digest.dialog
         return .result(
-            dialog: IntentDialog(stringLiteral: digest.dialog),
+            value: text,
+            dialog: IntentDialog(stringLiteral: text),
             view: AverageDurationSnippetView(digest: digest)
         )
     }
@@ -144,20 +122,22 @@ struct ExerciseProgressionIntent: AppIntent {
         Summary("How is \(\.$exercise) progressing?")
     }
 
-    func perform() async throws -> some IntentResult & ShowsSnippetView & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<String>
+        & ShowsSnippetView & ProvidesDialog {
         guard let entity = exercise else {
+            let text = "Name an exercise, for example your main lift."
             return .result(
-                dialog: "Name an exercise, for example your main lift.",
+                value: text,
+                dialog: IntentDialog(stringLiteral: text),
                 view: ProgressionSnippetView(name: "Exercise", direction: nil, changeKg: nil, sessions: nil)
             )
         }
-        let envelope = try await IntentCall.run {
-            let provider = try await IntentServices.provider()
-            return try await provider.progression(exerciseID: entity.id)
-        }
+        let envelope = try await ReadOnlyIntentQuery.progression(exerciseID: entity.id)
         let digest = ProgressionDigest(envelope: envelope)
+        let text = digest.dialog(fallbackName: entity.name)
         return .result(
-            dialog: IntentDialog(stringLiteral: digest.dialog(fallbackName: entity.name)),
+            value: text,
+            dialog: IntentDialog(stringLiteral: text),
             view: ProgressionSnippetView(
                 name: digest.exerciseDisplay ?? entity.name,
                 direction: digest.direction,
@@ -176,14 +156,14 @@ struct WeeklyReviewIntent: AppIntent {
     )
     static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult & ShowsSnippetView & ProvidesDialog {
-        let envelope = try await IntentCall.run {
-            let provider = try await IntentServices.provider()
-            return try await provider.weeklyReview()
-        }
+    func perform() async throws -> some IntentResult & ReturnsValue<String>
+        & ShowsSnippetView & ProvidesDialog {
+        let envelope = try await ReadOnlyIntentQuery.weeklyReview()
         let digest = WeeklyReviewDigest(envelope: envelope)
+        let text = digest.dialog
         return .result(
-            dialog: IntentDialog(stringLiteral: digest.dialog),
+            value: text,
+            dialog: IntentDialog(stringLiteral: text),
             view: WeeklyReviewSnippetView(digest: digest)
         )
     }

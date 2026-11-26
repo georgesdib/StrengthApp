@@ -225,7 +225,8 @@ final class WatchExecutionCoreTests: XCTestCase {
 
         let capture = try store.load()
         XCTAssertNil(capture.session)
-        XCTAssertEqual(capture.version, 1)
+        // A v1 file is decoded and migrated in place, never rejected.
+        XCTAssertEqual(capture.version, OfflineCapture.currentVersion)
     }
 
     private func addSet(setIndex: Int) -> AddSetRequest {

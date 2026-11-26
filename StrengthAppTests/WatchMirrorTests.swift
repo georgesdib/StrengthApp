@@ -26,23 +26,6 @@ final class WatchMirrorTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - Ownership
-
-    func testMirrorPolicyFollowsTheSessionOwner() throws {
-        // A row with no owner predates ownership; it keeps the permissive behaviour (contract §9).
-        XCTAssertFalse(MirrorPolicy.isMirror(workout: nil, phoneDeviceID: "phone-1"))
-        XCTAssertFalse(MirrorPolicy.isMirror(
-            workout: try workout(owner: nil, revision: 0),
-            phoneDeviceID: "phone-1"
-        ))
-
-        let watchOwned = try workout(owner: "watch-1", revision: 0)
-        XCTAssertTrue(MirrorPolicy.isMirror(workout: watchOwned, phoneDeviceID: "phone-1"))
-        XCTAssertFalse(MirrorPolicy.isMirror(workout: watchOwned, phoneDeviceID: "watch-1"))
-        // A phone that cannot prove its identity must never be allowed to write.
-        XCTAssertTrue(MirrorPolicy.isMirror(workout: watchOwned, phoneDeviceID: nil))
-    }
-
     // MARK: - Payload
 
     func testExecutionPayloadRoundTripsAndRejectsAnotherSchema() throws {
@@ -168,30 +151,6 @@ final class WatchMirrorTests: XCTestCase {
         XCTAssertNil(engine.activeSet)
         XCTAssertFalse(engine.planUpdated)
         XCTAssertEqual(engine.workout?.plan?.items.first?.loadKg, 150)
-    }
-
-    func testAPhoneOwnedPayloadMakesTheWatchReadOnly() async throws {
-        let engine = makeEngine()
-        _ = await engine.start(issuedPlanID: "plan-1", session: session())
-
-        XCTAssertTrue(engine.applyRemote(
-            try push(revision: 2, loadKg: 150, owner: "phone-1"),
-            deviceID: "watch-1"
-        ))
-        XCTAssertEqual(engine.phase, .readOnly)
-
-        let set = await engine.logSet(
-            WatchExecutionEngine.SetEntry(
-                exerciseId: "competition_squat",
-                planItemIndex: 0,
-                setIndex: 1,
-                loadKg: 140,
-                reps: 3,
-                rir: 2
-            ),
-            session: session()
-        )
-        XCTAssertFalse(set.persisted)
     }
 
     // MARK: - Push transport
@@ -392,6 +351,7 @@ private final class RecordingConnectivity: WatchConnectivitySession {
     var activationState: WCSessionActivationState = .activated
     var receivedApplicationContext: [String: Any] = [:]
     private(set) var userInfos: [[String: Any]] = []
+    private(set) var fileTransfers: [(URL, [String: Any])] = []
 
     func activate() {
         activationState = .activated
@@ -402,6 +362,10 @@ private final class RecordingConnectivity: WatchConnectivitySession {
 
     func transferUserInfo(_ userInfo: [String: Any]) {
         userInfos.append(userInfo)
+    }
+
+    func transferFile(_ fileURL: URL, metadata: [String: Any]) {
+        fileTransfers.append((fileURL, metadata))
     }
 
     func sendMessage(

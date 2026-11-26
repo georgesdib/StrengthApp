@@ -39,6 +39,9 @@ protocol WatchConnectivitySession: AnyObject {
     /// Used for execution payloads; the credential handshake keeps the single-slot
     /// application context (contract §10.2).
     func transferUserInfo(_ userInfo: [String: Any])
+    /// Queued file delivery for content that can exceed the WatchConnectivity message and
+    /// application-context limits (the plan and its load catalogue).
+    func transferFile(_ fileURL: URL, metadata: [String: Any])
 }
 
 /// Thin adapter over WCSession. Keeping it behind a protocol lets the handoff logic run in
@@ -87,6 +90,10 @@ final class LiveWatchConnectivitySession: NSObject, WatchConnectivitySession, WC
 
     func transferUserInfo(_ userInfo: [String: Any]) {
         session?.transferUserInfo(userInfo)
+    }
+
+    func transferFile(_ fileURL: URL, metadata: [String: Any]) {
+        session?.transferFile(fileURL, metadata: metadata)
     }
 
     nonisolated func session(
@@ -161,6 +168,17 @@ final class WatchPairingCoordinator: ObservableObject {
 
     @Published private(set) var phase: Phase = .unavailable("Apple Watch support is unavailable.")
     @Published private(set) var link: PairedWatch?
+    @Published private(set) var watchStatus: WatchWorkoutStatus?
+    private(set) var localSetMap = LocalSetMap()
+    private var lastPushedPlanKey: String?
+    /// The phone's committed workout, so an incoming watch set can be merged against it.
+    var currentWorkout: (() -> WorkoutDetail?)?
+    /// Applied after a relayed watch write so the phone's merged view stays current and a
+    /// consumed phone-side plan preview cannot outlive the start that used it.
+    var onRelayedWorkout: ((WorkoutDetail) -> Void)?
+    /// Called when the watch reports its pending work, so a synced watch can settle an open
+    /// reconciliation window instead of leaving it open for the full seven days.
+    var onWatchStatus: ((WatchWorkoutStatus) -> Void)?
     @Published private(set) var isMinting = false
     @Published private(set) var isRevoking = false
     @Published private(set) var errorMessage: String?
@@ -257,6 +275,60 @@ final class WatchPairingCoordinator: ObservableObject {
     var lastAckText: String? {
         guard let value = link?.lastAckAt, !value.isEmpty else { return nil }
         return value
+    }
+
+    var watchDeviceID: String? { link?.deviceID }
+
+    var isWatchReachable: Bool { connectivity?.isReachable ?? false }
+
+    /// Whether this phone could still be missing the watch's events for a workout.
+    func watchMayHavePendingWork(for workoutId: String) -> Bool {
+        guard link?.revoked != true, let watchDeviceID else { return false }
+        if let status = watchStatus {
+            return status.hasPendingWork(for: workoutId)
+        }
+        // No heartbeat yet and no live connection: the phone cannot know what the watch has,
+        // so it names it as pending. A synced watch settles the window explicitly.
+        return !isWatchReachable
+    }
+
+    /// Delivers the plan and catalogue by file. Application context stays reserved for the
+    /// credential handshake (contract §10.2), and plan + catalogue can exceed its 65 KB ceiling.
+    @discardableResult
+    func pushPlanCache(_ issued: IssuedPlanResponse) -> Bool {
+        guard isActive,
+              link?.revoked != true,
+              let connectivity,
+              connectivity.activationState == .activated,
+              connectivity.isWatchAppInstalled,
+              let executionID = issued.executionID,
+              !executionID.isEmpty else {
+            return false
+        }
+        let key = issued.issuedPlanId + ":" + executionID
+        guard lastPushedPlanKey != key else { return true }
+        let cache = WatchPlanCache(
+            issuedPlanId: issued.issuedPlanId,
+            executionId: executionID,
+            forDate: issued.forDate,
+            sessionType: issued.sessionType,
+            expiresAt: issued.expiresAt,
+            plan: issued.plan,
+            loadCatalogue: issued.loadCatalogue,
+            warnings: issued.warnings
+        )
+        do {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("plan-cache-\(executionID).json")
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(cache).write(to: url, options: [.atomic])
+            connectivity.transferFile(url, metadata: ["kind": "plan_cache", "execution_id": executionID])
+            lastPushedPlanKey = key
+            return true
+        } catch {
+            return false
+        }
     }
 
     func start(session: IOSSession, homeBaseURL: String?) {
@@ -829,14 +901,25 @@ final class WatchPairingCoordinator: ObservableObject {
         )
     }
 
-    /// Executes one watch operation with the watch token. The phone is a transport, not a
-    /// second author: it does not journal, retry or reinterpret the request.
+    /// Commits one watch operation with the phone's credential. The watch token that travelled
+    /// with the request is not used for execution writes; the watch keeps it for reads only.
     private func relay(_ request: WatchRelayRequest) async -> WatchRelayResponse {
         do {
             let baseURL = try IOSAPIClient.validatedBaseURL(request.baseURL)
             let watchSession = IOSSession(
                 baseURL: baseURL, token: request.token, deviceID: request.deviceID
             )
+            // The phone is the only writer. Its own session commits execution writes; the
+            // watch token is kept only for reads such as the bootstrap clock.
+            let commitSession: IOSSession
+            if request.operation == .bootstrap {
+                commitSession = watchSession
+            } else {
+                guard let phoneSession = homeSession else {
+                    throw APIError.transport("The iPhone session is unavailable.")
+                }
+                commitSession = phoneSession
+            }
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             let encoder = JSONEncoder()
@@ -861,9 +944,15 @@ final class WatchPairingCoordinator: ObservableObject {
                       let key = request.idempotencyKey else {
                     throw APIError.http(status: 400, message: "start relay is incomplete", fields: [:])
                 }
+                let startBody = try? payload(StartWorkoutRequest.self)
                 let value = try await client.startWorkout(
-                    issuedPlanId: issuedPlanId, session: watchSession, idempotencyKey: key
+                    issuedPlanId: issuedPlanId,
+                    executionId: startBody?.executionId,
+                    startedAt: startBody?.startedAt,
+                    session: commitSession,
+                    idempotencyKey: key
                 )
+                onRelayedWorkout?(value)
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
                 )
@@ -871,13 +960,76 @@ final class WatchPairingCoordinator: ObservableObject {
                 guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
                     throw APIError.http(status: 400, message: "set relay is incomplete", fields: [:])
                 }
+                var body = try payload(AddSetRequest.self)
+                // The watch captured it; the phone remains the authenticated committer.
+                body = body.withOriginDeviceId(request.deviceID)
+                if let index = body.setIndex {
+                    let existing = (currentWorkout?()?.sets ?? []).compactMap { set -> (String, Int)? in
+                        guard let value = set.setIndex else { return nil }
+                        return (set.exerciseId, value)
+                    }
+                    let provisional = ProvisionalSet(
+                        deviceId: request.deviceID ?? "watch",
+                        localSetId: key,
+                        exerciseId: body.exerciseId,
+                        setIndex: index,
+                        planItemIndex: body.planItemIndex,
+                        performedAt: body.performedAt
+                    )
+                    let merged = SetMerge.renumber(
+                        [provisional],
+                        existing: existing.map { (exerciseId: $0.0, setIndex: $0.1) }
+                    )
+                    if let assigned = merged.first?.setIndex, assigned != index {
+                        body = body.withSetIndex(assigned)
+                    }
+                }
                 let value = try await client.addSet(
                     workoutId: workoutId,
-                    body: try payload(AddSetRequest.self),
-                    session: watchSession,
+                    body: body,
+                    session: commitSession,
                     idempotencyKey: key,
                     journaling: false
                 )
+                if let created = value.sets?
+                    .filter({ $0.exerciseId == body.exerciseId })
+                    .max(by: { ($0.setId ?? 0) < ($1.setId ?? 0) }),
+                   let setId = created.setId {
+                    localSetMap.record(
+                        deviceId: request.deviceID ?? "watch",
+                        localSetId: key,
+                        setId: setId
+                    )
+                }
+                onRelayedWorkout?(value)
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .updateSet:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "correction relay is incomplete", fields: [:])
+                }
+                let value = try await client.updateSet(
+                    workoutId: workoutId,
+                    body: try payload(UpdateSetRequest.self),
+                    session: commitSession,
+                    idempotencyKey: key
+                )
+                onRelayedWorkout?(value)
+                return WatchRelayResponse(
+                    requestId: request.requestId, ok: true, payload: encode(value)
+                )
+            case .removeSet:
+                guard let workoutId = request.workoutId, let key = request.idempotencyKey else {
+                    throw APIError.http(status: 400, message: "removal relay is incomplete", fields: [:])
+                }
+                let value = try await client.removeSet(
+                    workoutId: workoutId,
+                    body: try payload(RemoveSetRequest.self),
+                    session: commitSession,
+                    idempotencyKey: key
+                )
+                onRelayedWorkout?(value)
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
                 )
@@ -888,7 +1040,7 @@ final class WatchPairingCoordinator: ObservableObject {
                 let value = try await client.submitExecutionEvents(
                     workoutId: workoutId,
                     events: try payload(ExecutionEventsRequest.self).events,
-                    session: watchSession,
+                    session: commitSession,
                     idempotencyKey: key
                 )
                 return WatchRelayResponse(
@@ -901,10 +1053,11 @@ final class WatchPairingCoordinator: ObservableObject {
                 let value = try await client.completeWorkout(
                     workoutId: workoutId,
                     body: try payload(CompleteWorkoutRequest.self),
-                    session: watchSession,
+                    session: commitSession,
                     idempotencyKey: key,
                     journaling: false
                 )
+                onRelayedWorkout?(value)
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
                 )
@@ -913,8 +1066,9 @@ final class WatchPairingCoordinator: ObservableObject {
                     throw APIError.http(status: 400, message: "abandon relay is incomplete", fields: [:])
                 }
                 let value = try await client.abandonWorkout(
-                    workoutId: workoutId, session: watchSession, idempotencyKey: key
+                    workoutId: workoutId, session: commitSession, idempotencyKey: key
                 )
+                onRelayedWorkout?(value)
                 return WatchRelayResponse(
                     requestId: request.requestId, ok: true, payload: encode(value)
                 )
@@ -925,7 +1079,7 @@ final class WatchPairingCoordinator: ObservableObject {
                 let value = try await client.rateForm(
                     workoutId: workoutId,
                     body: try payload(FormRatingRequest.self),
-                    session: watchSession,
+                    session: commitSession,
                     idempotencyKey: key,
                     journaling: false
                 )
@@ -1029,6 +1183,11 @@ extension WatchPairingCoordinator: WatchConnectivitySessionDelegate {
     }
 
     func watchConnectivityDidReceiveUserInfo(_ userInfo: [String: Any]) {
+        if let status = WatchWorkoutStatus.decode(userInfo) {
+            watchStatus = status
+            onWatchStatus?(status)
+            return
+        }
         // A rest the wrist started, mirrored as the phone's Live Activity.
         if WatchRestMirror.shared.handle(userInfo) { return }
     }

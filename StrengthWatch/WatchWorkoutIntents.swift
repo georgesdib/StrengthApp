@@ -1,6 +1,7 @@
 import AppIntents
 import Foundation
 import StrengthCore
+import StrengthIntents
 
 /// The Action button needs one style; the issued plan decides what the session actually contains.
 enum StrengthWorkoutStyle: String, AppEnum {
@@ -34,19 +35,19 @@ struct ActionButtonStartWorkoutIntent: StartWorkoutIntent {
     }
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         guard let today = WatchIntentBridge.today, let execution = WatchIntentBridge.execution else {
-            return .result(dialog: "Open Strength on your watch first.")
+            return IntentAnswer.text("Open Strength on your watch first.")
         }
         guard execution.phase == .ready else {
-            return .result(dialog: "A workout is already running.")
+            return IntentAnswer.text("A workout is already running.")
         }
         await today.refresh()
         guard case .ready(let plan) = today.state else {
-            return .result(dialog: "No workout is ready. Request one on your iPhone, then try again.")
+            return IntentAnswer.text("No workout is ready. Request one on your iPhone, then try again.")
         }
         await execution.start(issuedPlanID: plan.issuedPlanID)
-        return .result(dialog: "Starting your workout.")
+        return IntentAnswer.text("Starting your workout.")
     }
 }
 
@@ -59,14 +60,14 @@ struct ActionButtonOpenFinishIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         guard let execution = WatchIntentBridge.execution else {
-            return .result(dialog: "Open Strength on your watch first.")
+            return IntentAnswer.text("Open Strength on your watch first.")
         }
         guard execution.phase != .ready else {
-            return .result(dialog: "No workout is running. Request one on your iPhone first.")
+            return IntentAnswer.text("No workout is running. Request one on your iPhone first.")
         }
         execution.requestOpenFinish()
-        return .result(dialog: "Finish the workout here.")
+        return IntentAnswer.text("Finish the workout here.")
     }
 }

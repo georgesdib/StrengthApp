@@ -30,6 +30,12 @@ final class WatchExecutionController: ObservableObject {
 
     /// Called whenever the open rest changes, so the phone can mirror it as a Live Activity.
     var onRestChanged: ((WatchRestSnapshot) -> Void)?
+    /// A small status heartbeat so the phone can name this watch in `pending_devices`.
+    var onStatusChanged: ((WatchWorkoutStatus) -> Void)?
+    /// Whether WatchConnectivity currently has a reachable phone.
+    var phoneReachable: (() -> Bool)? {
+        didSet { engine.phoneReachable = phoneReachable }
+    }
     /// The last rest state sent, so a sync that changed nothing does not re-send it.
     private var sentRest: (sessionId: String, endsAt: Date?)?
     private var restSequence = 0
@@ -96,7 +102,8 @@ final class WatchExecutionController: ObservableObject {
         self.engine = WatchExecutionEngine(
             client: IOSAPIClient(),
             store: OfflineCaptureStore(fileURL: Self.recordFileURL),
-            relay: relay
+            relay: relay,
+            requiresPhoneRelay: true
         )
         healthRecorder?.onHeartRate = { [weak self] bpm in
             self?.heartRateUpdated(bpm)
@@ -135,6 +142,9 @@ final class WatchExecutionController: ObservableObject {
             try engine.restore()
         } catch {
             lastError = "The saved session could not be read."
+        }
+        if let cache = WatchSessionController.cachedPlan(), !cache.isExpired {
+            engine.cachedPlan = cache
         }
         sync()
         startPathMonitor()
@@ -231,6 +241,13 @@ final class WatchExecutionController: ObservableObject {
 
     // MARK: - Start
 
+    /// Applies the plan-only cache delivered by the phone (transferFile). It is the start input
+    /// when the server is unreachable; an online start still reads the plan from the server.
+    func applyPlanCache(_ cache: WatchPlanCache) {
+        guard !cache.isExpired else { return }
+        engine.cachedPlan = cache
+    }
+
     func start(issuedPlanID: String) async {
         guard let session = currentSession() else {
             credentialsMissing()
@@ -254,14 +271,20 @@ final class WatchExecutionController: ObservableObject {
                 lastError = "Enable Health access on the watch to log here, or log this workout on the iPhone."
                 return
             }
-            // Start HealthKit in the session's clock domain: one bootstrap call before the start gate.
+            // Start HealthKit in the session's clock domain: one bootstrap call before the start
+            // gate. With a cached plan and no server, the local clock is the only clock there is;
+            // the session is stamped locally and reconciled under the plan's execution id.
             let collectionStart: Date
             do {
                 let clock = try await engine.serverClock(session: session)
                 collectionStart = clock.serverNow(from: Date())
             } catch {
-                lastError = "Could not confirm the server clock, so the session was not started."
-                return
+                if (error as? APIError)?.isTransport == true, engine.cachedPlan != nil {
+                    collectionStart = Date()
+                } else {
+                    lastError = "Could not confirm the server clock, so the session was not started."
+                    return
+                }
             }
             do {
                 try await anchor.begin(at: collectionStart)
@@ -394,6 +417,43 @@ final class WatchExecutionController: ObservableObject {
     }
 
     var selectedSetNumber: Int { selectedCompletedSets + 1 }
+
+    var lastConfirmedSet: WorkoutSet? { engine.lastConfirmedSet }
+
+    func correctLastSet(
+        loadKg: Double?,
+        reps: Int?,
+        rir: Int?,
+        velocityMps: Double?
+    ) async {
+        guard let session = currentSession() else {
+            credentialsMissing()
+            return
+        }
+        isWorking = true
+        defer { isWorking = false }
+        let stop = await engine.correctLastSet(
+            loadKg: loadKg,
+            reps: reps,
+            rir: rir,
+            velocityMps: velocityMps,
+            session: session
+        )
+        await handle(stop)
+        sync()
+    }
+
+    func removeLastSet() async {
+        guard let session = currentSession() else {
+            credentialsMissing()
+            return
+        }
+        isWorking = true
+        defer { isWorking = false }
+        let stop = await engine.removeLastSet(session: session)
+        await handle(stop)
+        sync()
+    }
 
     var selectedExerciseName: String {
         let id = selectedRow?.exerciseId ?? engine.selectedItem?.exerciseId ?? ""
@@ -829,6 +889,18 @@ final class WatchExecutionController: ObservableObject {
         lastError = engine.lastError
         syncRestNotification()
         syncRestRelay()
+        publishStatus()
+    }
+
+    private func publishStatus() {
+        let status = WatchWorkoutStatus(
+            workoutId: engine.workout?.workoutId,
+            sessionId: engine.sessionRecord?.sessionUUID,
+            pendingCount: engine.pendingCount,
+            phase: String(describing: engine.phase),
+            finishAcknowledged: engine.sessionRecord?.finish?.serverAcked ?? false
+        )
+        onStatusChanged?(status)
     }
 
     /// Publishes the open rest to the phone. The end date is absolute, so a late delivery still

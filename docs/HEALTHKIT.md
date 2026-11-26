@@ -1,7 +1,8 @@
 # HEALTHKIT — CURRENT STATE
 
-**Status:** describes the development behaviour on 2026-11-21 (backend 1.7.1); the active-energy
-read scope and the saved workout's calories await physical-device acceptance. The cardio stage is
+**Status:** describes the development behaviour on 2026-11-23; physical acceptance of the
+active-energy read scope and saved-workout calories was closed by owner decision (see
+`DEVICE-ACCEPTANCE.md` record 14). The cardio stage is
 **implemented and deployed**, not proposed. This is a client-owned document: it describes what the
 phone and watch do with HealthKit. Server behaviour is owned by the backend and the shared contract
 in the [Phase 3A contract](https://github.com/georgesdib/strength-app/blob/main/docs/contracts/IOS-PHASE-3A-CONTRACT.md).
@@ -13,14 +14,17 @@ Read this before changing any HealthKit code.
 | Surface | Reads | Writes |
 |---|---|---|
 | iPhone — readiness | HRV (SDNN), resting heart rate, body mass | Nothing |
-| iPhone — recorded activity | Workouts, heart rate, active energy, VO₂max, workout effort score, Apple's average METs, step count, standing time | Nothing |
+| iPhone — recorded activity | Workouts, heart rate, active energy, VO₂max, workout effort score, Apple's average METs, step count, standing time | One strength-training workout when a session finishes |
 | Watch — workout execution | Heart rate and active energy, during a running workout session | One strength-training workout, one workout effort score |
 
 Because read authorisation cannot be queried per type, the watch requests its full read scope at
 every session start; HealthKit prompts only for types that are still undetermined. That is how a
 newly added scope (active energy) reaches someone who already granted workout access.
 
-There is still no write path from the phone to HealthKit beyond the watch's single saved workout.
+The phone now saves one workout when it finishes a session, through `PhoneHealthKitWorkoutWriter`;
+the watch keeps its per-device finaliser. Both may save, and neither deletes, merges or corrects a
+HealthKit record. The phone write requires workout write permission granted through the HealthKit
+opt-in; a denial is logged, not deferred.
 
 ## 2. iPhone — readiness reads
 
@@ -121,7 +125,9 @@ last workout.
 
 - `StrengthAppTests/HealthKitReadinessTests.swift` — readiness selection and the empty-never-denied
   rule.
-- `StrengthAppTests/WatchHealthKitFinalizerTests.swift` — the exactly-once workout save.
+- `StrengthAppTests/WatchHealthKitFinalizerTests.swift` — the watch's exactly-once workout save.
+- `StrengthAppTests/FakePhoneHealthKitWorkoutWriter.swift` and the Phase 2 suite — the phone saves
+  one workout at finish, and no save happens without write authorisation.
 - `StrengthAppTests/HealthKitActivityTests.swift` — independent cursor advancement, persisted
   workout-interval association, partial-response handling, the `rejected`/`skipped` decoding and
   backend scoping (same identity keeps state, a different identity clears it, a mid-sync scope

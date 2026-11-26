@@ -14,7 +14,27 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
     public let rirTarget: Int?
     public let prefillLoadKg: Double?
     public let prefillReason: String?
+    /// The server's verification of the number the athlete saw. A false value is a log
+    /// diagnostic, never a reason to replace the displayed load.
+    public let prefillVerified: Bool?
+    public let prefillExpectedLoadKg: Double?
+    public let prefillMismatchReason: String?
+    /// Which path produced the replacement: "catalogue" or "server".
+    public let resolvedBy: String?
+    /// The replacement's own set count and per-group prescription.
+    public let sets: Int?
+    public let setGroups: [SetGroup]?
+    /// Top-set eligibility is not inherited by a substitute; the server states it.
+    public let topSet: TopSetStatus?
+    /// Catalogue-path velocity target, when the lift has a trustworthy calibration.
+    public let vbtTarget: ExecutionVBT?
+    /// Server-path velocity target.
+    public let vbt: ExecutionVBT?
     public let createdAt: String?
+    /// Client-side state for an optimistic change: "pending" or "rejected". Nil for a server row.
+    public let localState: String?
+    /// The journal operation that owns this optimistic change.
+    public let localOperationId: String?
 
     public init(
         eventId: Int? = nil,
@@ -27,7 +47,18 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
         rirTarget: Int? = nil,
         prefillLoadKg: Double? = nil,
         prefillReason: String? = nil,
-        createdAt: String? = nil
+        prefillVerified: Bool? = nil,
+        prefillExpectedLoadKg: Double? = nil,
+        prefillMismatchReason: String? = nil,
+        resolvedBy: String? = nil,
+        sets: Int? = nil,
+        setGroups: [SetGroup]? = nil,
+        topSet: TopSetStatus? = nil,
+        vbtTarget: ExecutionVBT? = nil,
+        vbt: ExecutionVBT? = nil,
+        createdAt: String? = nil,
+        localState: String? = nil,
+        localOperationId: String? = nil
     ) {
         self.eventId = eventId
         self.kind = kind
@@ -39,7 +70,18 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
         self.rirTarget = rirTarget
         self.prefillLoadKg = prefillLoadKg
         self.prefillReason = prefillReason
+        self.prefillVerified = prefillVerified
+        self.prefillExpectedLoadKg = prefillExpectedLoadKg
+        self.prefillMismatchReason = prefillMismatchReason
+        self.resolvedBy = resolvedBy
+        self.sets = sets
+        self.setGroups = setGroups
+        self.topSet = topSet
+        self.vbtTarget = vbtTarget
+        self.vbt = vbt
         self.createdAt = createdAt
+        self.localState = localState
+        self.localOperationId = localOperationId
     }
 
     public var id: String {
@@ -61,6 +103,58 @@ public struct ExecutionChange: Codable, Sendable, Equatable, Identifiable {
     public var loadLabel: String {
         guard let prefillLoadKg, prefillLoadKg > 0 else { return "load not prefilled" }
         return String(format: "%.1f kg", prefillLoadKg)
+    }
+
+    public var velocityTarget: ExecutionVBT? { vbtTarget ?? vbt }
+
+    public var velocityTargetLabel: String? {
+        guard let target = velocityTarget?.targetMps, target > 0 else { return nil }
+        return String(format: "%.2f m/s", target)
+    }
+
+    public var topSetNote: String? {
+        guard topSet?.status == "not_applicable",
+              topSet?.reasonCode == "substituted" else { return nil }
+        return "Top set not applicable · substituted"
+    }
+}
+
+/// The velocity target shape used by both the catalogue (`vbt_target`) and the server solve
+/// (`vbt`). Values are shown as shipped; the client never reconstructs one.
+public struct ExecutionVBT: Codable, Equatable, Sendable {
+    public let targetMps: Double?
+    public let lowMps: Double?
+    public let highMps: Double?
+    public let repCount: Int?
+    public let rirLow: Int?
+    public let rirHigh: Int?
+    public let scope: String?
+    public let nSets: Int?
+    public let nSessions: Int?
+    public let calibrationId: String?
+
+    public init(
+        targetMps: Double? = nil,
+        lowMps: Double? = nil,
+        highMps: Double? = nil,
+        repCount: Int? = nil,
+        rirLow: Int? = nil,
+        rirHigh: Int? = nil,
+        scope: String? = nil,
+        nSets: Int? = nil,
+        nSessions: Int? = nil,
+        calibrationId: String? = nil
+    ) {
+        self.targetMps = targetMps
+        self.lowMps = lowMps
+        self.highMps = highMps
+        self.repCount = repCount
+        self.rirLow = rirLow
+        self.rirHigh = rirHigh
+        self.scope = scope
+        self.nSets = nSets
+        self.nSessions = nSessions
+        self.calibrationId = calibrationId
     }
 }
 
@@ -87,6 +181,32 @@ public struct ExecutionView: Codable, Sendable, Equatable {
 
     public static let empty = ExecutionView()
 
+    /// Applies optimistic local changes over the latest server view. A local substitution
+    /// replaces the server's row for that slot; local additions stay visible until acknowledged.
+    public func merging(local changes: [ExecutionChange]) -> ExecutionView {
+        guard !changes.isEmpty else { return self }
+        var slots: [Int: ExecutionChange] = [:]
+        for change in substitutions {
+            if let slot = change.planItemIndex {
+                slots[slot] = change
+            }
+        }
+        var additions = additions
+        for change in changes {
+            if let slot = change.planItemIndex {
+                slots[slot] = change
+            } else if !additions.contains(where: { $0.id == change.id }) {
+                additions.append(change)
+            }
+        }
+        return ExecutionView(
+            workoutId: workoutId,
+            watermark: watermark,
+            substitutions: slots.sorted { ($0.key) < ($1.key) }.map(\.value),
+            additions: additions
+        )
+    }
+
     /// One display row per plan item, with its substitution applied, plus additions after their
     /// anchor. Order is the plan order; an addition whose anchor is gone stays at the end.
     public func rows(plan: PrescriptionPlan?) -> [ExecutionRow] {
@@ -110,12 +230,12 @@ public struct ExecutionView: Codable, Sendable, Equatable {
                     afterItemIndex: nil,
                     exerciseId: change.exerciseId ?? plannedExercise,
                     plannedExerciseId: plannedExercise,
-                    sets: item.sets,
+                    sets: change.sets ?? item.sets,
                     loadKg: change.prefillLoadKg,
                     repsLow: change.repsLow ?? item.repsLow,
                     repsHigh: change.repsHigh ?? item.repsHigh,
                     rirTarget: change.rirTarget,
-                    groups: [],
+                    groups: change.setGroups ?? [],
                     change: change
                 ))
             } else {
@@ -144,12 +264,12 @@ public struct ExecutionView: Codable, Sendable, Equatable {
                     afterItemIndex: identity,
                     exerciseId: addition.exerciseId ?? "",
                     plannedExerciseId: nil,
-                    sets: nil,
+                    sets: addition.sets,
                     loadKg: addition.prefillLoadKg,
                     repsLow: addition.repsLow,
                     repsHigh: addition.repsHigh,
                     rirTarget: addition.rirTarget,
-                    groups: [],
+                    groups: addition.setGroups ?? [],
                     change: addition
                 ))
             }
@@ -162,12 +282,12 @@ public struct ExecutionView: Codable, Sendable, Equatable {
                 afterItemIndex: nil,
                 exerciseId: addition.exerciseId ?? "",
                 plannedExerciseId: nil,
-                sets: nil,
+                sets: addition.sets,
                 loadKg: addition.prefillLoadKg,
                 repsLow: addition.repsLow,
                 repsHigh: addition.repsHigh,
                 rirTarget: addition.rirTarget,
-                groups: [],
+                groups: addition.setGroups ?? [],
                 change: addition
             ))
         }
@@ -264,10 +384,25 @@ public struct ExecutionRow: Identifiable, Equatable, Sendable {
         guard let rirTarget else { return "—" }
         return "RIR \(rirTarget)"
     }
+
+    /// The substitute's shipped or solved velocity target, shown as supplied.
+    public var velocityTargetLabel: String? { change?.velocityTargetLabel }
+
+    /// A substitute's top-set eligibility is not inherited from the planned lift.
+    public var topSetNote: String? { change?.topSetNote }
+
+    public var localStateNote: String? {
+        switch change?.localState {
+        case "pending": return "Saved on this iPhone · not yet synced"
+        case "rejected": return "Unresolved · the server rejected this change"
+        default: return nil
+        }
+    }
 }
 
-/// The phone's authoring body. Setting prefillRequested to false is an offline author: the
-/// server stores no prefill and never retro-solves.
+/// The phone's authoring body. There is no legacy prefill flag: a value means the phone applied
+/// the catalogue, a version with no value records a catalogue miss, and neither asks the server
+/// to solve.
 public struct ExecutionChangeRequest: Encodable, Equatable, Sendable {
     public let eventId: String
     public let change: String
@@ -277,7 +412,10 @@ public struct ExecutionChangeRequest: Encodable, Equatable, Sendable {
     public let repsLow: Int?
     public let repsHigh: Int?
     public let rirTarget: Int?
-    public let prefillRequested: Bool?
+    /// The client-applied load from the shipped catalogue, and the snapshot it came from.
+    public let prefillLoadKg: Double?
+    public let prefillCatalogueVersion: String?
+    public let prefillAsOf: String?
 
     public init(
         eventId: String,
@@ -288,7 +426,9 @@ public struct ExecutionChangeRequest: Encodable, Equatable, Sendable {
         repsLow: Int? = nil,
         repsHigh: Int? = nil,
         rirTarget: Int? = nil,
-        prefillRequested: Bool? = nil
+        prefillLoadKg: Double? = nil,
+        prefillCatalogueVersion: String? = nil,
+        prefillAsOf: String? = nil
     ) {
         self.eventId = eventId
         self.change = change
@@ -298,7 +438,9 @@ public struct ExecutionChangeRequest: Encodable, Equatable, Sendable {
         self.repsLow = repsLow
         self.repsHigh = repsHigh
         self.rirTarget = rirTarget
-        self.prefillRequested = prefillRequested
+        self.prefillLoadKg = prefillLoadKg
+        self.prefillCatalogueVersion = prefillCatalogueVersion
+        self.prefillAsOf = prefillAsOf
     }
 }
 

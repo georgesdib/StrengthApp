@@ -58,6 +58,52 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.pairingError, APIError.forbidden.errorDescription)
     }
 
+    func testCachedReadinessSchemaIsAvailableOfflineAndAbsenceUsesTheFallback() throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        store.serverURL = "http://127.0.0.1:8000"
+
+        let cacheURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("readiness-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: cacheURL) }
+        let cache = ReadinessSchemaCache(fileURL: cacheURL)
+        let schema = ReadinessSchema(
+            registryId: 9,
+            effectiveFrom: "2026-11-24",
+            schemaVersion: 1,
+            minCoreFields: 2,
+            requireAnyOf: ["mood"],
+            wearableWeight: 0.2,
+            metrics: ReadinessSchema.fallback.metrics
+        )
+        try cache.save(serverURL: "http://127.0.0.1:8000", schema: schema)
+
+        let cachedModel = AppModel(
+            client: IOSAPIClient(transport: StubTransport { _ in (500, Data()) }),
+            tokens: InMemoryTokenStore(),
+            store: store,
+            readinessSchemaCache: cache
+        )
+        XCTAssertEqual(cachedModel.readinessSchema.registryId, 9)
+        XCTAssertEqual(cachedModel.readinessSchemaSource, .cache)
+
+        let fallbackURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("readiness-\(UUID().uuidString).json")
+        let fallbackModel = AppModel(
+            client: IOSAPIClient(transport: StubTransport { _ in (500, Data()) }),
+            tokens: InMemoryTokenStore(),
+            store: store,
+            readinessSchemaCache: ReadinessSchemaCache(fileURL: fallbackURL)
+        )
+        XCTAssertNil(fallbackModel.readinessSchema.registryId)
+        XCTAssertEqual(fallbackModel.readinessSchemaSource, .fallback)
+        XCTAssertEqual(
+            fallbackModel.readinessSchema.enabledMetrics.map(\.key),
+            ReadinessSchema.fallback.enabledMetrics.map(\.key)
+        )
+    }
+
     func testPairStoresTheTokenAndLoadsToday() async {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -258,7 +304,6 @@ final class AppModelTests: XCTestCase {
 
         await model.onLaunch()
         XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
-        XCTAssertTrue(model.isMirroringWatchSession)
 
         let recorded = await model.recordExecutionChange(
             workoutId: "workout-1",
@@ -267,10 +312,45 @@ final class AppModelTests: XCTestCase {
             idempotencyKey: "change-offline"
         )
 
-        XCTAssertFalse(recorded)
+        XCTAssertTrue(recorded)
         XCTAssertEqual(model.pendingExecutionChanges.count, 1)
         XCTAssertEqual(model.pendingExecutionChanges.first?.targetId, "workout-1")
         XCTAssertNil(model.executionChangeRejection)
+        XCTAssertEqual(model.effectiveExecutionView.substitutions.count, 1)
+        XCTAssertEqual(model.effectiveExecutionView.substitutions.first?.localState, "pending")
+        XCTAssertTrue(model.executionRows.contains { $0.change?.localState == "pending" })
+    }
+
+    func testRejectedExecutionChangeStaysVisibleAsUnresolved() async {
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(executionChangeToday().utf8))
+            case "/api/ios/v1/workouts/workout-1/execution":
+                return (409, Data(#"{"error":"already substituted","code":"execution_change_conflict"}"#.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let journal = MutationJournal(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("execution-change-(UUID().uuidString).json"))
+        let (model, suite) = executionChangeModel(transport: transport, journal: journal)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+        let recorded = await model.recordExecutionChange(
+            workoutId: "workout-1",
+            planItemIndex: 0,
+            exerciseId: "bench_press",
+            idempotencyKey: "change-rejected"
+        )
+
+        XCTAssertFalse(recorded)
+        XCTAssertEqual(model.effectiveExecutionView.substitutions.first?.localState, "rejected")
+        XCTAssertTrue(model.executionRows.contains { $0.change?.localState == "rejected" })
+        XCTAssertNotNil(model.mutationError)
     }
 
     func testReplayedExecutionChangePushesThePlanAndFlagsOffPlanSets() async throws {
@@ -431,6 +511,184 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.today)
         XCTAssertNil(model.pairingError)
     }
+
+    // MARK: - Relayed watch execution
+
+    private func cachedPlan(expiresAt: String = "2099-01-01T00:00:00Z") -> CachedIssuedPlan {
+        CachedIssuedPlan(
+            issuedPlanId: "plan-1",
+            executionId: "exec-1",
+            forDate: "2026-11-25",
+            sessionType: "squat",
+            expiresAt: expiresAt,
+            plan: PrescriptionPlan(
+                forDate: "2026-11-25",
+                sessionType: "squat",
+                sessionLabel: "Squat",
+                items: [
+                    PrescriptionItem(
+                        orderIndex: 0,
+                        exerciseId: "competition_squat",
+                        sets: 3,
+                        repsLow: 5,
+                        repsHigh: 5,
+                        loadKg: 140,
+                        loadBasis: "external",
+                        rirTarget: 2,
+                        effortModel: "rir",
+                        refs: nil,
+                        restS: 180,
+                        essential: true
+                    )
+                ],
+                warnings: nil,
+                issues: nil
+            )
+        )
+    }
+
+    private func sendRelay(
+        _ operation: WatchRelayOperation,
+        model: AppModel,
+        workoutId: String? = nil,
+        issuedPlanId: String? = nil,
+        idempotencyKey: String? = nil,
+        payload: Data? = nil
+    ) async throws -> WatchRelayResponse {
+        let request = WatchRelayRequest(
+            operation: operation,
+            baseURL: "http://127.0.0.1:8000",
+            token: "watch-token",
+            deviceID: "watch-1",
+            workoutId: workoutId,
+            issuedPlanId: issuedPlanId,
+            idempotencyKey: idempotencyKey,
+            payload: payload
+        )
+        let encoded = try XCTUnwrap(WatchRelayCoding.encodeRequest(request))
+        let replied = expectation(description: "relay \(operation.rawValue)")
+        var response: WatchRelayResponse?
+        model.watchPairing.watchConnectivityDidReceiveMessage(
+            ["kind": "relay", "request": encoded]
+        ) { dictionary in
+            response = (dictionary["response"] as? String)
+                .flatMap(WatchRelayCoding.decodeResponse)
+            replied.fulfill()
+        }
+        await fulfillment(of: [replied], timeout: 5)
+        let value = try XCTUnwrap(response)
+        XCTAssertTrue(value.ok)
+        return value
+    }
+
+    func testPlanStateNoneClearsTheCachedPlan() throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        let captureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("app-model-plan-cache-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: captureURL) }
+        let capture = OfflineCaptureStore(fileURL: captureURL)
+        _ = try capture.setCachedPlan(cachedPlan())
+        let model = AppModel(
+            client: IOSAPIClient(transport: StubTransport { _ in (500, Data()) }),
+            tokens: InMemoryTokenStore(),
+            store: store,
+            offlineStore: capture
+        )
+        guard case .issued = model.prescriptionState else {
+            return XCTFail("the cached plan should be previewable at launch")
+        }
+
+        model.applyPlanState(.none)
+
+        guard case .idle = model.prescriptionState else {
+            return XCTFail("a consumed plan must not stay startable")
+        }
+        XCTAssertNil(try capture.load().cachedPlan)
+    }
+
+    func testRelayedStartAndFinishClearThePhonePlan() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        store.serverURL = "http://127.0.0.1:8000"
+        store.homeServerURL = "http://127.0.0.1:8000"
+        store.device = PairingDevice(deviceID: "device-1", label: "iPhone")
+        let captureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("app-model-relay-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: captureURL) }
+        let capture = OfflineCaptureStore(fileURL: captureURL)
+        _ = try capture.setCachedPlan(cachedPlan())
+        let connectivity = RecordingWatchConnectivity()
+        var finished = false
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(Fixtures.today.utf8))
+            case "/api/ios/v1/plans/current":
+                return finished
+                    ? (200, Data(#"{"status":"none"}"#.utf8))
+                    : (200, Data(Fixtures.plansReady.utf8))
+            case "/api/ios/v1/workouts":
+                return (200, Data(Fixtures.workoutInProgress.utf8))
+            case "/api/ios/v1/workouts/workout-1/complete":
+                return (200, Data(Fixtures.workoutCompleted.utf8))
+            case "/api/ios/v1/history":
+                return (200, Data(Fixtures.history.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let model = AppModel(
+            client: IOSAPIClient(transport: transport),
+            tokens: InMemoryTokenStore(token: "token-abc"),
+            store: store,
+            offlineStore: capture,
+            watchConnectivity: connectivity
+        )
+        await model.onLaunch()
+        guard case .issued = model.prescriptionState else {
+            return XCTFail("the ready plan should be previewable")
+        }
+
+        _ = try await sendRelay(
+            .start,
+            model: model,
+            issuedPlanId: "plan-1",
+            idempotencyKey: "start-1"
+        )
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+        guard case .idle = model.prescriptionState else {
+            return XCTFail("the started plan must leave the start surface")
+        }
+        XCTAssertNil(try capture.load().cachedPlan)
+
+        finished = true
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let finishBody = CompleteWorkoutRequest(
+            sessionRpe: 7,
+            notRecorded: false,
+            durationMin: nil,
+            notes: nil,
+            endedAt: "2026-11-07T17:00:00+00:00"
+        )
+        _ = try await sendRelay(
+            .finish,
+            model: model,
+            workoutId: "workout-1",
+            idempotencyKey: "finish-1",
+            payload: try encoder.encode(finishBody)
+        )
+        XCTAssertNil(model.activeWorkout)
+        guard case .idle = model.prescriptionState else {
+            return XCTFail("a finished watch session must not leave a plan")
+        }
+        XCTAssertNil(try capture.load().cachedPlan)
+    }
 }
 
 @MainActor
@@ -444,6 +702,7 @@ private final class RecordingWatchConnectivity: WatchConnectivitySession {
     var receivedApplicationContext: [String: Any] = [:]
     private(set) var updates: [[String: Any]] = []
     private(set) var userInfos: [[String: Any]] = []
+    private(set) var fileTransfers: [(URL, [String: Any])] = []
 
     func activate() {}
     func updateApplicationContext(_ context: [String: Any]) throws {
@@ -451,6 +710,10 @@ private final class RecordingWatchConnectivity: WatchConnectivitySession {
     }
     func transferUserInfo(_ userInfo: [String: Any]) {
         userInfos.append(userInfo)
+    }
+
+    func transferFile(_ fileURL: URL, metadata: [String: Any]) {
+        fileTransfers.append((fileURL, metadata))
     }
 
     func sendMessage(

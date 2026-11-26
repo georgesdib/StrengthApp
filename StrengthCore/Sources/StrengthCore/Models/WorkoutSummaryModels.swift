@@ -24,6 +24,41 @@ public struct WorkoutSummary: Decodable {
     /// AFC-2i: at most one deterministic per-workout observation. Nil means the server found
     /// nothing that qualified; the report must not substitute its own.
     public let observation: WorkoutObservation?
+    /// Late-reconciliation state (D8). While `open`, the finished session is not final: another
+    /// device's events are still expected and the totals may grow.
+    public let reconciliation: WorkoutReconciliation?
+}
+
+public struct WorkoutReconciliation: Decodable, Equatable {
+    public let state: String
+    public let pendingDevices: [String]
+    public let closesAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case state
+        case pendingDevices
+        case closesAt
+    }
+
+    public init(state: String, pendingDevices: [String] = [], closesAt: String? = nil) {
+        self.state = state
+        self.pendingDevices = pendingDevices
+        self.closesAt = closesAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        state = try container.decode(String.self, forKey: .state)
+        pendingDevices = try container.decodeIfPresent([String].self, forKey: .pendingDevices) ?? []
+        closesAt = try container.decodeIfPresent(String.self, forKey: .closesAt)
+    }
+
+    public var isOpen: Bool { state == "open" }
+
+    public var pendingLabel: String {
+        guard !pendingDevices.isEmpty else { return "Apple Watch data pending" }
+        return "Apple Watch data pending"
+    }
 }
 
 public struct WorkoutObservation: Decodable {

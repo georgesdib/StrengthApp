@@ -39,6 +39,9 @@ public struct ActiveSet: Codable, Equatable, Sendable {
 
 public struct WatchSessionRecord: Codable, Equatable, Sendable {
     public var sessionUUID: String
+    /// The server device that owns this execution, as provenance for the ledger. Optional so a
+    /// record written before the ledger still decodes.
+    public var deviceId: String?
     public var startedAt: Date
     /// The plan revision the snapshot was built from. The watch never writes plan content.
     public var planRevision: Int?
@@ -54,15 +57,18 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
     public var offPlanNoted: Bool?
     /// The plan item whose exercise is currently in progress, for exercise telemetry.
     public var exerciseItemIndex: Int?
-    /// local set id -> server set id, learned when the add-set is acknowledged. Used only to
-    /// attach `set_id` to the matching telemetry event; a missing entry sends no set id.
+    /// local set id -> server set id, learned when the add-set is acknowledged. Used to attach
+    /// `set_id` to telemetry and to correct or remove the right confirmed set.
     public var eventSetIDs: [String: Int]?
+    /// The most recently acknowledged local set, so the wrist can offer one correction target.
+    public var lastConfirmedLocalSetID: String?
     /// The latest server-confirmed execution view. The watch merges it by watermark and never
     /// authors a substitution or addition (DEC-RESOLVER-23).
     public var execution: ExecutionView?
 
     public init(
         sessionUUID: String,
+        deviceId: String? = nil,
         startedAt: Date,
         planRevision: Int? = nil,
         clockOffsetSeconds: TimeInterval? = nil,
@@ -70,12 +76,14 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         finish: FinishIntent? = nil,
         activeSet: ActiveSet? = nil,
         eventSetIDs: [String: Int]? = nil,
+        lastConfirmedLocalSetID: String? = nil,
         selectedItemIndex: Int? = nil,
         exerciseItemIndex: Int? = nil,
         offPlanNoted: Bool? = nil,
         execution: ExecutionView? = nil
     ) {
         self.sessionUUID = sessionUUID
+        self.deviceId = deviceId
         self.startedAt = startedAt
         self.planRevision = planRevision
         self.clockOffsetSeconds = clockOffsetSeconds
@@ -83,6 +91,7 @@ public struct WatchSessionRecord: Codable, Equatable, Sendable {
         self.finish = finish
         self.activeSet = activeSet
         self.eventSetIDs = eventSetIDs
+        self.lastConfirmedLocalSetID = lastConfirmedLocalSetID
         self.selectedItemIndex = selectedItemIndex
         self.exerciseItemIndex = exerciseItemIndex
         self.offPlanNoted = offPlanNoted

@@ -9,9 +9,7 @@ struct TodayView: View {
     @State private var lastIssueAck = false
     @State private var lastIssueConfirmations: [String: Bool]?
     @State private var lastIssueSettings = PlanSettings()
-    @State private var lastIssueTarget: PrescriptionExecutionTarget = .phone
     @State private var draftSettings = PlanSettings()
-    @State private var draftTarget: PrescriptionExecutionTarget = .phone
     @State private var showingPlanSettings = false
     @State private var showingWorkout = false
     @State private var showingReview = false
@@ -357,12 +355,9 @@ struct TodayView: View {
                 ActiveWorkoutView(model: model)
             }
             .sheet(isPresented: $showingPlanSettings) {
-                PlanSettingsView(
-                    settings: $draftSettings,
-                    executionTarget: $draftTarget
-                ) {
+                PlanSettingsView(settings: $draftSettings) {
                     showingPlanSettings = false
-                    beginPrescription(with: draftSettings, target: draftTarget)
+                    beginPrescription(with: draftSettings)
                 }
             }
             .sheet(isPresented: $showingReview, onDismiss: {
@@ -490,12 +485,6 @@ struct TodayView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
-            if issued.executionTarget == "watch" {
-                Text("Requested for Apple Watch. Review it here; start it on the watch.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("watch-targeted-plan")
-            }
             // Borderless keeps the two buttons independent; the default list style made
             // either tap fire both of them.
             Button {
@@ -596,26 +585,20 @@ struct TodayView: View {
             return
         }
         draftSettings = model.planSettings
-        draftTarget = .phone
         showingPlanSettings = true
     }
 
-    private func beginPrescription(
-        with settings: PlanSettings,
-        target: PrescriptionExecutionTarget
-    ) {
+    private func beginPrescription(with settings: PlanSettings) {
         pendingReadinessAck = false
         lastIssueAck = false
         lastIssueConfirmations = nil
         lastIssueSettings = settings
-        lastIssueTarget = target
         lastIssueKey = UUID().uuidString.lowercased()
         guard let key = lastIssueKey else { return }
         Task {
             await model.issuePrescription(
                 readinessAck: false,
                 settings: settings,
-                executionTarget: target,
                 idempotencyKey: key
             )
         }
@@ -631,7 +614,6 @@ struct TodayView: View {
             await model.issuePrescription(
                 readinessAck: acknowledge,
                 settings: lastIssueSettings,
-                executionTarget: lastIssueTarget,
                 idempotencyKey: key
             )
         }
@@ -654,7 +636,6 @@ struct TodayView: View {
                 readinessAck: pendingReadinessAck,
                 confirmations: confirmations,
                 settings: lastIssueSettings,
-                executionTarget: lastIssueTarget,
                 idempotencyKey: key
             )
         }
@@ -667,7 +648,6 @@ struct TodayView: View {
                 readinessAck: lastIssueAck,
                 confirmations: lastIssueConfirmations,
                 settings: lastIssueSettings,
-                executionTarget: lastIssueTarget,
                 idempotencyKey: key
             )
         }
@@ -882,7 +862,6 @@ struct TodayView: View {
 /// with the server; this only picks which session and whether a minimum session is acceptable.
 struct PlanSettingsView: View {
     @Binding var settings: PlanSettings
-    @Binding var executionTarget: PrescriptionExecutionTarget
     var onRequest: () -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -900,6 +879,11 @@ struct PlanSettingsView: View {
         SessionOption(id: "accessory", label: "Accessory"),
     ]
 
+    // Mirrors the server's MOD-MIN-001 targets in config/minimum-session.v1.yaml. The
+    // server rejects anything else, so the picker must not offer intermediate minutes.
+    private let minimumTargets = [30, 45, 60]
+    private let defaultMinimumTarget = 45
+
     private enum MainLiftStructure: String, CaseIterable, Identifiable {
         case server = "Server default"
         case preferred = "Prefer top set + back-off"
@@ -907,6 +891,15 @@ struct PlanSettingsView: View {
         case straight = "Straight sets"
 
         var id: String { rawValue }
+    }
+
+    /// Keep the request on a target the server accepts, even if an older request echoed a
+    /// non-configured value into the restored settings.
+    private func normalizeMinimumTarget() {
+        guard settings.minimumSession else { return }
+        let target = settings.minimumTargetMinutes ?? defaultMinimumTarget
+        settings.minimumTargetMinutes = minimumTargets.contains(target)
+            ? target : defaultMinimumTarget
     }
 
     private var structure: Binding<MainLiftStructure> {
@@ -933,17 +926,6 @@ struct PlanSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Device") {
-                    Picker("Run on", selection: $executionTarget) {
-                        ForEach(PrescriptionExecutionTarget.allCases, id: \.self) { target in
-                            Text(target.label).tag(target)
-                        }
-                    }
-                    .accessibilityIdentifier("prescription-execution-target")
-                    Text("Watch-targeted plans appear on the Apple Watch Today screen and cannot be started on the iPhone.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
                 Section("Session") {
                     Picker("Session type", selection: $settings.sessionType) {
                         ForEach(sessionTypes) { option in
@@ -962,18 +944,36 @@ struct PlanSettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                Section("Technique") {
+                    Toggle("Technique throttle (main work)", isOn: $settings.techniqueThrottle)
+                        .accessibilityIdentifier("technique-throttle")
+                    Text("MOD-TECH-001 lightens main-work loads for this session only and explains the reduction on the issued plan. Accessory work is unchanged. The server applies it when the plan is built.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Section("Length") {
                     Toggle("Allow a minimum session", isOn: $settings.minimumSession)
+                        .onChange(of: settings.minimumSession) { _, enabled in
+                            if enabled {
+                                self.normalizeMinimumTarget()
+                            } else {
+                                // Only sent with an enabled minimum session; a stale value
+                                // must not be able to reach the server from an off toggle.
+                                settings.minimumTargetMinutes = nil
+                            }
+                        }
+                        .onAppear { self.normalizeMinimumTarget() }
                     if settings.minimumSession {
-                        Stepper(
-                            "Target: \(settings.minimumTargetMinutes ?? 30) min",
-                            value: Binding(
-                                get: { settings.minimumTargetMinutes ?? 30 },
-                                set: { settings.minimumTargetMinutes = $0 }
-                            ),
-                            in: 10...120,
-                            step: 5
-                        )
+                        Picker("Target", selection: Binding(
+                            get: { settings.minimumTargetMinutes ?? self.defaultMinimumTarget },
+                            set: { settings.minimumTargetMinutes = $0 }
+                        )) {
+                            ForEach(minimumTargets, id: \.self) { minutes in
+                                Text("\(minutes) min").tag(minutes)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .accessibilityIdentifier("minimum-session-target")
                     }
                 }
                 Section {

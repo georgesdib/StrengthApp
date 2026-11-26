@@ -39,7 +39,8 @@ public struct WatchPlanSummary: Equatable, Sendable {
     public let items: [WatchPlanItemSummary]
     public let warnings: [String]
     public let expiresAt: String?
-    public let executionTarget: String
+    /// The plan's execution identity; an offline watch start names it. Nil for an older server.
+    public let executionID: String?
 
     public init(
         issuedPlanID: String,
@@ -48,7 +49,7 @@ public struct WatchPlanSummary: Equatable, Sendable {
         items: [WatchPlanItemSummary],
         warnings: [String],
         expiresAt: String?,
-        executionTarget: String
+        executionID: String? = nil
     ) {
         self.issuedPlanID = issuedPlanID
         self.forDate = forDate
@@ -56,7 +57,7 @@ public struct WatchPlanSummary: Equatable, Sendable {
         self.items = items
         self.warnings = warnings
         self.expiresAt = expiresAt
-        self.executionTarget = executionTarget
+        self.executionID = executionID
     }
 }
 
@@ -167,20 +168,6 @@ public enum WatchTodayCopy {
                 action: "Request one on your iPhone.",
                 identifier: "no-plan"
             )
-        case .phonePlan:
-            return WatchTodayEmptyCopy(
-                title: "Planned for iPhone",
-                detail: "Today's workout is set to run on your iPhone.",
-                action: "Start it there.",
-                identifier: "phone-plan"
-            )
-        case .unsupportedTarget:
-            return WatchTodayEmptyCopy(
-                title: "Not for Apple Watch",
-                detail: "This plan was issued for another device.",
-                action: nil,
-                identifier: "unsupported"
-            )
         case .offline(_, let detail):
             return WatchTodayEmptyCopy(
                 title: "Can't reach your Home Server",
@@ -203,8 +190,6 @@ public enum WatchTodayState: Equatable, Sendable {
     case loading
     case missingCredentials
     case noPlan
-    case phonePlan
-    case unsupportedTarget
     case generating(elapsedSeconds: Int?)
     case ready(WatchPlanSummary)
     /// The request failed. The detail is the reason and the host that was tried, so a stale
@@ -226,23 +211,12 @@ public enum WatchOfflineDetail {
 
 public enum WatchTodayMapper {
     public static func map(_ state: PlansStateResponse) -> WatchTodayState {
-        let target = state.executionTarget
         switch state.status {
         case "none":
             return .noPlan
         case "queued", "building":
-            switch target {
-            case "watch":
-                return .generating(elapsedSeconds: state.elapsedSeconds)
-            case "phone":
-                return .phonePlan
-            default:
-                return .unsupportedTarget
-            }
+            return .generating(elapsedSeconds: state.elapsedSeconds)
         case "ready":
-            guard target == "watch" else {
-                return target == "phone" ? .phonePlan : .unsupportedTarget
-            }
             guard let plan = state.plan else {
                 return .unavailable("The server marked a plan ready without a plan body.")
             }
@@ -270,7 +244,7 @@ public enum WatchTodayMapper {
                 items: items,
                 warnings: state.warnings ?? plan.warnings ?? [],
                 expiresAt: state.planExpiresAt,
-                executionTarget: "watch"
+                executionID: state.executionId
             ))
         default:
             return .unavailable("The server returned an unknown plan state.")
@@ -316,11 +290,17 @@ public final class WatchTodayService {
     public func fetch(session: IOSSession) async throws -> WatchTodaySnapshot {
         async let bootstrap = client.bootstrap(session: session)
         async let plan = client.planState(session: session)
+        // Readiness is independent of whether a plan is ready. The plan envelope carries it
+        // only sometimes; Today is the authoritative readiness read.
+        async let today: TodayResponse? = try? client.today(session: session)
         let (server, planState) = try await (bootstrap, plan)
+        let todayData = await today
         return WatchTodaySnapshot(
             state: WatchTodayMapper.map(planState),
             serverDate: server.serverDate,
-            readiness: WatchReadinessSummary.make(planState.readiness)
+            readiness: WatchReadinessSummary.make(
+                todayData?.readinessScore ?? planState.readiness
+            )
         )
     }
 }

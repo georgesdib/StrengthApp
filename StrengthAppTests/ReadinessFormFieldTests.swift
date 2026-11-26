@@ -14,11 +14,11 @@ final class ReadinessFormFieldTests: XCTestCase {
         }
     }
 
-    func testCurrentReadinessInputsAreStillOffered() {
+    func testFallbackFormOffersTheSeededRegistryOrderPlusTheTwoExtras() {
         XCTAssertEqual(
             ReadinessFormView.inputFieldIds,
             [
-                "sleep", "energy", "mood", "soreness", "stress",
+                "sleep", "energy", "mood", "stress", "soreness",
                 "hrv_ms", "rhr_bpm", "bodyweight_kg", "wearable_score",
             ]
         )

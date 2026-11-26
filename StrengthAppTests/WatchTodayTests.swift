@@ -66,7 +66,6 @@ final class WatchTodayTests: XCTestCase {
         }
         XCTAssertEqual(plan.issuedPlanID, "plan-1")
         XCTAssertEqual(plan.sessionType, "lower")
-        XCTAssertEqual(plan.executionTarget, "watch")
         XCTAssertEqual(plan.items.count, 1)
         XCTAssertEqual(plan.items[0].exerciseLabel, "Back Squat")
         XCTAssertEqual(plan.items[0].setsLabel, "3")
@@ -133,22 +132,6 @@ final class WatchTodayTests: XCTestCase {
         XCTAssertTrue(item.isTimeBased)
     }
 
-    func testPhoneTargetedPlanIsHidden() throws {
-        XCTAssertEqual(
-            WatchTodayMapper.map(try planState(target: "phone")),
-            .phonePlan
-        )
-    }
-
-    func testMissingOrUnknownExecutionTargetFailsClosedWithoutPlanDetails() throws {
-        let missing = WatchTodayMapper.map(try planState(target: nil))
-        XCTAssertEqual(missing, .unsupportedTarget)
-
-        let unknown = WatchTodayMapper.map(try planState(target: "tablet"))
-        XCTAssertEqual(unknown, .unsupportedTarget)
-        XCTAssertFalse(String(describing: unknown).contains("back_squat"))
-    }
-
     func testNoPlanAndBuildingStates() throws {
         XCTAssertEqual(
             WatchTodayMapper.map(try planState(status: "none", withPlan: false)),
@@ -157,10 +140,6 @@ final class WatchTodayTests: XCTestCase {
         XCTAssertEqual(
             WatchTodayMapper.map(try planState(status: "building", withPlan: false, elapsed: 12)),
             .generating(elapsedSeconds: 12)
-        )
-        XCTAssertEqual(
-            WatchTodayMapper.map(try planState(status: "building", target: "phone", withPlan: false)),
-            .phonePlan
         )
     }
 
@@ -173,6 +152,8 @@ final class WatchTodayTests: XCTestCase {
                 return (200, Data(Fixtures.bootstrapPhase2.utf8))
             case "/api/ios/v1/plans/current":
                 return (200, Data(self.planJSON().utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(#"{"date":"2026-11-10"}"#.utf8))
             default:
                 return (404, Data())
             }
@@ -188,10 +169,10 @@ final class WatchTodayTests: XCTestCase {
         }
         XCTAssertEqual(plan.issuedPlanID, "plan-1")
         XCTAssertNotNil(snapshot.serverDate)
-        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests.count, 3)
         XCTAssertEqual(
             Set(transport.requests.compactMap { $0.url?.path }),
-            ["/api/ios/v1/bootstrap", "/api/ios/v1/plans/current"]
+            ["/api/ios/v1/bootstrap", "/api/ios/v1/plans/current", "/api/ios/v1/today"]
         )
     }
 
@@ -250,7 +231,6 @@ final class WatchTodayTests: XCTestCase {
             WatchTodayCopy.empty(for: .noPlan)?.action,
             "Request one on your iPhone."
         )
-        XCTAssertEqual(WatchTodayCopy.empty(for: .phonePlan)?.identifier, "phone-plan")
         XCTAssertEqual(WatchTodayCopy.empty(for: .missingCredentials)?.identifier, "unpaired")
         XCTAssertNil(WatchTodayCopy.empty(for: .loading))
         XCTAssertNil(WatchTodayCopy.empty(for: .generating(elapsedSeconds: 3)))
@@ -286,7 +266,35 @@ final class WatchTodayTests: XCTestCase {
         ))
         XCTAssertEqual(snapshot.state, .noPlan)
         XCTAssertEqual(snapshot.readiness?.scoreText, "64%")
-        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests.count, 3)
+    }
+
+    func testServiceUsesTodayReadinessWhenThePlanDoesNotCarryIt() async throws {
+        let planBody = #"{"status":"none"}"#
+        let todayBody = """
+        {"date":"2026-11-23","readiness_score":{"status":"ready","score":0.73}}
+        """
+        let transport = StubTransport { request in
+            switch request.url?.path {
+            case "/api/ios/v1/bootstrap":
+                return (200, Data(Fixtures.bootstrapPhase2.utf8))
+            case "/api/ios/v1/plans/current":
+                return (200, Data(planBody.utf8))
+            case "/api/ios/v1/today":
+                return (200, Data(todayBody.utf8))
+            default:
+                return (404, Data())
+            }
+        }
+        let service = WatchTodayService(client: IOSAPIClient(transport: transport))
+        let snapshot = try await service.fetch(session: IOSSession(
+            baseURL: URL(string: "http://home.local:8000")!,
+            token: "watch-token",
+            deviceID: "watch-1"
+        ))
+        XCTAssertEqual(snapshot.state, .noPlan)
+        XCTAssertEqual(snapshot.readiness?.statusWord, "Ready")
+        XCTAssertEqual(snapshot.readiness?.scoreText, "73%")
     }
 
     private func planJSON() -> String {

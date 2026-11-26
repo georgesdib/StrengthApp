@@ -115,6 +115,7 @@ final class StrengthAppUITests: XCTestCase {
         XCTAssertTrue(readiness.waitForExistence(timeout: 10))
         readiness.tap()
         XCTAssertTrue(app.navigationBars["Log readiness"].waitForExistence(timeout: 10))
+        attachScreenshot(app, name: "03-readiness-schema-form")
         for (identifier, value) in [
             ("readiness-sleep", "4"),
             ("readiness-energy", "4"),
@@ -124,16 +125,25 @@ final class StrengthAppUITests: XCTestCase {
         ] {
             let field = app.textFields[identifier]
             XCTAssertTrue(field.waitForExistence(timeout: 5), identifier)
+            scrollTo(field, in: app)
             field.tap()
             field.typeText(value)
+            // The schema form's per-row hints make it taller than the old fixed list, so the
+            // keyboard can cover the next row. Dismiss it between fields instead of tapping a
+            // field that is behind the keyboard.
+            if app.toolbars.buttons["Done"].exists {
+                app.toolbars.buttons["Done"].tap()
+            }
         }
         if app.buttons["Done"].waitForExistence(timeout: 2) {
             app.buttons["Done"].tap()
         }
+        attachScreenshot(app, name: "03b-readiness-filled")
         let saveReadiness = app.buttons["save-readiness"]
         scrollTo(saveReadiness, in: app)
         saveReadiness.tap()
         XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 20))
+        attachScreenshot(app, name: "04-readiness-saved")
 
         let start = app.buttons["start-workout"]
         XCTAssertTrue(start.waitForExistence(timeout: 10))
@@ -312,8 +322,11 @@ final class StrengthAppUITests: XCTestCase {
                 // isHittable fails outright when an element is clipped by the screen edge and
                 // has no valid activation point, so require it to sit inside the safe area.
                 let frame = element.frame
-                let inside = frame.minY > app.frame.minY + 60
-                    && frame.maxY < app.frame.maxY - 90
+                // A focused field may sit inside the screen frame but under the keyboard.
+                let bottom = app.keyboards.firstMatch.exists
+                    ? app.keyboards.firstMatch.frame.minY - 10
+                    : app.frame.maxY - 90
+                let inside = frame.minY > app.frame.minY + 60 && frame.maxY < bottom
                 if inside, frame.width > 0, frame.height > 0, element.isHittable {
                     return
                 }

@@ -138,6 +138,9 @@ public struct TodayResponse: Decodable {
 public struct ReadinessPayload: Decodable {
     public let onDate: String?
     public let known: Bool?
+    /// The readiness registry version the server used for this day. The form can show it, but
+    /// the schema endpoint remains the source for labels, scale and required fields.
+    public let registryVersion: Int?
     public let score: ReadinessScore?
     public let contextFlags: [String]?
     public let hrvMs: Double?
@@ -169,7 +172,7 @@ public struct HealthKitReadinessProvenance: Decodable, Equatable {
     public let importedAt: String
 }
 
-public struct ReadinessScore: Decodable {
+public struct ReadinessScore: Codable, Equatable, Sendable {
     public let onDate: String?
     public let status: String
     public let score: Double?
@@ -182,19 +185,19 @@ public struct ReadinessScore: Decodable {
     public let deviceSuppressed: Bool?
 }
 
-public struct ReadinessComponent: Decodable {
+public struct ReadinessComponent: Codable, Equatable, Sendable {
     public let field: String
     public let value: Double
     public let normalised: Double
     public let weight: Double
 }
 
-public struct ReadinessOverride: Decodable {
+public struct ReadinessOverride: Codable, Equatable, Sendable {
     public let value: Double?
     public let reason: String?
 }
 
-public struct CategoryFactor: Decodable {
+public struct CategoryFactor: Codable, Equatable, Sendable {
     public let factor: Double
     public let rirBump: Int
 }

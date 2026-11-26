@@ -19,6 +19,12 @@ struct ExerciseWorkoutView: View {
     @State private var addError: String?
     @State private var pendingRemoval: WorkoutSet?
     @State private var removeError: String?
+    @State private var editingSet: WorkoutSet?
+    @State private var editLoad = ""
+    @State private var editReps = ""
+    @State private var editRir = ""
+    @State private var editVelocity = ""
+    @State private var editError: String?
     @State private var activeLocalSetID: String?
     @State private var showingEndExercise = false
     @State private var endError: String?
@@ -198,7 +204,6 @@ struct ExerciseWorkoutView: View {
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                             .accessibilityIdentifier("log-warmup-\(index)")
-                            .disabled(model.isMirroringWatchSession)
                         }
                         .accessibilityIdentifier("warmup-\(index)")
                     }
@@ -208,19 +213,7 @@ struct ExerciseWorkoutView: View {
                 }
             }
 
-            if model.isMirroringWatchSession {
-                Section("Logged on Apple Watch") {
-                    Label(
-                        "Form ratings are recorded on the Apple Watch.",
-                        systemImage: "applewatch"
-                    )
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("mirror-form-disabled")
-                    Text("Take over logging to log or end exercises here.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            } else if let active = activeExercise {
+            if let active = activeExercise {
                 Section("In progress") {
                     TimelineView(.periodic(from: active.startedAt, by: 1)) { context in
                         LabeledContent(
@@ -274,7 +267,6 @@ struct ExerciseWorkoutView: View {
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
                                 .accessibilityIdentifier("log-planned-set-\(index)")
-                                .disabled(model.isMirroringWatchSession)
                             }
                         }
                     }
@@ -303,10 +295,16 @@ struct ExerciseWorkoutView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
-                            Button("Remove set", role: .destructive) {
-                                pendingRemoval = set
+                            HStack(spacing: 12) {
+                                if !set.isPendingLocal {
+                                    Button("Edit") { beginEdit(set) }
+                                        .font(.caption)
+                                }
+                                Button("Remove set", role: .destructive) {
+                                    pendingRemoval = set
+                                }
+                                .font(.caption)
                             }
-                            .font(.caption)
                         }
                     }
                 }
@@ -322,7 +320,7 @@ struct ExerciseWorkoutView: View {
                     Label("Start another set", systemImage: "plus")
                 }
                 .accessibilityIdentifier("exercise-add-set")
-                .disabled(model.isSaving || model.isMirroringWatchSession)
+                .disabled(model.isSaving)
             }
 
             Section {
@@ -362,6 +360,38 @@ struct ExerciseWorkoutView: View {
                 Task { await saveSet(performedAt: anchor) }
             }
         }
+        .sheet(item: $editingSet) { set in
+            NavigationStack {
+                Form {
+                    Section("Set \(set.setIndex ?? 0)") {
+                        TextField("Load (kg)", text: $editLoad)
+                            .keyboardType(.decimalPad)
+                        TextField("Reps", text: $editReps)
+                            .keyboardType(.numberPad)
+                        TextField("RIR", text: $editRir)
+                            .keyboardType(.numberPad)
+                        TextField("Velocity (m/s)", text: $editVelocity)
+                            .keyboardType(.decimalPad)
+                    }
+                    if let editError {
+                        Text(editError).foregroundStyle(.red)
+                    }
+                    Text("This appends one correction and keeps the set's server identity.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .navigationTitle("Correct set")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { editingSet = nil }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") { Task { await saveEdit(set) } }
+                            .disabled(model.isSaving)
+                    }
+                }
+            }
+        }
         .alert(item: $pendingRemoval) { set in
             Alert(
                 title: Text("Remove this set?"),
@@ -372,6 +402,69 @@ struct ExerciseWorkoutView: View {
                 secondaryButton: .cancel()
             )
         }
+    }
+
+    private func beginEdit(_ set: WorkoutSet) {
+        editLoad = set.loadKg.map { String($0) } ?? ""
+        editReps = set.reps.map(String.init) ?? ""
+        editRir = set.rir.map(String.init) ?? ""
+        editVelocity = set.velocity.map { String($0) } ?? ""
+        editError = nil
+        editingSet = set
+    }
+
+    private func saveEdit(_ set: WorkoutSet) async {
+        guard let workout, let setId = set.setId, setId > 0 else { return }
+        guard let reps = Int(editReps.trimmingCharacters(in: .whitespaces)) else {
+            editError = "Reps must be a whole number."
+            return
+        }
+        let load = parseOptionalDouble(editLoad)
+        if !editLoad.trimmingCharacters(in: .whitespaces).isEmpty, load == nil {
+            editError = "Load must be a number."
+            return
+        }
+        let rir = editRir.trimmingCharacters(in: .whitespaces).isEmpty
+            ? nil : Int(editRir.trimmingCharacters(in: .whitespaces))
+        if !editRir.trimmingCharacters(in: .whitespaces).isEmpty, rir == nil {
+            editError = "RIR must be a whole number."
+            return
+        }
+        let velocity = parseOptionalDouble(editVelocity)
+        if !editVelocity.trimmingCharacters(in: .whitespaces).isEmpty,
+           velocity == nil || (velocity ?? 0) <= 0 {
+            editError = "Velocity must be a positive number."
+            return
+        }
+        editError = nil
+        let loadKey = load.map { String($0) } ?? "nil"
+        let rirKey = rir.map { String($0) } ?? "nil"
+        let velocityKey = velocity.map { String($0) } ?? "nil"
+        let corrected = UpdateSetRequest(
+            setId: setId,
+            loadKg: load,
+            reps: reps,
+            rir: rir,
+            velocityMps: velocity
+        )
+        let saved = await model.updateSet(
+            workoutId: workout.workoutId,
+            body: corrected,
+            idempotencyKey: OperationID.derived(
+                "update-set:\(setId):\(loadKey):\(reps):\(rirKey):\(velocityKey)"
+            )
+        )
+        if saved {
+            editingSet = nil
+        } else {
+            editError = model.mutationError
+        }
+    }
+
+    private func parseOptionalDouble(_ text: String) -> Double? {
+        let value = text.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: ",", with: ".")
+        return value.isEmpty ? nil : Double(value)
     }
 
     private func performedSet(at index: Int) -> WorkoutSet? {

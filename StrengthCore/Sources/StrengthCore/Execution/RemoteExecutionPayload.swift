@@ -62,14 +62,3 @@ public struct RemoteExecutionPayload: Codable, Sendable {
         return payload
     }
 }
-
-/// Which device is allowed to log. A watch-owned session puts the phone in mirror mode.
-public enum MirrorPolicy {
-    public static func isMirror(workout: WorkoutDetail?, phoneDeviceID: String?) -> Bool {
-        guard let owner = workout?.ownerDeviceId, !owner.isEmpty else {
-            return false    // legacy rows keep the permissive behaviour (contract §9)
-        }
-        guard let phoneDeviceID, !phoneDeviceID.isEmpty else { return true }
-        return owner != phoneDeviceID
-    }
-}

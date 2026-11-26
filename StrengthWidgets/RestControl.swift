@@ -1,4 +1,5 @@
 import AppIntents
+import StrengthCore
 import SwiftUI
 import WidgetKit
 
@@ -13,6 +14,21 @@ struct RestControl: ControlWidget {
         }
         .displayName("Strength workout")
         .description("Open the running workout.")
+    }
+}
+
+/// Starts the workout card without opening the app, so a watch session's later rests update it
+/// without a notification tap. It does nothing unless the phone already has an active workout in
+/// its persisted capture; there is no card to start from a blank Today screen.
+struct WorkoutCardControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "com.georgesdibpersonalteam.StrengthApp.workoutcard") {
+            ControlWidgetButton(action: StartWorkoutCardIntent()) {
+                Label("Workout card", systemImage: "timer")
+            }
+        }
+        .displayName("Workout card")
+        .description("Show the active workout on the Lock Screen and in the Dynamic Island.")
     }
 }
 

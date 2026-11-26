@@ -44,7 +44,7 @@ final class PairedStore {
     private let preferHomeKey = "ios.server.preferHome"
     private let deviceKey = "ios.paired.device"
     private let watchConfigVersionKey = "ios.watch.configVersion"
-    private let watchLinkKey = "ios.watch.link"
+    private let watchLinkKey = SharedDefaultsKeys.watchLink
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

@@ -224,7 +224,10 @@ notifications are denied, the phone has no way to prompt you, but the watch noti
 watch screen still work.
 
 Settings → Control Center (or the Action button) can host the **Strength** control. It opens the
-running workout; it does not record a set or change a rest on its own.
+running workout; it does not record a set or change a rest on its own. There is also a **Workout
+card** control: it starts the workout card without opening the app, but only when the phone already
+knows about an active workout (it does nothing on a blank Today screen). Starting the card this way
+means later watch rests update it in the background with no notification tap.
 
 The timer is descriptive. It does not change the next prescription or declare the session
 compliant.

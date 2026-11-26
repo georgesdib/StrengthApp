@@ -35,6 +35,9 @@ that build and are superseded by the checks here.
 - [ ] Finishing or abandoning the workout on the watch removes the card.
 - [ ] With the app open when the watch rest starts, the card starts directly without a
       notification.
+- [ ] Control Center **Workout card** starts the active card without opening the app when a
+      workout is already active, and does nothing on a blank Today screen; a later watch rest
+      updates that card with no notification.
 - [ ] A phone-owned rest shows **+15 s** / **Skip** and wins over a watch rest; a watch-owned rest
       shows **Rest on Apple Watch** and no controls.
 - [ ] No duplicate card after relaunch, and a rest that ended while the app was closed does not

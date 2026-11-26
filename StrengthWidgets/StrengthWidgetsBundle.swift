@@ -6,5 +6,6 @@ struct StrengthWidgetsBundle: WidgetBundle {
     var body: some Widget {
         WorkoutLiveActivityWidget()
         RestControl()
+        WorkoutCardControl()
     }
 }

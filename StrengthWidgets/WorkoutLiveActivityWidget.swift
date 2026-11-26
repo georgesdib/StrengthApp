@@ -30,7 +30,7 @@ struct WorkoutLiveActivityWidget: Widget {
             } compactLeading: {
                 Image(systemName: WorkoutCard.icon(for: context.state))
             } compactTrailing: {
-                WorkoutCard.trailing(for: context.state)
+                WorkoutCard.trailing(for: context.state, compact: true)
             } minimal: {
                 Image(systemName: WorkoutCard.icon(for: context.state))
             }
@@ -60,10 +60,13 @@ private enum WorkoutCard {
     }
 
     @ViewBuilder
-    static func trailing(for state: WorkoutActivityAttributes.ContentState) -> some View {
+    static func trailing(
+        for state: WorkoutActivityAttributes.ContentState,
+        compact: Bool = false
+    ) -> some View {
         if isResting(state), let endDate = state.endDate {
             RestCountdown(endDate: endDate)
-                .font(.title3.monospacedDigit())
+                .font(compact ? .caption.monospacedDigit() : .title3.monospacedDigit())
         } else {
             Image(systemName: "figure.strengthtraining.traditional")
                 .foregroundStyle(.orange)

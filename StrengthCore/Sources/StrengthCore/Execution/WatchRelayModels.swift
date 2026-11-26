@@ -108,6 +108,15 @@ public struct WatchWorkoutStatus: Codable, Equatable, Sendable {
         return try? JSONDecoder().decode(WatchWorkoutStatus.self, from: data)
     }
 
+    /// True once the watch's session is over on the server, so the phone may close its workout
+    /// card. A watch that is still finishing or flushing sets keeps the card alive.
+    public var sessionEnded: Bool {
+        guard workoutId != nil else { return false }
+        if finishAcknowledged { return true }
+        let value = phase.lowercased()
+        return value == "finished" || value == "abandoned" || value.hasPrefix("ended")
+    }
+
     /// True while this watch could still have unsent work for the given workout.
     public func hasPendingWork(for workoutId: String?) -> Bool {
         guard let workoutId, self.workoutId == workoutId else { return false }

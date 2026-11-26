@@ -89,10 +89,11 @@ final class RestTimerModel: ObservableObject {
         self.workoutId = workoutId
         persist()
         RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
-        RestLiveActivityController.shared.start(
+        WorkoutLiveActivityController.shared.startRest(
+            source: .phone,
             endDate: end,
-            exerciseId: exerciseId,
-            workoutId: workoutId
+            exerciseLabel: WorkoutLiveActivityController.label(forExerciseId: exerciseId),
+            workoutId: workoutId ?? ""
         )
         startTicker()
     }
@@ -131,10 +132,11 @@ final class RestTimerModel: ObservableObject {
         isComplete = false
         remainingSeconds = max(0, Int(end.timeIntervalSince(now).rounded(.up)))
         RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
-        RestLiveActivityController.shared.start(
+        WorkoutLiveActivityController.shared.startRest(
+            source: .phone,
             endDate: end,
-            exerciseId: exerciseId,
-            workoutId: workoutId
+            exerciseLabel: WorkoutLiveActivityController.label(forExerciseId: exerciseId),
+            workoutId: workoutId ?? ""
         )
         startTicker()
         return nil
@@ -174,7 +176,12 @@ final class RestTimerModel: ObservableObject {
         isComplete = false
         persist()
         RestNotificationManager.shared.scheduleRestEnd(after: remainingSeconds)
-        RestLiveActivityController.shared.update(endDate: self.endDate!, exerciseId: exerciseId)
+        WorkoutLiveActivityController.shared.startRest(
+            source: .phone,
+            endDate: self.endDate!,
+            exerciseLabel: WorkoutLiveActivityController.label(forExerciseId: exerciseId),
+            workoutId: workoutId ?? ""
+        )
         onExtend?(seconds)
     }
 
@@ -205,7 +212,9 @@ final class RestTimerModel: ObservableObject {
 
     func dismiss() {
         RestNotificationManager.shared.cancel()
-        RestLiveActivityController.shared.end()
+        // The card is workout-scoped: the rest is over, but the session is not. The workout's
+        // finish/abandon path ends the activity itself.
+        WorkoutLiveActivityController.shared.setActive(source: .phone)
         RestActivityStore.clear(from: defaults)
         clearPublishedState()
     }

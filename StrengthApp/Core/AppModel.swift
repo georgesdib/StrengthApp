@@ -833,6 +833,15 @@ final class AppModel: ObservableObject {
         }
         let refreshed = await refresh()
         isOffline = !refreshed.succeeded
+        // A workout already running when the app opens gets its card back, unless a rest card
+        // (for example one started from a watch notification) is already showing.
+        if refreshed.succeeded, !WorkoutLiveActivityController.shared.hasActivity,
+           let workout = activeWorkout {
+            WorkoutLiveActivityController.shared.startActive(
+                source: activitySource(for: workout),
+                workoutId: workout.workoutId
+            )
+        }
         await recoverPendingMutations()
         await syncOfflineCapture()
         if refreshed.succeeded, healthKitEnabled {
@@ -1375,6 +1384,9 @@ final class AppModel: ObservableObject {
                 workoutRefreshGrace = false
             } else if let serverActive = newToday.activeWorkout {
                 if previousActive?.workoutId != serverActive.workoutId {
+                    if let previousActive {
+                        WorkoutLiveActivityController.shared.endWorkout(previousActive.workoutId)
+                    }
                     recoveryIssue = .serverActiveWorkout(
                         workoutId: serverActive.workoutId,
                         sessionType: serverActive.sessionType
@@ -1390,8 +1402,10 @@ final class AppModel: ObservableObject {
                     reconciled = previousActive
                 } else {
                     // The server no longer has the workout this session was showing. Do not
-                    // silently keep stale local state; surface it for reconciliation.
+                    // silently keep stale local state; surface it for reconciliation. The
+                    // workout-scoped card belongs to that workout, so it goes with it.
                     reconciled = nil
+                    WorkoutLiveActivityController.shared.endWorkout(previousActive.workoutId)
                     recoveryIssue = .workoutEndedElsewhere(
                         workoutId: previousActive.workoutId
                     )
@@ -1436,9 +1450,18 @@ final class AppModel: ObservableObject {
             activeWorkout = workout
             recoveryIssue = nil
             persistActiveWorkout()
+            // A watch workout started while the phone was visible gets its card straight away;
+            // an existing card (for example one started from a rest notification) is left alone.
+            if !WorkoutLiveActivityController.shared.hasActivity {
+                WorkoutLiveActivityController.shared.startActive(
+                    source: .watch,
+                    workoutId: workout.workoutId
+                )
+            }
             return
         }
         // The watch finished or abandoned the session; no local workout is active any more.
+        WorkoutLiveActivityController.shared.endWorkout(workout.workoutId)
         if activeWorkout == nil || activeWorkout?.workoutId == workout.workoutId {
             activeWorkout = nil
         }
@@ -1467,6 +1490,21 @@ final class AppModel: ObservableObject {
             || offlineCapture?.cachedPlan != nil
         guard hasPlanState else { return }
         clearCachedPlan()
+    }
+
+    /// Which device the card should name while the session is active. Ownership is provenance
+    /// after S5, which is exactly the start device this label wants.
+    private func activitySource(
+        for workout: WorkoutDetail
+    ) -> WorkoutActivityAttributes.Source {
+        if let watchDevice = watchPairing.watchDeviceID,
+           workout.ownerDeviceId == watchDevice {
+            return .watch
+        }
+        if watchPairing.watchStatus?.workoutId == workout.workoutId {
+            return .watch
+        }
+        return .phone
     }
 
     private func persistActiveWorkout() {
@@ -2414,6 +2452,10 @@ final class AppModel: ObservableObject {
                 offlineCapture = try? offlineStore.setActiveCatalogue(catalogue)
             }
             persistActiveWorkout()
+            WorkoutLiveActivityController.shared.startActive(
+                source: .phone,
+                workoutId: workout.workoutId
+            )
             recoveryIssue = nil
             workoutRefreshGrace = true
             await refresh()
@@ -3026,6 +3068,7 @@ final class AppModel: ObservableObject {
         }
         if offlineCaptureActive {
             restTimer.dismiss()
+            WorkoutLiveActivityController.shared.endWorkout(workout.workoutId)
             let queued = queueFinish(body, idempotencyKey: idempotencyKey, workout: workout)
             if queued {
                 await savePhoneHealthKit(workout: workout, endedAt: body.endedAt)
@@ -3051,6 +3094,7 @@ final class AppModel: ObservableObject {
             recoveryIssue = nil
             workoutRefreshGrace = false
             restTimer.dismiss()
+            WorkoutLiveActivityController.shared.endWorkout(workout.workoutId)
             clearOfflineCaptureAfterServerCompletion()
             nudges.recordSessionCompleted()
             await refresh()
@@ -3117,6 +3161,7 @@ final class AppModel: ObservableObject {
             recoveryIssue = nil
             workoutRefreshGrace = false
             restTimer.dismiss()
+            WorkoutLiveActivityController.shared.endWorkout(workout.workoutId)
             activeExercises = []
             persistActiveExercises()
             await refresh()
@@ -3391,6 +3436,7 @@ final class AppModel: ObservableObject {
 
     func clearWorkoutRecovery() {
         // Clear stale local state; the server remains the authority on the next refresh.
+        WorkoutLiveActivityController.shared.endAll()
         activeWorkout = nil
         activeExercises = []
         recoveryIssue = nil
@@ -3783,6 +3829,7 @@ final class AppModel: ObservableObject {
                         _ = try? offlineStore.remove(operation.operationId)
                         offlineCapture = try? offlineStore.setActiveWorkout(nil)
                         activeWorkout = nil
+                        WorkoutLiveActivityController.shared.endWorkout(operation.workoutId)
                         if hasPendingOfflineCapture {
                             offlineSyncError = "The workout finished on the server, but some local operations still need attention."
                         } else {
@@ -4098,6 +4145,7 @@ final class AppModel: ObservableObject {
         historyTotal = 0
         historyOffset = 0
         hasLoadedHistory = false
+        WorkoutLiveActivityController.shared.endAll()
         activeWorkout = nil
         var cleared = false
         do {

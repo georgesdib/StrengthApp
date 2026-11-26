@@ -59,7 +59,19 @@ final class RestNotificationManager {
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([category, nudge])
+        let watchRest = UNNotificationCategory(
+            identifier: WatchRestNotifier.categoryIdentifier,
+            actions: [
+                UNNotificationAction(
+                    identifier: WatchRestNotifier.showActionIdentifier,
+                    title: "Show countdown",
+                    options: [.foreground]
+                ),
+            ],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category, nudge, watchRest])
     }
 
     func requestAuthorizationIfNeeded() {
@@ -132,6 +144,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         center.delegate = self
         Task { @MainActor in
             RestNotificationManager.shared.registerCategory()
+            // Activate WatchConnectivity before the scene exists: a queued watch transfer can
+            // launch the app in the background, and the rest mirror must be listening for it.
+            WatchBackgroundBridge.start()
             // Belt and braces: an intent can run before SwiftUI's App.init on a background launch.
             IntentServices.register(LiveIntentDataProvider())
         }
@@ -151,6 +166,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        if response.notification.request.content.categoryIdentifier
+            == WatchRestNotifier.categoryIdentifier {
+            Task { @MainActor in
+                WatchRestReceiver.shared.noteNotificationTapped()
+            }
+            completionHandler()
+            return
+        }
         if response.notification.request.content.categoryIdentifier
             == NudgeScheduler.categoryIdentifier {
             Task { @MainActor in

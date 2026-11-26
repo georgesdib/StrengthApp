@@ -40,7 +40,12 @@ struct WatchSettingsSection: View {
                     .accessibilityIdentifier("watch-spike-status")
             }
             Button {
-                Task { await watch.pair() }
+                Task {
+                    await watch.pair()
+                    // A watch rest is reported to the phone in the background; the tap-able
+                    // notification is the only way to surface it while ActivityKit cannot start.
+                    RestNotificationManager.shared.requestAuthorizationIfNeeded()
+                }
             } label: {
                 if watch.isMinting {
                     HStack {
@@ -66,7 +71,7 @@ struct WatchSettingsSection: View {
         } footer: {
             Text("The watch uses your Home Server only. It never follows the Away route. "
                  + "Pairing mints a separate watch token; the iPhone keeps it only until the "
-                 + "watch acknowledges it.")
+                 + "watch acknowledges it. Phone rest alerts need notifications enabled.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

@@ -6,7 +6,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        let model = AppModel(watchConnectivity: LiveWatchConnectivitySession())
+        let model = AppModel(watchConnectivity: LiveWatchConnectivitySession.shared)
         PhoneIntentBridge.model = model
         _model = StateObject(wrappedValue: model)
     }
@@ -27,11 +27,15 @@ struct RootView: View {
             }
         }
         .task {
+            // A notification tap can launch the app; consume it before the ordinary start path so
+            // the rest card is requested while the scene is visible.
+            WatchRestReceiver.shared.applicationBecameActive()
             model.startNetworkMonitoring()
             await model.onLaunch()
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
+            WatchRestReceiver.shared.applicationBecameActive()
             Task { await model.appBecameActive() }
         }
     }

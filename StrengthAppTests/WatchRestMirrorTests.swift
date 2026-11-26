@@ -216,7 +216,7 @@ final class WatchRestMirrorTests: XCTestCase {
 }
 
 @MainActor
-private final class StubRestPresenter: RestActivityPresenting {
+private final class StubRestPresenter: WatchRestPresenting {
     struct Shown: Equatable {
         let endDate: Date
         let label: String
@@ -228,8 +228,14 @@ private final class StubRestPresenter: RestActivityPresenting {
     var isShowingPhoneRest = false
     private(set) var isShowingWatchRest = false
 
-    func showWatchRest(endDate: Date, exerciseLabel: String, workoutId: String) {
-        shown.append(Shown(endDate: endDate, label: exerciseLabel, workoutId: workoutId))
+    func showWatchRest(_ snapshot: WatchRestSnapshot, endDate: Date, label: String) {
+        shown.append(
+            Shown(
+                endDate: endDate,
+                label: label,
+                workoutId: snapshot.workoutId ?? snapshot.sessionId
+            )
+        )
         isShowingWatchRest = true
     }
 

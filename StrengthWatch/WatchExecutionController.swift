@@ -920,7 +920,9 @@ final class WatchExecutionController: ObservableObject {
                 sessionId: sessionId,
                 endsAt: endsAt,
                 exerciseLabel: label,
-                workoutId: sessionId.isEmpty ? nil : sessionId
+                // The server workout id, not the watch's session UUID: the phone ends the
+                // workout-scoped card by matching this id.
+                workoutId: engine.workout?.workoutId
             )
         )
     }

@@ -1,5 +1,55 @@
 _Part of the device acceptance record. Index: [DEVICE-ACCEPTANCE.md](../../../DEVICE-ACCEPTANCE.md). Content preserved verbatim._
 
+## 2026-11-26 — first physical run failed; workout-scoped card and notification fallback
+
+**Status 2026-11-26:** the owner reported that logging a set on the Apple Watch and resting produced
+no Live Activity on the phone (the phone app was not open). Cause: ActivityKit refuses to start a
+Live Activity while the app is in the background, and the app activated `WCSession` only after its
+SwiftUI scene loaded, so a cold background delivery was missed entirely. The watch rest is now one
+**workout-scoped** card: a background watch rest posts a tap-able **Rest on Apple Watch**
+notification; the tap opens the app, starts the card with the original end date, and every later
+rest updates the same card from the background. The card shows the active state between rests and
+ends when the workout finishes or is abandoned. The 2026-11-21 items below remain the record of
+that build and are superseded by the checks here.
+
+### Automated
+
+- [x] `WatchWorkoutStatus.sessionEnded` treats finished, abandoned, ended-elsewhere and
+      finish-acknowledged as over, and keeps an active or still-finishing watch session alive.
+- [x] The focused `WatchRestMirrorTests`, `RestTimerTests`, `WatchWorkoutStatusTests`,
+      `WatchPairingTests` and `WatchMirrorTests` suites pass on the iPhone 18 Pro simulator
+      (56 tests, 0 failures).
+- [x] `scripts/ci.sh` passes: watch build, phone build, embedded watch app, and 598 unit tests
+      with 1 skipped and 0 failures.
+
+### Physical device — re-run pending
+
+- [ ] Starting a workout on the phone shows the active card immediately; opening the app during a
+      watch workout starts the active card when none exists.
+- [ ] With the iPhone locked and the app not open, start a set on the Apple Watch: a **Rest on
+      Apple Watch** notification appears with the remaining time (notifications allowed).
+- [ ] Tapping it opens the app and starts the workout card with the correct remaining countdown;
+      the card survives locking the phone again.
+- [ ] The next rest on the watch updates the same card in the background with no notification or
+      tap, and the card shows **Next set on Apple Watch** between rests.
+- [ ] Finishing or abandoning the workout on the watch removes the card.
+- [ ] With the app open when the watch rest starts, the card starts directly without a
+      notification.
+- [ ] A phone-owned rest shows **+15 s** / **Skip** and wins over a watch rest; a watch-owned rest
+      shows **Rest on Apple Watch** and no controls.
+- [ ] No duplicate card after relaunch, and a rest that ended while the app was closed does not
+      leave a countdown at zero.
+- [ ] With notifications denied, no phone alert appears; the watch rest notification and watch
+      screen still work.
+- [ ] The notification permission prompt appears when pairing the watch, not at launch.
+
+### Limits
+
+- A force-quit app is not relaunched by WatchConnectivity, so the phone misses watch messages until
+  it is opened again.
+- A rest that ends while the phone is suspended can leave the resting card showing **Ready** until
+  the next watch message, the app opens, or the card is dismissed.
+
 # Watch rest mirror and Home scene diagnostics — implemented, device run pending (2026-11-21)
 
 **Status 2026-11-21:** the phone now mirrors a rest that starts on the Apple Watch as its Live

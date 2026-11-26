@@ -15,7 +15,7 @@ public struct ExtendRestIntent: LiveActivityIntent {
 
     public func perform() async throws -> some IntentResult {
         guard let state = RestActivityStore.extend(by: 15) else { return .result() }
-        await RestLiveActivity.refresh(with: state)
+        await WorkoutLiveActivity.refresh(with: state)
         NotificationCenter.default.post(name: .restActivityChangedExternally, object: nil)
         return .result()
     }
@@ -29,8 +29,9 @@ public struct SkipRestIntent: LiveActivityIntent {
     public init() {}
 
     public func perform() async throws -> some IntentResult {
-        guard RestActivityStore.skip() != nil else { return .result() }
-        await RestLiveActivity.end()
+        guard let completion = RestActivityStore.skip() else { return .result() }
+        // The workout is still running, so the card moves to its active state instead of ending.
+        await WorkoutLiveActivity.setActive(workoutId: completion.workoutId)
         NotificationCenter.default.post(name: .restActivityChangedExternally, object: nil)
         return .result()
     }
@@ -39,11 +40,16 @@ public struct SkipRestIntent: LiveActivityIntent {
 /// Updates the running activity from the persisted interval. Enumerating the activities keeps the
 /// intent independent of the app's controller instance, which a background launch may not have.
 @available(iOS 16.2, *)
-public enum RestLiveActivity {
+public enum WorkoutLiveActivity {
     public static func refresh(with state: RestActivityState) async {
-        for activity in Activity<RestActivityAttributes>.activities {
+        for activity in Activity<WorkoutActivityAttributes>.activities {
+            // Controls only ever belong to a phone-owned rest; do not rewrite a watch rest.
+            guard activity.content.state.source == .phone else { continue }
             let content = ActivityContent(
-                state: RestActivityAttributes.ContentState(
+                state: WorkoutActivityAttributes.ContentState(
+                    phase: .resting,
+                    source: .phone,
+                    workoutId: state.workoutId ?? activity.content.state.workoutId,
                     endDate: state.endsAt,
                     exerciseLabel: state.exerciseLabel
                 ),
@@ -53,8 +59,26 @@ public enum RestLiveActivity {
         }
     }
 
+    /// Moves a phone-owned rest card to the workout's active state. The rest was ended by the
+    /// activity's Skip button; the app records the completion on its next activation.
+    public static func setActive(workoutId: String?) async {
+        for activity in Activity<WorkoutActivityAttributes>.activities {
+            guard activity.content.state.source == .phone,
+                  activity.content.state.phase == .resting else { continue }
+            let content = ActivityContent(
+                state: WorkoutActivityAttributes.ContentState(
+                    phase: .active,
+                    source: .phone,
+                    workoutId: workoutId ?? activity.content.state.workoutId
+                ),
+                staleDate: Date().addingTimeInterval(8 * 60 * 60)
+            )
+            await activity.update(content)
+        }
+    }
+
     public static func end() async {
-        for activity in Activity<RestActivityAttributes>.activities {
+        for activity in Activity<WorkoutActivityAttributes>.activities {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
     }

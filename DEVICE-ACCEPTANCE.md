@@ -22,6 +22,6 @@ Split on 2026-11-21; no record content was changed.
 | INT-10 Daily reminder | Waived by owner decision 2026-11-18 (not run) | [10-int-10-reminder.md](docs/acceptance/device/10-int-10-reminder.md) |
 | INT-13 Today summary | Closed by owner decision 2026-11-17 | [11-int-13-today-summary.md](docs/acceptance/device/11-int-13-today-summary.md) |
 | INT-11 Explain | Closed by owner decision 2026-11-17 | [12-int-11-explain.md](docs/acceptance/device/12-int-11-explain.md) |
-| Watch rest mirror and Home scene diagnostics | Partially owner-confirmed 2026-11-21; rest mirror pending | [13-watch-rest-mirror.md](docs/acceptance/device/13-watch-rest-mirror.md) |
+| Watch rest mirror and Home scene diagnostics | Partially owner-confirmed 2026-11-21; first rest-mirror run failed 2026-11-26, workout-card redesign awaiting physical re-run | [13-watch-rest-mirror.md](docs/acceptance/device/13-watch-rest-mirror.md) |
 | Unified offline execution | Physical user testing done, owner-confirmed 2026-11-25 | [14-offline-execution.md](docs/acceptance/device/14-offline-execution.md) |
 | Readiness registry | **Waived by owner 2026-11-25** — installation declined; simulator live acceptance passed | [15-readiness-registry.md](docs/acceptance/device/15-readiness-registry.md) |

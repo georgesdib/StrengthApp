@@ -198,15 +198,30 @@ The timer uses the prescription's rest seconds when available.
 
 ### Lock Screen and Control Center
 
-A rest that starts on the Apple Watch is mirrored to the phone: the same countdown appears on the
-Lock Screen and in the Dynamic Island, with **Rest on Apple Watch** instead of the buttons, because
-the wrist owns the interval and ends it.
+The phone shows one Live Activity card for the whole workout on the Lock Screen and in the Dynamic
+Island. During a rest it shows the countdown; between rests it shows the active state, **Next set
+on iPhone** or **Next set on Apple Watch**. The countdown is drawn by the system from the rest's end
+time, so it stays correct with the app closed. **+15 s** and **Skip** are buttons on a phone-owned
+rest; a rest owned by the Apple Watch shows **Rest on Apple Watch** instead, because the wrist owns
+the interval and ends it. The compact Island shows the timer only.
 
-While a rest is running, the phone shows a Live Activity countdown on the Lock Screen and in the
-Dynamic Island. The countdown is drawn by the system from the rest's end time, so it stays correct
-with the app closed. **+15 s** and **Skip** are buttons on the Lock Screen card and in the expanded
-Dynamic Island: they act at the tap without opening the app or unlocking the phone, and the app
-records the extension or the skip when it next runs. The compact Island shows the timer only.
+iOS only lets a Live Activity *start* while the app is in the foreground, so a workout running on
+the Apple Watch uses one extra step for the first rest:
+
+- if the phone app is not open, the phone posts a **Rest on Apple Watch** notification instead of
+  starting the card, and the notification is replaced at each rest until a card exists;
+- tap the notification (or its **Show countdown** action) to open the app and start the workout
+  card, anchored to the rest's original end time so the countdown is correct even if the tap was
+  late;
+- after that the card stays for the workout and later rests, extensions and skips update it in the
+  background with no further taps or notifications;
+- if the app is already open when the watch reports a rest, the card starts directly;
+- the card ends when the workout finishes or is abandoned, and a phone-owned rest takes precedence
+  over a watch rest.
+
+The card is not a substitute for the watch: the wrist still shows and ends its own rest. If
+notifications are denied, the phone has no way to prompt you, but the watch notification and the
+watch screen still work.
 
 Settings → Control Center (or the Action button) can host the **Strength** control. It opens the
 running workout; it does not record a set or change a rest on its own.
@@ -217,7 +232,8 @@ compliant.
 ### Rest alerts
 
 The first rest timer asks for notification permission. If allowed, the app schedules a local
-notification for the rest end:
+notification for the rest end. The same permission lets a watch rest alert the phone when it
+cannot start the workout card:
 
 - the notification plays the system sound and follows the phone's vibration/silent settings;
 - it carries a **Done** action; tapping either the action or the notification opens the app and
@@ -395,7 +411,8 @@ follows the Away route.
 1. Install and open Strength on the Apple Watch once, then keep both apps open.
 2. On the iPhone, open **Settings → Apple Watch**.
 3. Tap **Pair Apple Watch**. The status changes from *Waiting for Apple Watch* to *Paired* when
-   the watch acknowledges the credential.
+   the watch acknowledges the credential. Pairing also asks for notification permission, which
+   lets a watch rest alert the phone when the app is not open.
 4. If the status stays waiting, bring the watch near the phone, open both apps and try again.
 
 The watch receives its own server device token. The iPhone keeps that token only until the watch

@@ -48,6 +48,10 @@ protocol WatchConnectivitySession: AnyObject {
 /// tests without a paired watch or a live WatchConnectivity session.
 @MainActor
 final class LiveWatchConnectivitySession: NSObject, WatchConnectivitySession, WCSessionDelegate {
+    /// One adapter for the process. The app delegate activates it at launch, before the SwiftUI
+    /// scene exists, so a background wake can receive a queued user-info transfer.
+    static let shared = LiveWatchConnectivitySession()
+
     weak var delegate: WatchConnectivitySessionDelegate?
     private let session: WCSession?
 
@@ -142,6 +146,9 @@ final class LiveWatchConnectivitySession: NSObject, WatchConnectivitySession, WC
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
         Task { @MainActor in
+            // The workout Live Activity is handled independently of the pairing coordinator: a
+            // background launch may not have created the app model yet.
+            WatchRestReceiver.shared.handleUserInfo(userInfo)
             self.delegate?.watchConnectivityDidReceiveUserInfo(userInfo)
         }
     }
@@ -1188,7 +1195,7 @@ extension WatchPairingCoordinator: WatchConnectivitySessionDelegate {
             onWatchStatus?(status)
             return
         }
-        // A rest the wrist started, mirrored as the phone's Live Activity.
-        if WatchRestMirror.shared.handle(userInfo) { return }
+        // Rests are handled by WatchRestReceiver at the session boundary, before the coordinator,
+        // so they are still delivered when the app launches in the background.
     }
 }

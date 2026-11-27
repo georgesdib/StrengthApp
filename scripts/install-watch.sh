@@ -12,6 +12,11 @@
 # success, and the watch kept running stale code while the change was debugged in the wrong
 # place. The build and the staleness guard below are the fix for that trap.
 #
+# It also refuses to reinstall an identical bundle: every install replaces the watch app, and a
+# replacement clears its HealthKit authorisation, so re-pushing unchanged code costs a re-grant
+# for nothing. FORCE=1 reinstalls. The bundle carries a build stamp (commit, not clock) so the
+# watch and the phone can both name the build actually installed on the wrist.
+#
 # Usage:
 #   ./scripts/install-watch.sh              # Release build + install
 #   ./scripts/install-watch.sh --launch     # ... and open it on the watch
@@ -26,7 +31,7 @@
 #   APP_PATH       install this StrengthWatch.app instead of the one embedded in the phone build
 #   DERIVED_DATA   build directory (default: .build/device)
 #   BUILD=0        skip the build; the bundle must still be newer than the watch sources
-#   FORCE=1        install even when the bundle is older than the watch sources
+#   FORCE=1        install even when the bundle is older than the watch sources, or unchanged
 #   LAUNCH=1       launch the watch app after install (same as --launch)
 set -euo pipefail
 
@@ -50,7 +55,7 @@ for argument in "$@"; do
     --dry-run) DRY_RUN=1 ;;
     --no-build) BUILD=0 ;;
     -h|--help)
-      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -125,10 +130,23 @@ echo "config: $CONFIGURATION"
 
 # --- Build ------------------------------------------------------------------------------------
 
+# The watch stamp identifies the code on the wrist, not the moment of the build: the same tree
+# must produce the same bundle, or the skip below can never fire. No time, on purpose.
+watch_stamp() {
+  local stamp
+  stamp=$(git -C "$PWD" rev-parse --short HEAD 2>/dev/null || echo unknown)
+  if [[ -n "$(git -C "$PWD" status --porcelain 2>/dev/null)" ]]; then
+    stamp="$stamp-dirty"
+  fi
+  printf '%s' "$stamp"
+}
+
+WATCH_STAMP="$(watch_stamp)"
+
 if [[ "$BUILD" == "1" ]]; then
-  BUILD_SETTINGS=()
+  BUILD_SETTINGS=(STRENGTH_WATCH_STAMP="$WATCH_STAMP")
   if [[ "$CONFIGURATION" == "Release" ]]; then
-    BUILD_SETTINGS=(SWIFT_OPTIMIZATION_LEVEL=-O GCC_OPTIMIZATION_LEVEL=3)
+    BUILD_SETTINGS+=(SWIFT_OPTIMIZATION_LEVEL=-O GCC_OPTIMIZATION_LEVEL=3)
   fi
   # A generic destination builds the phone app and its embedded watch app without needing the
   # watch awake; a connected iPhone is a better destination when there is one.
@@ -183,8 +201,38 @@ if [[ -f "$WATCH_BINARY" ]]; then
 fi
 
 built_at=$(date -r "$WATCH_BINARY" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "unknown")
+installed_stamp=$(/usr/libexec/PlistBuddy -c 'Print :StrengthBuildStamp' \
+  "$APP_PATH/Info.plist" 2>/dev/null || true)
 echo "app:    $APP_PATH"
 echo "built:  $built_at"
+echo "stamp:  ${installed_stamp:-unknown}"
+
+if [[ "$BUILD" == "1" && "$installed_stamp" != "$WATCH_STAMP" ]]; then
+  echo "error: the watch bundle carries stamp '${installed_stamp:-none}', not '$WATCH_STAMP';" >&2
+  echo "       it was not rebuilt" >&2
+  exit 1
+fi
+
+# An install replaces the watch app, and a replacement clears its HealthKit authorisation. Skip
+# the byte-identical bundle a rebuild produces, so the athlete pays that re-grant only when the
+# watch code actually changed. FORCE=1 reinstalls on purpose (a re-paired watch needs it).
+WATCH_DIGEST_FILE="$PWD/.build/installed-watch-${WATCH_UDID}.digest"
+bundle_digest() {
+  ( cd "$1" && find . -type f \
+      ! -path './_CodeSignature/*' \
+      ! -name embedded.mobileprovision \
+      -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256 ) \
+    | shasum -a 256 | cut -d' ' -f1
+}
+digest="$(bundle_digest "$APP_PATH")"
+if [[ "$FORCE" != "1" && -f "$WATCH_DIGEST_FILE" && "$(cat "$WATCH_DIGEST_FILE")" == "$digest" ]]; then
+  echo "skip:   this exact bundle is already installed on the watch"
+  echo "        (FORCE=1 to reinstall; a re-paired or erased watch needs one)"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "dry run: no install performed"
+  fi
+  exit 0
+fi
 
 if [[ -n "$stale_source" && "$FORCE" != "1" ]]; then
   echo "error: the bundled watch app predates the current watch sources." >&2
@@ -214,6 +262,11 @@ until xcrun devicectl device install app --device "$WATCH_UDID" "$APP_PATH"; do
   echo "install did not reach the watch; retrying in 5 s (attempt $attempt/3)..." >&2
   sleep 5
 done
+
+# Only record the digest after the device accepted the bundle: a failed install must not make the
+# next run believe this code is already on the wrist.
+mkdir -p "$(dirname "$WATCH_DIGEST_FILE")"
+printf '%s' "$digest" > "$WATCH_DIGEST_FILE"
 
 if [[ "$LAUNCH" == "1" ]]; then
   bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist" 2>/dev/null || echo "com.georgesdibpersonalteam.StrengthApp.watchkitapp")

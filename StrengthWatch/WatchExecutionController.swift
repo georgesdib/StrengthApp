@@ -904,7 +904,10 @@ final class WatchExecutionController: ObservableObject {
             sessionId: engine.sessionRecord?.sessionUUID,
             pendingCount: engine.pendingCount,
             phase: String(describing: engine.phase),
-            finishAcknowledged: engine.sessionRecord?.finish?.serverAcked ?? false
+            finishAcknowledged: engine.sessionRecord?.finish?.serverAcked ?? false,
+            // Read from this bundle: on the watch, BuildStamp describes the watch app, so the
+            // phone can tell whether an install actually reached the wrist.
+            build: BuildStamp.current
         )
         onStatusChanged?(status)
     }

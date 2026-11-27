@@ -53,6 +53,22 @@ struct WatchSettingsView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                 }
+
+                // The Watch app's install handoff gives up silently, so the build on the wrist
+                // has to be readable there: compare it with the commit that was installed.
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "hammer")
+                            .font(.caption2)
+                        Text("Build")
+                            .font(.caption2)
+                        Spacer()
+                    }
+                    Text(BuildStamp.current)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("watch-build-stamp")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

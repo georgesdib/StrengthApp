@@ -64,6 +64,14 @@ It builds the phone app and its embedded Watch/StrengthWatch.app, then pushes th
 It refuses to install a bundle older than the watch sources (StrengthWatch, StrengthCore,
 WatchInfo.plist, the project) unless FORCE=1 is set: an install that silently pushed a stale bundle looks exactly like "the fix did not work".
 
+It also refuses to reinstall a byte-identical bundle (FORCE=1 overrides). Every install replaces the
+watch app, and a replacement clears its HealthKit authorisation, so re-pushing unchanged code costs
+a re-grant for nothing. The bundle carries a build stamp — the commit, not the clock, so the same
+tree produces the same bundle — which the watch's Settings screen shows and which the watch sends to
+the phone with its status heartbeat. That answers "did the install actually reach the wrist?", which
+the iPhone's Watch app handoff does not: installing the phone alone can still push the embedded watch
+app, silently, whenever the watch is reachable.
+
 Simulator smoke test (on demand, not a CI gate):
 
     ./scripts/watch-smoke.sh

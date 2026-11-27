@@ -1,3 +1,4 @@
+import StrengthCore
 import SwiftUI
 
 struct WatchSettingsSection: View {
@@ -21,6 +22,12 @@ struct WatchSettingsSection: View {
                 if let lastAck = watch.lastAckText {
                     LabeledContent("Last acknowledged", value: lastAck)
                 }
+            }
+            // Reported with the watch's status heartbeat. "unknown" means no build stamp, which
+            // is what a watch built outside the install scripts carries.
+            if let build = watch.watchStatus?.build {
+                LabeledContent("Watch build", value: build)
+                    .accessibilityIdentifier("watch-build")
             }
             if let error = watch.errorMessage {
                 Text(error)

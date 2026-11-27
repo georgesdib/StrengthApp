@@ -39,6 +39,8 @@ DRY_RUN="${DRY_RUN:-0}"
 BUILD="${BUILD:-1}"
 REF="${REF:-}"
 KEEP_WORKTREE="${KEEP_WORKTREE:-0}"
+# Set when this run builds; a skipped build installs whatever stamp the bundle already carries.
+WATCH_STAMP=""
 
 for argument in "$@"; do
   case "$argument" in
@@ -135,15 +137,28 @@ build_stamp() {
     "$(git -C "$BUILD_ROOT" rev-parse --short HEAD)" "$dirty"
 }
 
+# The watch stamp identifies the watch code, not the moment of the build. A phone-only rebuild
+# must produce the same watch bundle: any difference makes iOS push a new copy to the watch,
+# which replaces the app and takes its HealthKit authorisation with it.
+watch_stamp() {
+  local dirty=""
+  if [[ -n "$(git -C "$BUILD_ROOT" status --porcelain)" ]]; then
+    dirty="-dirty"
+  fi
+  printf '%s%s' "$(git -C "$BUILD_ROOT" rev-parse --short HEAD)" "$dirty"
+}
+
 if [[ "$BUILD" == "1" ]]; then
   STAMP="$(build_stamp)"
+  WATCH_STAMP="$(watch_stamp)"
   STATE_BEFORE="$(tree_state)"
-  BUILD_SETTINGS=("STRENGTH_BUILD_STAMP=$STAMP")
+  BUILD_SETTINGS=("STRENGTH_BUILD_STAMP=$STAMP" "STRENGTH_WATCH_STAMP=$WATCH_STAMP")
   if [[ "$CONFIGURATION" == "Release" ]]; then
     # Make the optimised build explicit rather than relying on an inherited default.
     BUILD_SETTINGS+=(SWIFT_OPTIMIZATION_LEVEL=-O GCC_OPTIMIZATION_LEVEL=3)
   fi
   echo "stamp:  $STAMP"
+  echo "watch:  $WATCH_STAMP (embedded)"
   echo "building $CONFIGURATION for the device..."
   # -allowProvisioningUpdates lets xcodebuild reissue a development profile from the portal once
   # one lapses or is pruned; without it a plain build fails with "No profiles for ... were found"
@@ -189,8 +204,19 @@ if [[ "$BUILD" == "1" && "$built_stamp" != "$STAMP" ]]; then
   exit 1
 fi
 
+# The embedded watch app is built by the same invocation; check it carries the watch stamp so a
+# silent stale copy cannot reach the watch through the Watch app's handoff.
+watch_stamp_built=$(/usr/libexec/PlistBuddy -c 'Print :StrengthBuildStamp' \
+  "$APP_PATH/Watch/StrengthWatch.app/Info.plist" 2>/dev/null || true)
+if [[ "$BUILD" == "1" && "$watch_stamp_built" != "$WATCH_STAMP" ]]; then
+  echo "error: the embedded watch app carries stamp '${watch_stamp_built:-none}', not" >&2
+  echo "       '$WATCH_STAMP'; it was not rebuilt" >&2
+  exit 1
+fi
+
 echo "app:    $APP_PATH${version:+ ($version)}"
 echo "build:  ${built_stamp:-unknown}"
+echo "watch:  ${watch_stamp_built:-unknown} (embedded)"
 
 echo "installing..."
 xcrun devicectl device install app --device "$IPHONE_UDID" "$APP_PATH"

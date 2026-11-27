@@ -79,6 +79,10 @@ public struct WatchWorkoutStatus: Codable, Equatable, Sendable {
     public let pendingCount: Int
     public let phase: String
     public let finishAcknowledged: Bool
+    /// The watch app's build stamp. The Watch app's install handoff is silent, so without this
+    /// the phone has no way to name the build actually installed on the wrist. Optional: a watch
+    /// built before the stamp existed simply omits it.
+    public let build: String?
     public let updatedAt: String
 
     public init(
@@ -87,6 +91,7 @@ public struct WatchWorkoutStatus: Codable, Equatable, Sendable {
         pendingCount: Int,
         phase: String,
         finishAcknowledged: Bool,
+        build: String? = nil,
         updatedAt: String = ExecutionEvent.nowISO()
     ) {
         self.workoutId = workoutId
@@ -94,6 +99,7 @@ public struct WatchWorkoutStatus: Codable, Equatable, Sendable {
         self.pendingCount = pendingCount
         self.phase = phase
         self.finishAcknowledged = finishAcknowledged
+        self.build = build
         self.updatedAt = updatedAt
     }
 

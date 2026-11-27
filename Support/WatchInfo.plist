@@ -10,6 +10,8 @@
     <true/>
     <key>WKCompanionAppBundleIdentifier</key>
     <string>com.georgesdibpersonalteam.StrengthApp</string>
+    <key>StrengthBuildStamp</key>
+    <string>$(STRENGTH_WATCH_STAMP)</string>
     <key>WKBackgroundModes</key>
     <array>
         <string>workout-processing</string>

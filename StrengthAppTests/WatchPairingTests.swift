@@ -712,4 +712,57 @@ final class WatchPairingTests: XCTestCase {
         XCTAssertEqual(mintCount(), 0)
         XCTAssertNotNil(coordinator.errorMessage)
     }
+
+    func testTheReportedWatchBuildSurvivesAPhoneRelaunch() {
+        let suite = "WatchBuildTests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            return XCTFail("no defaults suite")
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PairedStore(defaults: defaults)
+        let client = IOSAPIClient(transport: StubTransport { _ in (404, Data()) })
+
+        let first = WatchPairingCoordinator(
+            client: client,
+            store: store,
+            connectivity: FakeWatchConnectivity(),
+            defaults: defaults
+        )
+        let status = WatchWorkoutStatus(
+            workoutId: "w1",
+            sessionId: "s1",
+            pendingCount: 0,
+            phase: "active",
+            finishAcknowledged: false,
+            build: "c79a86f"
+        )
+        guard let message = status.message else { return XCTFail("no relay payload") }
+        first.watchConnectivityDidReceiveUserInfo(message)
+        XCTAssertEqual(first.watchBuild, "c79a86f")
+
+        // A relaunched phone holds no status, so the row has to come from what was recorded.
+        let second = WatchPairingCoordinator(
+            client: client,
+            store: store,
+            connectivity: FakeWatchConnectivity(),
+            defaults: defaults
+        )
+        XCTAssertEqual(second.watchBuild, "c79a86f")
+
+        // A watch bundle without a stamp is authoritative: the old value must not linger.
+        let unstamped = WatchWorkoutStatus(
+            workoutId: "w1",
+            sessionId: "s1",
+            pendingCount: 0,
+            phase: "active",
+            finishAcknowledged: false,
+            build: nil
+        )
+        guard let unstampedMessage = unstamped.message else {
+            return XCTFail("no relay payload")
+        }
+        second.watchConnectivityDidReceiveUserInfo(unstampedMessage)
+        XCTAssertNil(second.watchBuild)
+        XCTAssertNil(defaults.string(forKey: "watch.build.last.v1"))
+    }
 }

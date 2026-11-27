@@ -23,12 +23,13 @@ struct WatchSettingsSection: View {
                     LabeledContent("Last acknowledged", value: lastAck)
                 }
             }
-            // Reported with the watch's status heartbeat. "unknown" means no build stamp, which
-            // is what a watch built outside the install scripts carries.
-            if let build = watch.watchStatus?.build {
-                LabeledContent("Watch build", value: build)
-                    .accessibilityIdentifier("watch-build")
-            }
+            // Always shown: "not reported yet" is the honest state before the watch app has
+            // written to this phone, and the pair of rows is what answers "did the install
+            // actually reach the wrist?".
+            LabeledContent("Phone build", value: BuildStamp.current)
+                .accessibilityIdentifier("phone-build")
+            LabeledContent("Watch build", value: watch.watchBuild ?? "unknown")
+                .accessibilityIdentifier("watch-build")
             if let error = watch.errorMessage {
                 Text(error)
                     .font(.footnote)
@@ -78,7 +79,9 @@ struct WatchSettingsSection: View {
         } footer: {
             Text("The watch uses your Home Server only. It never follows the Away route. "
                  + "Pairing mints a separate watch token; the iPhone keeps it only until the "
-                 + "watch acknowledges it. Phone rest alerts need notifications enabled.")
+                 + "watch acknowledges it. Phone rest alerts need notifications enabled. "
+                 + "The watch reports its build when the watch app opens; if it still names the "
+                 + "previous commit, the install has not reached the watch.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

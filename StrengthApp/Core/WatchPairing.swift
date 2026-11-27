@@ -176,6 +176,10 @@ final class WatchPairingCoordinator: ObservableObject {
     @Published private(set) var phase: Phase = .unavailable("Apple Watch support is unavailable.")
     @Published private(set) var link: PairedWatch?
     @Published private(set) var watchStatus: WatchWorkoutStatus?
+    /// The last build the watch reported. Persisted because the status heartbeat is
+    /// per-launch: the phone restarted five minutes ago has no idea which build is on the wrist
+    /// until the watch app next writes, which is exactly when the athlete is trying to check.
+    @Published private(set) var watchBuild: String?
     private(set) var localSetMap = LocalSetMap()
     private var lastPushedPlanKey: String?
     /// The phone's committed workout, so an incoming watch set can be merged against it.
@@ -208,15 +212,21 @@ final class WatchPairingCoordinator: ObservableObject {
     /// The scene mapping last handed to WatchConnectivity in this launch.
     private var sentSceneMapping: (start: String?, end: String?)?
 
+    private static let watchBuildKey = "watch.build.last.v1"
+    private let defaults: UserDefaults
+
     init(
         client: IOSAPIClient,
         store: PairedStore,
-        connectivity: WatchConnectivitySession? = nil
+        connectivity: WatchConnectivitySession? = nil,
+        defaults: UserDefaults = .standard
     ) {
         self.client = client
         self.store = store
         self.connectivity = connectivity
+        self.defaults = defaults
         self.link = store.watchLink
+        self.watchBuild = defaults.string(forKey: Self.watchBuildKey)
         connectivity?.delegate = self
         refreshAvailability()
         updatePhase()
@@ -1189,9 +1199,26 @@ extension WatchPairingCoordinator: WatchConnectivitySessionDelegate {
         handle(context)
     }
 
+    /// Store the reported build, treating "unknown" as no stamp rather than a build name.
+    ///
+    /// A status without a build is authoritative too: it means the watch is running a bundle
+    /// without a stamp, so a previously reported build must not linger on the phone.
+    private func recordWatchBuild(_ reported: String?) {
+        let trimmed = reported?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let build = trimmed.isEmpty || trimmed == "unknown" ? nil : trimmed
+        guard build != watchBuild else { return }
+        watchBuild = build
+        if let build {
+            defaults.set(build, forKey: Self.watchBuildKey)
+        } else {
+            defaults.removeObject(forKey: Self.watchBuildKey)
+        }
+    }
+
     func watchConnectivityDidReceiveUserInfo(_ userInfo: [String: Any]) {
         if let status = WatchWorkoutStatus.decode(userInfo) {
             watchStatus = status
+            recordWatchBuild(status.build)
             onWatchStatus?(status)
             return
         }

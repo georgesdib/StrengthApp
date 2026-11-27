@@ -819,6 +819,9 @@ final class AppModel: ObservableObject {
         pairedServerURL = baseURL.absoluteString
         pairingLabelText = pairedDevice.label
         phase = .paired
+        // Launch is the earliest point that can re-ask: the sheet is rare (only after the
+        // store lost its decision) and it appears before any workout can need the grant.
+        await reauthorizeHealthKitIfNeeded()
         if let session {
             watchPairing.currentWorkout = { [weak self] in self?.activeWorkout }
             watchPairing.onRelayedWorkout = { [weak self] workout in
@@ -1113,6 +1116,7 @@ final class AppModel: ObservableObject {
     }
 
     func appBecameActive() async {
+        await reauthorizeHealthKitIfNeeded()
         drainRestActivityChanges()
         await recheckServerSelection()
         await syncOfflineCapture()
@@ -2032,6 +2036,26 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: HealthKit readiness (Phase 3A)
+
+    /// Ask for workout write access again when the store has no decision on record.
+    ///
+    /// The readiness opt-in lives in this app's defaults and survives an upgrade, but HealthKit
+    /// authorisation does not: replacing the bundle clears the grant, and because the toggle was
+    /// already on, nothing used to re-ask. The phone then stopped saving workouts with only a
+    /// log line to show for it. Asking here is safe to repeat: HealthKit prompts only for types
+    /// that are still undetermined, and a denial is left to Settings rather than asked twice.
+    func reauthorizeHealthKitIfNeeded() async {
+        guard healthKitEnabled, healthKit.isAvailable,
+              healthKit.needsWorkoutWriteAuthorization else { return }
+        do {
+            try await healthKit.requestAuthorization()
+            if case .importError = healthKitState {
+                healthKitState = .enabled
+            }
+        } catch {
+            healthKitState = .importError(message(for: error))
+        }
+    }
 
     func setHealthKitEnabled(_ enabled: Bool) async {
         guard enabled != healthKitEnabled else { return }
@@ -3123,6 +3147,9 @@ final class AppModel: ObservableObject {
     private func savePhoneHealthKit(workout: WorkoutDetail, endedAt: String?) async {
         guard let started = Self.parseISO8601(workout.startedAt) else { return }
         let ended = Self.parseISO8601(endedAt) ?? Date()
+        // A grant cleared while the app was already running would otherwise be discovered only
+        // as a skipped save; ask now so this session's workout can still be written.
+        await reauthorizeHealthKitIfNeeded()
         await phoneHealthKitWriter.save(
             workoutID: workout.workoutId,
             startedAt: started,

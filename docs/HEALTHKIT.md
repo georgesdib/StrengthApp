@@ -26,10 +26,20 @@ the watch keeps its per-device finaliser. Both may save, and neither deletes, me
 HealthKit record. The phone write requires workout write permission granted through the HealthKit
 opt-in; a denial is logged, not deferred.
 
+Write authorisation is also the one grant that a bundle replacement clears while the readiness
+opt-in (app defaults) survives, which used to leave the phone saving nothing and saying nothing.
+The phone therefore re-requests when `authorizationStatus(for: .workoutType())` is
+`notDetermined` — at launch, on foreground and on the finish path — and the watch asks when the
+app opens rather than at session start. HealthKit prompts only for types still undetermined, so a
+granted or denied scope is never re-asked; a denial stays a Settings matter. Both targets carry
+`NSHealthUpdateUsageDescription` because both request workout write; without it HealthKit fails the
+request instead of showing the sheet.
+
 ## 2. iPhone — readiness reads
 
 - Read-only adapter (`HealthKitReadinessService`): no writes, no observer queries, no background
-  delivery.
+  delivery. Its one authorisation request also asks for the workout write the phone's finaliser
+  needs, so the readiness opt-in is the phone's single HealthKit consent.
 - Query window: 30 days back to five minutes ahead of now; at most one sample per field per day,
   Apple Watch winning only when positively classified.
 - Fields report `eligible`, `stale` or `missing`; an empty result is never treated as denied access
@@ -110,6 +120,9 @@ last workout.
 - `NSHealthShareUsageDescription` covers the full read scope (HRV, resting heart rate, bodyweight,
   workouts, heart rate, active energy, VO₂max, steps and standing time). The watch string covers heart rate and active energy during a
   workout, and one saved workout.
+- `NSHealthUpdateUsageDescription` is required on **both** targets: the phone saves one workout at
+  finish and the watch saves its own. The phone's key was missing until 2026-11-27, which made its
+  authorisation request fail before the sheet, so the write grant could never be established.
 
 ## 6. What is not implemented
 

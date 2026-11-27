@@ -109,6 +109,7 @@ final class TestCounter: @unchecked Sendable {
 
 final class FakeHealthKitReadinessProvider: HealthKitReadinessProviding {
     var isAvailable = true
+    var needsWorkoutWriteAuthorization = false
     var authorizationRequests = 0
     var selectionCalls = 0
     var selection = HealthKitReadinessSelection(hrv: nil, rhr: nil, staleFields: [])

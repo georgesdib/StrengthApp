@@ -271,6 +271,10 @@ enum HealthKitReadinessError: LocalizedError {
 
 protocol HealthKitReadinessProviding {
     var isAvailable: Bool { get }
+    /// Whether the store still has to ask for workout write access. A reinstall replaces the
+    /// app's HealthKit record, so this is true again afterwards even though the readiness
+    /// opt-in survives in the app container.
+    var needsWorkoutWriteAuthorization: Bool { get }
     func requestAuthorization() async throws
     func selectSamples(serverDate: String, now: Date) async throws -> HealthKitReadinessSelection
     /// One recovery value per night from the raw SDNN samples in the window.
@@ -282,5 +286,8 @@ extension HealthKitReadinessProviding {
     func recoveryNights(from start: Date, to end: Date) async throws -> [RecoveryHRVSample] {
         []
     }
+
+    /// A double that does not model the store reports nothing to re-ask for.
+    var needsWorkoutWriteAuthorization: Bool { false }
 }
 

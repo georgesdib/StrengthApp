@@ -451,6 +451,35 @@ final class Phase2AppModelTests: XCTestCase {
         XCTAssertTrue(model.pendingMutations.isEmpty)
     }
 
+    func testLaunchAsksAgainWhenWorkoutWriteAccessIsUndetermined() async {
+        // A reinstall clears the HealthKit record while the readiness opt-in survives, so the
+        // app must re-ask on its own; otherwise the phone silently stops saving workouts.
+        let fake = FakeHealthKitReadinessProvider()
+        fake.needsWorkoutWriteAuthorization = true
+        let transport = StubTransport { _ in (404, Data()) }
+        let (model, defaults, suite, _) = pairedModel(
+            transport: transport, healthKit: fake, healthKitEnabled: true
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+
+        XCTAssertEqual(fake.authorizationRequests, 1)
+        XCTAssertTrue(model.healthKitEnabled)
+    }
+
+    func testWriteAccessIsNotAskedForWhenTheOptInIsOff() async {
+        let fake = FakeHealthKitReadinessProvider()
+        fake.needsWorkoutWriteAuthorization = true
+        let transport = StubTransport { _ in (404, Data()) }
+        let (model, defaults, suite, _) = pairedModel(transport: transport, healthKit: fake)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        await model.onLaunch()
+
+        XCTAssertEqual(fake.authorizationRequests, 0)
+    }
+
     func testHealthKitNoSampleIsIndeterminateAndDoesNotPost() async {
         let fake = FakeHealthKitReadinessProvider()
         fake.selection = HealthKitReadinessSelection(

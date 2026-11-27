@@ -15,6 +15,14 @@ final class HealthKitReadinessService: HealthKitReadinessProviding {
         HKHealthStore.isHealthDataAvailable()
     }
 
+    /// Write authorisation is queryable (read is not). "Not determined" means the store has no
+    /// record of a decision: the app may ask again without re-prompting someone who already
+    /// answered, and a denial stays a denial that only Settings can change.
+    var needsWorkoutWriteAuthorization: Bool {
+        guard isAvailable else { return false }
+        return store.authorizationStatus(for: HKObjectType.workoutType()) == .notDetermined
+    }
+
     func requestAuthorization() async throws {
         guard isAvailable else { throw HealthKitReadinessError.unavailable }
         guard let hrv = HKObjectType.quantityType(

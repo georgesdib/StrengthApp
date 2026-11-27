@@ -150,6 +150,12 @@ final class WatchExecutionController: ObservableObject {
         startPathMonitor()
         Task {
             authorization = WatchSmokeMode.isEnabled ? .authorized : await anchor.authorizationStatus()
+            // A replaced watch bundle no longer holds its HealthKit record, and the session
+            // start is a bad place to discover that: the workout cannot begin until the sheet
+            // is answered. Ask here instead, so the one prompt happens when the app opens.
+            if !WatchSmokeMode.isEnabled, authorization == .notDetermined {
+                authorization = await anchor.requestAuthorization()
+            }
             // A finished session must not start a new builder: that builder belongs to this
             // launch, not to the workout being recovered (contract §12.3).
             if engine.phase == .active {

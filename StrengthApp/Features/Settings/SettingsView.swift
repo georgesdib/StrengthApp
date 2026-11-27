@@ -197,7 +197,7 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
-                    Text("Reads only HRV, resting heart rate and bodyweight. No sleep, workouts or write access.")
+                    Text("Reads HRV, resting heart rate and bodyweight for readiness, and saves one workout to Health when you finish a session. No sleep or clinical records.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

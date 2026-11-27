@@ -55,7 +55,7 @@ struct WatchPlanView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(exerciseName(row.exerciseId))
                     .font(.subheadline)
-                Text("\\(row.completedSets) of \\(row.plannedSets) done")
+                Text("\(row.completedSets) of \(row.plannedSets) done")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text(label(row.status))
@@ -63,7 +63,7 @@ struct WatchPlanView: View {
                     .foregroundStyle(color(row.status))
             }
         }
-        .accessibilityIdentifier("watch-plan-row-\\(row.orderIndex)")
+        .accessibilityIdentifier("watch-plan-row-\(row.orderIndex)")
     }
 
     private func icon(_ status: WatchPlanRow.Status) -> String {

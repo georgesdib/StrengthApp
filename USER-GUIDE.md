@@ -95,7 +95,8 @@ raw 100.x address.
    this session only; the issued plan marks the affected exercises and explains why. The server
    owns eligibility and every load.
 3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
-   load, RIR, any velocity target, rest and any warnings. **Start workout** is on that screen, so the plan is always
+   load, RIR, any velocity target, rest and any warnings. Plans with multiple target groups show
+   each group separately and in order. **Start workout** is on that screen, so the plan is always
    visible before it is consumed. The server issues the plan; the phone never invents plan content.
 4. Open an exercise and tap **Start set** before the set. The first set starts the exercise;
    the exercise stays open until you end it, and starting a set in another exercise leaves the

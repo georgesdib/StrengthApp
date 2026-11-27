@@ -101,21 +101,47 @@ struct PrescriptionPreviewView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        HStack(spacing: 8) {
-                            Text(item.repsLabel)
-                            Text(item.loadLabel)
-                            Text(item.effortLabel)
-                            if (item.refs ?? []).contains("MOD-TECH-001") {
-                                Text("throttled")
-                                    .foregroundStyle(.orange)
+                        if let groups = item.setGroups, !groups.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(groups.enumerated()), id: \.offset) {
+                                    groupIndex, group in
+                                    Text(group.rowLabel)
+                                        .accessibilityIdentifier(
+                                            "preview-plan-group-\(item.id)-\(groupIndex)"
+                                        )
+                                }
+                                HStack(spacing: 8) {
+                                    if (item.refs ?? []).contains("MOD-TECH-001") {
+                                        Text("throttled")
+                                            .foregroundStyle(.orange)
+                                    }
+                                    if let velocity = item.velocityTargetLabel {
+                                        Text("target \(velocity)")
+                                    }
+                                    Text("rest \(item.restS ?? 120)s")
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                             }
-                            if let velocity = item.velocityTargetLabel {
-                                Text("target \(velocity)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        } else {
+                            HStack(spacing: 8) {
+                                Text(item.repsLabel)
+                                Text(item.loadLabel)
+                                Text(item.effortLabel)
+                                if (item.refs ?? []).contains("MOD-TECH-001") {
+                                    Text("throttled")
+                                        .foregroundStyle(.orange)
+                                }
+                                if let velocity = item.velocityTargetLabel {
+                                    Text("target \(velocity)")
+                                }
+                                Text("rest \(item.restS ?? 120)s")
                             }
-                            Text("rest \(item.restS ?? 120)s")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                         if let warmups = item.warmup, !warmups.isEmpty {
                             Text("Warm-ups: " + warmups.map { "\(Self.load($0.loadKg))×\($0.reps)" }.joined(separator: ", "))
                                 .font(.caption2)

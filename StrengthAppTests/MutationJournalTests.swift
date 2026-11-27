@@ -1,7 +1,7 @@
 import XCTest
 
 @testable import StrengthApp
-import StrengthCore
+@testable import StrengthCore
 
 final class MutationJournalTests: XCTestCase {
     private func tempURL() -> URL {
@@ -130,5 +130,44 @@ final class MutationJournalTests: XCTestCase {
             for: "device-1", serverURL: "http://127.0.0.1:8000"
         )
         XCTAssertEqual(conflicted.first?.state, .conflict)
+    }
+
+    func testJournalUsesTheBackgroundAccessibleProtectionClass() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try MutationJournal(fileURL: url).record(entry())
+
+        guard let reported = DurableFileProtection.currentType(at: url) else {
+            throw XCTSkip("this platform does not report a file protection class")
+        }
+        XCTAssertEqual(reported, .completeUntilFirstUserAuthentication)
+    }
+
+    func testALockedJournalReportsATemporaryErrorWithoutLosingEntries() throws {
+        let url = tempURL()
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: url.path
+            )
+            try? FileManager.default.removeItem(at: url)
+        }
+        let journal = MutationJournal(fileURL: url)
+        try journal.record(entry())
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000], ofItemAtPath: url.path
+        )
+
+        XCTAssertThrowsError(try journal.record(entry(operation: "second"))) { error in
+            XCTAssertEqual(error as? MutationJournalError, .deviceLocked)
+        }
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: url.path
+        )
+        XCTAssertEqual(
+            journal.all(for: "device-1", serverURL: "http://127.0.0.1:8000")
+                .map(\.operationId),
+            ["operation-1"]
+        )
     }
 }

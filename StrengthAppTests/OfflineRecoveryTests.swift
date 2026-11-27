@@ -419,4 +419,39 @@ final class OfflineRecoveryTests: XCTestCase {
         XCTAssertNil(model.offlineRecoveryError)
         XCTAssertNotNil(model.offlineCapture)
     }
+
+    func testALockedCaptureIsTemporaryNotCorruptAndRecoversAfterUnlock() throws {
+        let (captureStore, url) = makeStore()
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: url.path
+            )
+            try? FileManager.default.removeItem(at: url)
+        }
+        _ = try captureStore.setActiveWorkout(workout())
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000], ofItemAtPath: url.path
+        )
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let model = makeModel(
+            captureStore: captureStore,
+            pairedStore: PairedStore(defaults: defaults)
+        )
+
+        // A locked phone is not a corrupt file: no recovery error and no destructive discard
+        // prompt, and the in-memory model simply waits for the next unlock.
+        XCTAssertNil(model.offlineRecoveryError)
+        XCTAssertNil(model.offlineRecoveryMessage)
+        XCTAssertTrue(model.offlineStorageLocked)
+        XCTAssertNil(model.activeWorkout)
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: url.path
+        )
+        XCTAssertTrue(model.retryOfflineRecovery())
+        XCTAssertFalse(model.offlineStorageLocked)
+        XCTAssertEqual(model.activeWorkout?.workoutId, "workout-1")
+    }
 }

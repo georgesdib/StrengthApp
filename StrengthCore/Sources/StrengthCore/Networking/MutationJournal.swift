@@ -86,6 +86,9 @@ public enum MutationKind: String, Codable, CaseIterable {
 public enum MutationJournalError: LocalizedError, Equatable {
     case full
     case operationConflict
+    /// The journal exists but the phone is locked, so its protection key is unavailable. The
+    /// caller can retry after the next unlock; no journal entry is discarded.
+    case deviceLocked
     case io(String)
 
     public var errorDescription: String? {
@@ -94,6 +97,8 @@ public enum MutationJournalError: LocalizedError, Equatable {
             return "Too many unconfirmed operations are already waiting. Resolve them before trying again."
         case .operationConflict:
             return "That operation ID was already used with a different request."
+        case .deviceLocked:
+            return "This phone is locked, so the pending operation could not be recorded yet. Unlock it and try again."
         case .io(let message):
             return "Could not save the pending operation: \(message)"
         }
@@ -216,12 +221,33 @@ public final class MutationJournal {
             return []
         }
         do {
-            let data = try Data(contentsOf: fileURL)
+            let data = try readData()
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode([PendingMutation].self, from: data)
+            let entries = try decoder.decode([PendingMutation].self, from: data)
+            // Heal a journal written with the old complete protection class before a background
+            // replay needs it.
+            DurableFileProtection.adopt(at: fileURL)
+            return entries
+        } catch let error as MutationJournalError {
+            throw error
         } catch {
             throw MutationJournalError.io(error.localizedDescription)
+        }
+    }
+
+    private func readData() throws -> Data {
+        do {
+            return try Data(contentsOf: fileURL)
+        } catch {
+            guard DurableFileProtection.isAccessDenied(error) else { throw error }
+            DurableFileProtection.adopt(at: fileURL)
+            do {
+                return try Data(contentsOf: fileURL)
+            } catch {
+                guard DurableFileProtection.isAccessDenied(error) else { throw error }
+                throw MutationJournalError.deviceLocked
+            }
         }
     }
 
@@ -234,12 +260,17 @@ public final class MutationJournal {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(entries)
-            try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+            try data.write(to: fileURL, options: DurableFileProtection.writingOptions)
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
             var url = fileURL
             try? url.setResourceValues(values)
+        } catch let error as MutationJournalError {
+            throw error
         } catch {
+            if DurableFileProtection.isAccessDenied(error) {
+                throw MutationJournalError.deviceLocked
+            }
             throw MutationJournalError.io(error.localizedDescription)
         }
     }

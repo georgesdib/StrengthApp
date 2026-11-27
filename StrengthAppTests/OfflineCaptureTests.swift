@@ -1,7 +1,7 @@
 import XCTest
 
 @testable import StrengthApp
-import StrengthCore
+@testable import StrengthCore
 
 final class OfflineCaptureTests: XCTestCase {
     private var fileURL: URL!
@@ -246,5 +246,71 @@ final class OfflineCaptureTests: XCTestCase {
         let operation = try store.load().operations.first
         XCTAssertEqual(operation?.state, .conflict)
         XCTAssertEqual(operation?.lastError, "ended elsewhere")
+    }
+
+    // MARK: - File protection while the phone is locked
+
+    func testStoreWritesWithTheBackgroundAccessibleProtectionOption() throws {
+        // The policy itself is platform-independent and is the part that regressed: the complete
+        // class is unreadable while the phone is locked, and a watch relay can wake the app then.
+        XCTAssertEqual(DurableFileProtection.type, .completeUntilFirstUserAuthentication)
+        XCTAssertTrue(
+            DurableFileProtection.writingOptions
+                .contains(.completeFileProtectionUntilFirstUserAuthentication)
+        )
+        XCTAssertFalse(
+            DurableFileProtection.writingOptions.contains(.completeFileProtection)
+        )
+
+        _ = try store.setActiveWorkout(workout())
+        guard let reported = DurableFileProtection.currentType(at: fileURL) else {
+            throw XCTSkip("the simulator does not apply file protection classes")
+        }
+        XCTAssertEqual(reported, .completeUntilFirstUserAuthentication)
+    }
+
+    func testALegacyCompleteProtectedFileIsMigratedOnTheNextRead() throws {
+        _ = try store.setActiveWorkout(workout())
+        let capture = try Data(contentsOf: fileURL)
+        try capture.write(to: fileURL, options: [.atomic, .completeFileProtection])
+        guard DurableFileProtection.currentType(at: fileURL) == .complete else {
+            throw XCTSkip("this platform does not report a file protection class")
+        }
+
+        let loaded = try store.load()
+
+        XCTAssertEqual(loaded.activeWorkout?.workoutId, "workout-1")
+        XCTAssertEqual(
+            DurableFileProtection.currentType(at: fileURL),
+            .completeUntilFirstUserAuthentication
+        )
+    }
+
+    func testAnUnreadableCaptureIsReportedAsLockedAndNeverOverwritten() throws {
+        _ = try store.setActiveWorkout(workout())
+        let original = try Data(contentsOf: fileURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000], ofItemAtPath: fileURL.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: fileURL.path
+            )
+        }
+
+        // A locked read must not look like a corrupt file: the error says it is temporary and
+        // the capture is left byte-for-byte intact for the next unlock.
+        XCTAssertThrowsError(try store.load()) { error in
+            XCTAssertEqual(error as? OfflineCaptureStoreError, .deviceLocked)
+        }
+        XCTAssertThrowsError(try store.setActiveWorkout(nil)) { error in
+            XCTAssertEqual(error as? OfflineCaptureStoreError, .deviceLocked)
+        }
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: fileURL.path
+        )
+        XCTAssertEqual(try Data(contentsOf: fileURL), original)
+        XCTAssertEqual(try store.load().activeWorkout?.workoutId, "workout-1")
     }
 }

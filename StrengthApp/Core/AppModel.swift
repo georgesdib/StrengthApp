@@ -189,6 +189,12 @@ final class AppModel: ObservableObject {
     }
     @Published private(set) var offlineCapture: OfflineCapture?
     @Published private(set) var offlineRecoveryError: OfflineCaptureStoreError?
+    /// The capture is intact but the phone is locked, so its data-protection key is unavailable.
+    /// This clears on the next activation, when the store can be read and migrated.
+    @Published private(set) var offlineStorageLocked = false
+    /// A locked write left the active-workout snapshot in memory newer than the file. The next
+    /// successful read must write this state instead of adopting the stale snapshot back.
+    private var offlineWorkoutWriteDeferred = false
     @Published private(set) var offlinePersistenceError: String?
     @Published private(set) var offlineTelemetryError: String?
     @Published private(set) var offlineRecoveryConflict: OfflineRecoveryConflict?
@@ -379,15 +385,27 @@ final class AppModel: ObservableObject {
         let resolvedAutomation = automation ?? WorkoutAutomation.shared
         let initialCapture: OfflineCapture?
         let initialRecoveryError: OfflineCaptureStoreError?
+        let initialStorageLocked: Bool
         do {
             initialCapture = try captureStore.load()
             initialRecoveryError = nil
+            initialStorageLocked = false
+        } catch OfflineCaptureStoreError.deviceLocked {
+            // A background wake can create the model while the phone is locked. An older build
+            // protected the file with the complete class, which cannot be opened in that state.
+            // Nothing is wrong with the data, so this must not look like a corrupt file: the next
+            // activation retries and migrates it.
+            initialCapture = nil
+            initialRecoveryError = nil
+            initialStorageLocked = true
         } catch let error as OfflineCaptureStoreError {
             initialCapture = nil
             initialRecoveryError = error
+            initialStorageLocked = false
         } catch {
             initialCapture = nil
             initialRecoveryError = .io(error.localizedDescription)
+            initialStorageLocked = false
         }
         let apiClient = client ?? IOSAPIClient(journal: MutationJournal())
         self.client = apiClient
@@ -431,6 +449,7 @@ final class AppModel: ObservableObject {
         self.pairingLabelText = store.device?.label ?? "iPhone"
         self.offlineCapture = initialCapture
         self.offlineRecoveryError = initialRecoveryError
+        self.offlineStorageLocked = initialStorageLocked
         self.activeWorkout = initialCapture?.activeWorkout
         if let cached = initialCapture?.cachedPlan, !cached.isExpired {
             self.prescriptionState = .issued(cached.issued)
@@ -789,6 +808,11 @@ final class AppModel: ObservableObject {
 
     func onLaunch() async {
         guard phase == .loading else { return }
+        // A model created by a background wake may have been locked out of the capture. This is
+        // the first moment the scene (and the owner's unlock) is available to retry it.
+        if offlineStorageLocked || offlineRecoveryError != nil {
+            retryOfflineRecovery()
+        }
         homeServerText = store.homeServerURL ?? ""
         awayServerText = store.awayServerURL ?? ""
         preferHome = store.preferHome
@@ -1119,6 +1143,11 @@ final class AppModel: ObservableObject {
         await reauthorizeHealthKitIfNeeded()
         drainRestActivityChanges()
         await recheckServerSelection()
+        // The phone is unlocked now, so a store that could not be read in the background can be
+        // read, migrated and written again before anything else tries to use it.
+        if offlineStorageLocked || offlineRecoveryError != nil {
+            retryOfflineRecovery()
+        }
         await syncOfflineCapture()
         if phase == .paired, let session {
             await watchPairing.foreground(session: session, homeBaseURL: store.homeServerURL)
@@ -1521,6 +1550,13 @@ final class AppModel: ObservableObject {
         do {
             offlineCapture = try offlineStore.setActiveWorkout(activeWorkout)
             offlinePersistenceError = nil
+            offlineStorageLocked = false
+            offlineWorkoutWriteDeferred = false
+        } catch OfflineCaptureStoreError.deviceLocked {
+            // Keep the in-memory workout: the next activation persists it once unlocked. A
+            // transient lock is not a write failure the owner must resolve.
+            offlineStorageLocked = true
+            offlineWorkoutWriteDeferred = true
         } catch let error as OfflineCaptureStoreError {
             offlinePersistenceError = error.errorDescription
         } catch {
@@ -1538,6 +1574,16 @@ final class AppModel: ObservableObject {
             let recovered = try offlineStore.load()
             offlineCapture = recovered
             offlineRecoveryError = nil
+            offlineStorageLocked = false
+            if offlineWorkoutWriteDeferred {
+                // The lock stopped a start or finish from reaching the file. The in-memory
+                // workout is newer than the recovered snapshot, so write it instead of adopting
+                // the stale one (which would resurrect a workout finished while locked).
+                offlineWorkoutWriteDeferred = false
+                offlineRecoveryConflict = nil
+                persistActiveWorkout()
+                return true
+            }
             if activeWorkout == nil {
                 offlineRecoveryConflict = nil
                 activeWorkout = recovered.activeWorkout
@@ -1557,6 +1603,9 @@ final class AppModel: ObservableObject {
             }
             offlineRecoveryConflict = nil
             return true
+        } catch OfflineCaptureStoreError.deviceLocked {
+            offlineStorageLocked = true
+            return false
         } catch let error as OfflineCaptureStoreError {
             offlineRecoveryError = error
             return false

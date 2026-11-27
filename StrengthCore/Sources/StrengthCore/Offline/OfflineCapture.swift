@@ -183,6 +183,9 @@ public enum OfflineCaptureStoreError: LocalizedError, Equatable {
     case full
     case invalidOperation(String)
     case operationNotFound(String)
+    /// The store exists but the phone is locked and its protection key is unavailable. This is
+    /// temporary and never a reason to discard data: the store resumes after the next unlock.
+    case deviceLocked
     case io(String)
 
     public var errorDescription: String? {
@@ -195,6 +198,8 @@ public enum OfflineCaptureStoreError: LocalizedError, Equatable {
             return message
         case .operationNotFound(let id):
             return "Offline operation \(id) was not found."
+        case .deviceLocked:
+            return "Offline capture is paused while this device is locked. It resumes after the next unlock."
         case .io(let message):
             return "Offline capture storage failed: \(message)"
         }
@@ -673,7 +678,7 @@ public final class OfflineCaptureStore {
             return OfflineCapture(updatedAt: now())
         }
         do {
-            let data = try Data(contentsOf: fileURL)
+            let data = try readUnlockedData()
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             var capture = try decoder.decode(OfflineCapture.self, from: data)
@@ -687,11 +692,33 @@ public final class OfflineCaptureStore {
                 migrateLedgerFields(&capture)
                 try saveUnlocked(capture)
             }
+            // A file written before the protection class changed is readable now, so move it off
+            // the complete class before the next background wake needs it.
+            DurableFileProtection.adopt(at: fileURL)
             return capture
         } catch let error as OfflineCaptureStoreError {
             throw error
         } catch {
             throw OfflineCaptureStoreError.io(error.localizedDescription)
+        }
+    }
+
+    /// Reads the capture, tolerating only one specific failure: a file left with complete file
+    /// protection by an older build is refused while the device is locked. Relaxing the class and
+    /// retrying costs nothing when it is unlocked, and reports a resumable lock otherwise.
+    /// The file is never replaced on a read failure, so queued work cannot be lost.
+    private func readUnlockedData() throws -> Data {
+        do {
+            return try Data(contentsOf: fileURL)
+        } catch {
+            guard DurableFileProtection.isAccessDenied(error) else { throw error }
+            DurableFileProtection.adopt(at: fileURL)
+            do {
+                return try Data(contentsOf: fileURL)
+            } catch {
+                guard DurableFileProtection.isAccessDenied(error) else { throw error }
+                throw OfflineCaptureStoreError.deviceLocked
+            }
         }
     }
 
@@ -710,7 +737,7 @@ public final class OfflineCaptureStore {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(clean)
-            try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+            try data.write(to: fileURL, options: DurableFileProtection.writingOptions)
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
             var url = fileURL
@@ -718,6 +745,9 @@ public final class OfflineCaptureStore {
         } catch let error as OfflineCaptureStoreError {
             throw error
         } catch {
+            if DurableFileProtection.isAccessDenied(error) {
+                throw OfflineCaptureStoreError.deviceLocked
+            }
             throw OfflineCaptureStoreError.io(error.localizedDescription)
         }
     }

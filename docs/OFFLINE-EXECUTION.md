@@ -97,6 +97,17 @@ portfolio repository; this file records only what the app does.
   the phone commits; the phone adds its own id on direct writes. The server validates that the
   origin belongs to the workout's pairing and persists it without changing the set key.
 
+## Storage protection while the phone is locked (2026-11-27)
+
+- `OfflineCaptureStore` and `MutationJournal` write with
+  `NSFileProtectionCompleteUntilFirstUserAuthentication`, not the complete class. The complete
+  class is unreadable whenever the phone is locked, and a watch relay can wake the app in a pocket;
+  the OS then reports "you don't have permission to view it", which looked like a corrupt file.
+- A locked read of a file written by an older build is reported as `deviceLocked`, not as
+  corruption: the app keeps the file untouched, retries and migrates it to the background-accessible
+  class on the next unlock, and never offers to discard it. The active-workout snapshot is written
+  from memory after that unlock, so a finish processed while locked is not resurrected.
+
 ## S5 — pairing-scoped execution
 
 - An issued plan belongs to the iPhone/watch pairing. The request screen no longer has a device

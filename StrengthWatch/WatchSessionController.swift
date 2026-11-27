@@ -32,6 +32,9 @@ final class WatchSessionController: NSObject, ObservableObject {
     /// The latest rest the phone has not been told about yet, kept while WatchConnectivity is
     /// still activating.
     private var pendingRest: WatchRestSnapshot?
+    /// The first status of a launch is published before activation completes; dropping it left
+    /// the phone without the watch's build until a workout happened to publish another.
+    private var pendingStatus: WatchWorkoutStatus?
 
     init(store: WatchCredentialStore = WatchCredentialStore()) {
         self.store = store
@@ -61,6 +64,7 @@ final class WatchSessionController: NSObject, ObservableObject {
         }
         retryDeferredConfig()
         flushPendingRest()
+        flushPendingStatus()
     }
 
     /// Sends the open rest to the phone, which mirrors it as a Live Activity. A queued user-info
@@ -93,9 +97,20 @@ final class WatchSessionController: NSObject, ObservableObject {
             return
         }
         guard let session, session.activationState == .activated,
-              let message = status.message else { return }
+              let message = status.message else {
+            pendingStatus = status
+            return
+        }
         lastSentStatus = key
+        pendingStatus = nil
         session.transferUserInfo(message)
+    }
+
+    /// Sends the status held while the session was still activating.
+    private func flushPendingStatus() {
+        guard let status = pendingStatus else { return }
+        pendingStatus = nil
+        sendStatus(status)
     }
 
     func sendRest(_ snapshot: WatchRestSnapshot) {
@@ -307,6 +322,7 @@ extension WatchSessionController: WCSessionDelegate {
                 self.process(session.receivedApplicationContext)
                 self.sendAcknowledgement()
                 self.flushPendingRest()
+                self.flushPendingStatus()
             }
             self.refreshState()
         }

@@ -93,7 +93,9 @@ raw 100.x address.
    with a recorded reason; required marks an unexpected fallback as unsatisfied, but the plan stays
    startable. **Technique throttle (main work)** asks the server to lighten main-work loads for
    this session only; the issued plan marks the affected exercises and explains why. The server
-   owns eligibility and every load.
+   owns eligibility and every load. If the server asks about a scheduled deload, choose **Accept**,
+   **Proceed without**, or **Postpone scheduled deload** and select a future date. That date starts
+   a one-week deload window and shifts the future schedule; reactive deloads remain automatic.
 3. When the plan is ready, open **Review workout** to see every exercise, target set, rep range,
    load, RIR, any velocity target, rest and any warnings. Plans with multiple target groups show
    each group separately and in order. **Start workout** is on that screen, so the plan is always

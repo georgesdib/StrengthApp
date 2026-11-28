@@ -9,6 +9,10 @@ struct TodayView: View {
     @State private var lastIssueAck = false
     @State private var lastIssueConfirmations: [String: Bool]?
     @State private var lastIssueSettings = PlanSettings()
+    @State private var showingDeloadPostponement = false
+    @State private var postponedDeloadDate = Date()
+    @State private var pendingPostponementDate: String?
+    @State private var pendingPostponementOperationId: String?
     @State private var draftSettings = PlanSettings()
     @State private var showingPlanSettings = false
     @State private var showingWorkout = false
@@ -392,9 +396,53 @@ struct TodayView: View {
             ) {
                 Button("Accept") { issueConfirmation(accept: true) }
                 Button("Proceed without") { issueConfirmation(accept: false) }
+                if case .confirmationRequired(let details) = model.prescriptionState,
+                   details["deload"] != nil {
+                    Button("Postpone scheduled deload…") {
+                        prepareDeloadPostponement()
+                    }
+                }
                 Button("Cancel", role: .cancel) { model.clearPrescription() }
             } message: {
                 Text("The server needs a deload or drop decision before issuing the plan.")
+            }
+            .sheet(isPresented: $showingDeloadPostponement) {
+                NavigationStack {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("The selected date starts a one-week deload window and shifts the future schedule.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        DatePicker(
+                            "Window starts",
+                            selection: $postponedDeloadDate,
+                            in: minimumPostponementDate...,
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.graphical)
+                        if let error = model.mutationError {
+                            Label(error, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.red)
+                                .font(.footnote)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding()
+                    .navigationTitle("Postpone deload")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") {
+                                showingDeloadPostponement = false
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Postpone") {
+                                submitDeloadPostponement()
+                            }
+                            .disabled(model.isSaving)
+                        }
+                    }
+                }
             }
         }
     }
@@ -627,6 +675,76 @@ struct TodayView: View {
         let confirmations = Dictionary(
             uniqueKeysWithValues: keys.map { ($0, accept) }
         )
+        lastIssueConfirmations = confirmations
+        lastIssueAck = pendingReadinessAck
+        lastIssueKey = UUID().uuidString.lowercased()
+        guard let key = lastIssueKey else { return }
+        Task {
+            await model.issuePrescription(
+                readinessAck: pendingReadinessAck,
+                confirmations: confirmations,
+                settings: lastIssueSettings,
+                idempotencyKey: key
+            )
+        }
+    }
+
+    private var minimumPostponementDate: Date {
+        let calendar = Calendar.current
+        let today = model.today.flatMap { response in
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = calendar
+            formatter.timeZone = .current
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.date(from: response.date)
+        } ?? Date()
+        let start = calendar.startOfDay(for: today)
+        return calendar.date(byAdding: .day, value: 1, to: start)
+            ?? start.addingTimeInterval(86_400)
+    }
+
+    private func prepareDeloadPostponement() {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar.current
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        postponedDeloadDate = pendingPostponementDate.flatMap {
+            formatter.date(from: $0)
+        } ?? minimumPostponementDate
+        model.clearMutationError()
+        showingDeloadPostponement = true
+    }
+
+    private func submitDeloadPostponement() {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar.current
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        let target = formatter.string(from: postponedDeloadDate)
+        if pendingPostponementDate != target || pendingPostponementOperationId == nil {
+            pendingPostponementDate = target
+            pendingPostponementOperationId = UUID().uuidString.lowercased()
+        }
+        guard let operationId = pendingPostponementOperationId else { return }
+        Task {
+            let postponed = await model.postponeScheduledDeload(
+                until: target,
+                operationId: operationId,
+                idempotencyKey: operationId
+            )
+            guard postponed else { return }
+            showingDeloadPostponement = false
+            pendingPostponementDate = nil
+            pendingPostponementOperationId = nil
+            issueAfterDeloadPostponement()
+        }
+    }
+
+    private func issueAfterDeloadPostponement() {
+        let confirmations = ["deload": false]
         lastIssueConfirmations = confirmations
         lastIssueAck = pendingReadinessAck
         lastIssueKey = UUID().uuidString.lowercased()

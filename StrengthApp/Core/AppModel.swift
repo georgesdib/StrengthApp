@@ -2316,11 +2316,55 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func postponeScheduledDeload(
+        until date: String,
+        operationId: String,
+        idempotencyKey: String
+    ) async -> Bool {
+        guard !isSaving, let session else {
+            mutationError = "A deload postponement is already in progress, or this device is not paired."
+            return false
+        }
+        guard !hasPendingOfflineCapture else {
+            mutationError = "Resolve or discard the pending offline capture before postponing a deload."
+            return false
+        }
+        guard permitsMutation(kind: .prescription, operationId: idempotencyKey) else {
+            return false
+        }
+        isSaving = true
+        mutationFailureAmbiguous = false
+        defer {
+            isSaving = false
+            refreshPendingMutations()
+        }
+        mutationError = nil
+        do {
+            _ = try await client.postponeScheduledDeload(
+                PostponeScheduledDeloadRequest(
+                    postponedUntil: date,
+                    operationId: operationId
+                ),
+                session: session,
+                idempotencyKey: idempotencyKey
+            )
+            mutationError = nil
+            return true
+        } catch {
+            handleMutation(error)
+            return false
+        }
+    }
+
     func clearPrescription() {
         stopPlanPolling()
         prescriptionState = .idle
         mutationError = nil
         mutationFailureAmbiguous = false
+    }
+
+    func clearMutationError() {
+        mutationError = nil
     }
 
     // MARK: Plan request (R7)

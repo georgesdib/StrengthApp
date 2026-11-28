@@ -82,6 +82,43 @@ final class IOSAPIClientTests: XCTestCase {
         XCTAssertEqual(transport.requests.count, 1)
     }
 
+    func testPostponeScheduledDeloadPostsIdempotentDateAndDecodesWindow() async throws {
+        let (client, transport) = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/ios/v1/deload/postpone")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Idempotency-Key"),
+                "postpone-1"
+            )
+            let object = request.httpBody.flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            XCTAssertEqual(object?["postponed_until"] as? String, "2026-12-01")
+            XCTAssertEqual(object?["operation_id"] as? String, "postpone-1")
+            return (200, Data("""
+            {"postponed_until":"2026-12-01","window_ends_on":"2026-12-07"}
+            """.utf8))
+        }
+
+        let ack = try await client.postponeScheduledDeload(
+            PostponeScheduledDeloadRequest(
+                postponedUntil: "2026-12-01",
+                operationId: "postpone-1"
+            ),
+            session: session,
+            idempotencyKey: "postpone-1"
+        )
+
+        XCTAssertEqual(
+            ack,
+            PostponedScheduledDeloadAck(
+                postponedUntil: "2026-12-01",
+                windowEndsOn: "2026-12-07"
+            )
+        )
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+
     // MARK: Decoding
 
     func testBootstrapDecodesAndSendsTheBearerToken() async throws {

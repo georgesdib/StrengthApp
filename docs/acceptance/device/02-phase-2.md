@@ -35,6 +35,10 @@ record of what was exercised.
       Cancel creates no plan; Start anyway creates one with the acknowledgement recorded.
 - [ ] When the server asks for a scheduled deload or drop confirmation, the app shows the choice;
       Accept and Proceed without both produce a plan, and Cancel creates none.
+- [ ] For a scheduled deload due today, Today also offers **Postpone scheduled deload**. Selecting
+      a future date stores the operation once, starts the seven-day window on that date and shifts
+      the future cadence; an ambiguous retry reuses the operation id. Reactive deloads stay
+      automatic, and declared breaks retain precedence.
 - [ ] When the server finishes building, Today shows **Workout ready** with the session type,
       date, exercise count and any warnings. **Review workout** opens the full plan; no sheet opens
       automatically, and Start is only on the review screen.

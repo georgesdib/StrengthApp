@@ -698,6 +698,22 @@ public final class IOSAPIClient {
         )
     }
 
+    public func postponeScheduledDeload(
+        _ body: PostponeScheduledDeloadRequest,
+        session: IOSSession,
+        idempotencyKey: String
+    ) async throws -> PostponedScheduledDeloadAck {
+        try await post(
+            path: "api/ios/v1/deload/postpone",
+            body: body,
+            kind: .prescription,
+            targetId: nil,
+            session: session,
+            idempotencyKey: idempotencyKey,
+            journaling: false
+        )
+    }
+
     /// The authoritative plan-request state. Read-only: no idempotency key, no retries beyond
     /// the bounded GET policy.
     public func planState(session: IOSSession) async throws -> PlansStateResponse {

@@ -796,6 +796,26 @@ public struct IssuePrescriptionRequest: Encodable {
     }
 }
 
+public struct PostponeScheduledDeloadRequest: Encodable {
+    public let postponedUntil: String
+    public let operationId: String
+
+    public init(postponedUntil: String, operationId: String) {
+        self.postponedUntil = postponedUntil
+        self.operationId = operationId
+    }
+}
+
+public struct PostponedScheduledDeloadAck: Decodable, Equatable {
+    public let postponedUntil: String
+    public let windowEndsOn: String
+
+    public init(postponedUntil: String, windowEndsOn: String) {
+        self.postponedUntil = postponedUntil
+        self.windowEndsOn = windowEndsOn
+    }
+}
+
 public struct StartWorkoutRequest: Codable, Equatable {
     public let issuedPlanId: String
     /// The plan's execution identity; it binds the workout id. Omitted by older clients.
